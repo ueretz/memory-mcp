@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration>
+    <include resource="org/springframework/boot/logging/logback/defaults.xml"/>
+
+    <!--
+        MCP over stdio requires stdout to carry ONLY JSON-RPC frames - any log line there
+        corrupts the handshake. The dashboard profile has no such constraint, so it logs
+        normally to stdout (colored, like any Spring Boot app) instead of showing everything
+        as stderr/red in the console.
+    -->
+    <springProfile name="mcp-stdio">
+        <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+            <target>System.err</target>
+            <encoder>
+                <pattern>${CONSOLE_LOG_PATTERN}</pattern>
+            </encoder>
+        </appender>
+    </springProfile>
+
+    <springProfile name="!mcp-stdio">
+        <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+            <encoder>
+                <pattern>${CONSOLE_LOG_PATTERN}</pattern>
+            </encoder>
+        </appender>
+    </springProfile>
+
+    <root level="INFO">
+        <appender-ref ref="CONSOLE"/>
+    </root>
+</configuration>

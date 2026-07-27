@@ -1,0 +1,16 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: memory-mcp-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: memorymcp
+      POSTGRES_USER: memorymcp
+      POSTGRES_PASSWORD: memorymcp
+    ports:
+      - "5433:5432"
+    volumes:
+      - memory-mcp-pgdata:/var/lib/postgresql/data
+
+volumes:
+  memory-mcp-pgdata:
