@@ -36,7 +36,7 @@ MCP-сервер для Claude Code, дающий агенту **долговр�
 | Логирование | Logback (`logback-spring.xml`) | — | `<springProfile>`: stdio-профиль пишет в `stderr` (протокол требует чистый stdout), дашборд-профиль — обычный цветной stdout |
 | Веб-слой (дашборд) | Spring MVC (`spring-boot-starter-web`) + embedded Tomcat | — | REST API для чтения данных и настройки |
 | Фронтенд дашборда | Vanilla HTML/CSS/JS, ES-модули, hash-роутинг (без сборки) | — | `static/index.html` + `static/js/*`, без фреймворков и CDN-зависимостей |
-| Локальный инфраструктурный слой | Docker Compose | — | Поднимает Postgres на `localhost:5433` с именованным volume |
+| Контейнеризация | Docker (многостадийный `Dockerfile`) + Docker Compose | — | `docker compose up -d --build` поднимает и Postgres, и сам дашборд как долгоживущий контейнер |
 
 ## Как это работает
 
@@ -156,15 +156,41 @@ Hash-роутинг (`static/js/router.js`) с навигацией в стил�
 
 ## Запуск локально
 
+### Вариант A: дашборд в Docker (рекомендуется — не нужно держать IDE открытой)
+
+`Dockerfile` — многостадийная сборка (`eclipse-temurin:25-jdk` компилирует jar, рантайм на
+`eclipse-temurin:25-jre`). `docker-compose.yml` поднимает и Postgres, и сам дашборд как сервис
+`app`, который ждёт готовности Postgres (`healthcheck`) и переживает перезапуски (`restart:
+unless-stopped`) — то есть один раз собрал и забыл, никакого `java -jar` в терминале/IDE.
+
 ```bash
-docker compose up -d                 # Postgres на localhost:5433
+docker compose up -d --build    # соберёт образ приложения (если менялся код) и поднимет оба сервиса
+docker compose ps               # memory-mcp-postgres + memory-mcp-app, оба "Up"
+docker compose logs -f app      # логи дашборда
+# -> http://localhost:8080/     (проекты → задачи/common → записи, плюс #setup)
+
+docker compose down             # остановить (данные в volume memory-mcp-pgdata сохранятся)
+```
+
+После правок в коде: `docker compose up -d --build app` пересоберёт только образ приложения.
+
+### Вариант B: всё локально (без Docker для самого приложения)
+
+```bash
+docker compose up -d postgres        # только Postgres, на localhost:5433
 ./gradlew bootJar                    # соберёт build/libs/memory-mcp.jar; Flyway применит миграции при старте
 
-# Дашборд (веб-режим)
 java -jar build/libs/memory-mcp.jar
-# -> http://localhost:8080/  (проекты → задачи/common → записи, плюс #setup)
+# -> http://localhost:8080/
+```
 
-# MCP-сервер (то, что запускает Claude Code)
+### MCP-сервер (то, что запускает Claude Code)
+
+Это отдельный процесс, который сам Claude Code запускает и останавливает на время каждой
+сессии — держать его в Docker/IDE не требуется в принципе, поэтому он остаётся как обычный
+`java -jar`, независимо от того, где крутится дашборд (вариант A или B выше):
+
+```bash
 java -jar build/libs/memory-mcp.jar --spring.profiles.active=mcp-stdio
 ```
 
@@ -215,7 +241,9 @@ src/main/resources/
 └── static/                        — index.html + css/style.css + js/ (router, views/*, markdown.js)
 
 .claude/skills/memory-mcp/SKILL.md — зеркало skill/SKILL.md для догфудинга в этом репо
-docker-compose.yml                 — локальный Postgres
+Dockerfile                         — многостадийная сборка jar (build) + рантайм-образ (25-jre)
+.dockerignore                      — исключает build/.gradle/.git из контекста сборки
+docker-compose.yml                 — Postgres (с healthcheck) + сервис app (дашборд)
 ```
 
 ## Статус и дальнейшие шаги
@@ -231,6 +259,7 @@ stdio, REST API, полный дашборд, регистрация в Claude C
 - [x] Страница `#setup` с готовой командой подключения и скачиванием SKILL.md
 - [x] Автоматический граф расположения файлов/классов (`location_scan`), реальные Java-зависимости
 - [x] `SKILL.md`, обучающий агента этому всему, включая always-ask про задачу
+- [x] Docker-сборка дашборда (`Dockerfile` + `docker-compose.yml`), не требует IDE/терминала
 
 Дальше по плану (пока не запрошено, возможные следующие шаги):
 - [ ] Графовая диаграмма (узлы/рёбра как визуальный граф, а не только дерево/списки) на дашборде
