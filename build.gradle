@@ -46,3 +46,48 @@ tasks.named('test') {
 bootJar {
     archiveFileName = 'memory-mcp.jar'
 }
+
+// ---- Vue dashboard (ui/) ----
+// Vite writes to build/ui-dist; processResources packages it as /static inside the boot jar.
+// Pass -PskipUi when the bundle was built elsewhere (see the ui stage in the Dockerfile).
+
+def npmExecutable = System.getProperty('os.name').toLowerCase().contains('windows') ? 'npm.cmd' : 'npm'
+def uiDir = layout.projectDirectory.dir('ui')
+def uiDist = layout.buildDirectory.dir('ui-dist')
+def skipUi = providers.gradleProperty('skipUi').present
+
+tasks.register('npmInstall', Exec) {
+    group = 'ui'
+    description = 'Installs the dashboard dependencies'
+    workingDir = uiDir
+    commandLine npmExecutable, 'ci'
+    inputs.file(uiDir.file('package.json'))
+    inputs.file(uiDir.file('package-lock.json'))
+    outputs.file(uiDir.file('node_modules/.package-lock.json'))
+}
+
+tasks.register('buildUi', Exec) {
+    group = 'ui'
+    description = 'Builds the Vue dashboard into build/ui-dist'
+    dependsOn 'npmInstall'
+    workingDir = uiDir
+    commandLine npmExecutable, 'run', 'build'
+    inputs.dir(uiDir.dir('src'))
+    inputs.file(uiDir.file('index.html'))
+    inputs.file(uiDir.file('vite.config.ts'))
+    inputs.file(uiDir.file('package.json'))
+    outputs.dir(uiDist)
+}
+
+tasks.named('processResources') {
+    if (!skipUi) {
+        dependsOn 'buildUi'
+    }
+    from(uiDist) {
+        into 'static'
+    }
+}
+
+tasks.named('clean') {
+    delete uiDist
+}

@@ -1,0 +1,219 @@
+@import 'tailwindcss';
+
+/* Theme is driven by a class on <html>, set before first paint in index.html. */
+@custom-variant dark (&:where(.dark, .dark *));
+
+:root {
+  color-scheme: light;
+
+  --c-bg: #f6f6fa;
+  --c-panel: #ffffff;
+  --c-elevated: #fbfbfe;
+  --c-border: #e5e5ee;
+  --c-border-strong: #d2d2e0;
+  --c-text: #17171f;
+  --c-muted: #6b7080;
+  --c-faint: #9a9aab;
+  --c-accent: #6d4aff;
+  --c-accent-hover: #5b39f0;
+  --c-accent-fg: #ffffff;
+  --c-accent-soft: #efeaff;
+
+  --c-user: #0d9668;
+  --c-feedback: #d97706;
+  --c-project: #2563eb;
+  --c-reference: #c026d3;
+  --c-location: #64748b;
+
+  --c-active: #1d6fd8;
+  --c-done: #6b7280;
+
+  --c-shadow: 0 1px 2px rgb(20 20 40 / 0.05), 0 8px 24px -12px rgb(20 20 40 / 0.12);
+}
+
+.dark {
+  color-scheme: dark;
+
+  --c-bg: #0d0d12;
+  --c-panel: #15151c;
+  --c-elevated: #1b1b25;
+  --c-border: #262633;
+  --c-border-strong: #363648;
+  --c-text: #e9e9f2;
+  --c-muted: #9797ac;
+  --c-faint: #6e6e85;
+  --c-accent: #9b82ff;
+  --c-accent-hover: #ab95ff;
+  --c-accent-fg: #12101f;
+  --c-accent-soft: #241f3d;
+
+  --c-user: #34d399;
+  --c-feedback: #fbbf24;
+  --c-project: #60a5fa;
+  --c-reference: #e879f9;
+  --c-location: #94a3b8;
+
+  --c-active: #60a5fa;
+  --c-done: #8b8b9e;
+
+  --c-shadow: 0 1px 2px rgb(0 0 0 / 0.4), 0 12px 32px -16px rgb(0 0 0 / 0.7);
+}
+
+@theme inline {
+  --color-bg: var(--c-bg);
+  --color-panel: var(--c-panel);
+  --color-elevated: var(--c-elevated);
+  --color-border: var(--c-border);
+  --color-border-strong: var(--c-border-strong);
+  --color-content: var(--c-text);
+  --color-muted: var(--c-muted);
+  --color-faint: var(--c-faint);
+  --color-accent: var(--c-accent);
+  --color-accent-hover: var(--c-accent-hover);
+  --color-accent-fg: var(--c-accent-fg);
+  --color-accent-soft: var(--c-accent-soft);
+
+  --color-type-user: var(--c-user);
+  --color-type-feedback: var(--c-feedback);
+  --color-type-project: var(--c-project);
+  --color-type-reference: var(--c-reference);
+  --color-type-location: var(--c-location);
+
+  --color-status-active: var(--c-active);
+  --color-status-done: var(--c-done);
+
+  --shadow-panel: var(--c-shadow);
+
+  --font-sans:
+    'Inter var', 'Inter', ui-sans-serif, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
+    'Helvetica Neue', sans-serif;
+  --font-mono:
+    'JetBrains Mono', ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
+}
+
+@layer base {
+  html {
+    scrollbar-gutter: stable;
+  }
+
+  body {
+    @apply bg-bg text-content font-sans antialiased;
+    font-size: 14px;
+  }
+
+  ::selection {
+    background: var(--c-accent-soft);
+  }
+
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--c-border-strong) transparent;
+  }
+
+  *:focus-visible {
+    outline: 2px solid var(--c-accent);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+}
+
+@layer components {
+  /* Rendered markdown. Kept as plain CSS so entry content needs no wrapper markup. */
+  .md-body {
+    @apply text-[14.5px] leading-relaxed text-content;
+  }
+
+  .md-body > * + * {
+    @apply mt-4;
+  }
+
+  .md-body h1,
+  .md-body h2,
+  .md-body h3,
+  .md-body h4 {
+    @apply font-semibold tracking-tight text-content;
+  }
+
+  .md-body h1 {
+    @apply mt-8 text-xl;
+  }
+
+  .md-body h2 {
+    @apply mt-8 text-lg;
+  }
+
+  .md-body h3 {
+    @apply mt-6 text-base;
+  }
+
+  .md-body h4 {
+    @apply mt-6 text-sm uppercase tracking-wide text-muted;
+  }
+
+  .md-body p {
+    @apply text-content/90;
+  }
+
+  .md-body strong {
+    @apply font-semibold text-content;
+  }
+
+  .md-body a {
+    @apply text-accent underline decoration-accent/30 underline-offset-2 hover:decoration-accent;
+  }
+
+  .md-body ul {
+    @apply list-disc space-y-1.5 pl-5 marker:text-faint;
+  }
+
+  .md-body ol {
+    @apply list-decimal space-y-1.5 pl-5 marker:text-faint;
+  }
+
+  .md-body li > ul,
+  .md-body li > ol {
+    @apply mt-1.5;
+  }
+
+  .md-body blockquote {
+    @apply border-l-2 border-accent/40 pl-4 text-muted italic;
+  }
+
+  .md-body code {
+    @apply rounded-md border border-border bg-elevated px-1.5 py-0.5 font-mono text-[12.5px] text-content;
+  }
+
+  .md-body pre {
+    @apply overflow-x-auto rounded-xl border border-border bg-elevated p-4;
+  }
+
+  .md-body pre code {
+    @apply border-0 bg-transparent p-0 text-[12.5px] leading-relaxed;
+  }
+
+  .md-body hr {
+    @apply border-border;
+  }
+
+  .md-body table {
+    @apply w-full border-collapse overflow-hidden text-left text-[13px];
+  }
+
+  .md-body th,
+  .md-body td {
+    @apply border border-border px-3 py-2;
+  }
+
+  .md-body th {
+    @apply bg-elevated font-semibold;
+  }
+
+  /* [[wiki-link]] targets, resolved and unresolved. */
+  .md-body .wikilink {
+    @apply rounded-md bg-accent-soft px-1.5 py-0.5 font-medium text-accent no-underline hover:bg-accent/15;
+  }
+
+  .md-body .wikilink-missing {
+    @apply cursor-help rounded-md border border-dashed border-border-strong px-1.5 py-0.5 text-faint;
+  }
+}
