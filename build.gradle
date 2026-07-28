@@ -56,9 +56,43 @@ def uiDir = layout.projectDirectory.dir('ui')
 def uiDist = layout.buildDirectory.dir('ui-dist')
 def skipUi = providers.gradleProperty('skipUi').present
 
+// Vite ships its bundler as platform-specific native binaries declared as optional dependencies
+// guarded by this range. On an older Node npm skips them without failing, and the build dies much
+// later with "Cannot find native binding" - so the version is checked up front. Keep in sync with
+// the engines field in ui/package.json.
+def requiredNode = '^20.19.0 || >=22.12.0'
+
+def nodeVersionSupported = { String version ->
+    if (!version) {
+        return false
+    }
+    def match = version =~ /^v?(\d+)\.(\d+)\./
+    if (!match) {
+        return false
+    }
+    def major = match[0][1] as int
+    def minor = match[0][2] as int
+    return (major == 20 && minor >= 19) || (major == 22 && minor >= 12) || major >= 23
+}
+
+/** Version of the node sitting next to the given npm, or null when it cannot be determined. */
+def nodeVersionOf = { File npmFile ->
+    def sibling = new File(npmFile.parentFile, isWindows ? 'node.exe' : 'node')
+    def command = sibling.isFile() ? sibling.absolutePath : (isWindows ? 'node.exe' : 'node')
+    try {
+        def process = new ProcessBuilder(command, '--version').redirectErrorStream(true).start()
+        def output = process.inputStream.text.trim()
+        return process.waitFor() == 0 && output.startsWith('v') ? output : null
+    } catch (Exception ignored) {
+        return null
+    }
+}
+
 /**
  * Finds npm without relying on the PATH alone: Gradle daemons started by an IDE inherit the
  * desktop session's environment, which usually misses nvm/fnm/volta shims set up in the shell.
+ * A candidate whose Node is too old is remembered but kept searching past - that way a usable
+ * Node installed alongside an outdated default one still gets picked up.
  * Override with -PnpmExecutable=/path/to/npm if the search misses your install.
  */
 def findNpm = {
@@ -66,7 +100,8 @@ def findNpm = {
 
     def override = providers.gradleProperty('npmExecutable').orNull ?: System.getenv('MEMORY_MCP_NPM')
     if (override) {
-        return new File(override)
+        def file = new File(override)
+        return [npm: file, node: nodeVersionOf(file)]
     }
 
     def home = new File(System.getProperty('user.home'))
@@ -81,6 +116,7 @@ def findNpm = {
     }
     dirs += versionDirs(new File(home, '.nvm/versions/node'), 'bin')
     dirs += versionDirs(new File(home, '.local/share/fnm/node-versions'), 'installation/bin')
+    dirs += versionDirs(new File(home, 'Library/Application Support/fnm/node-versions'), 'installation/bin')
     dirs += versionDirs(new File(home, 'AppData/Roaming/nvm'), '')
     dirs += [
             new File(home, '.volta/bin'),
@@ -91,18 +127,26 @@ def findNpm = {
             new File('C:/Program Files/nodejs'),
     ]
 
+    def fallback = null
     for (dir in dirs) {
         for (name in names) {
             def candidate = new File(dir, name)
-            if (candidate.isFile()) {
-                return candidate
+            if (!candidate.isFile()) {
+                continue
             }
+            def version = nodeVersionOf(candidate)
+            if (nodeVersionSupported(version)) {
+                return [npm: candidate, node: version]
+            }
+            fallback = fallback ?: [npm: candidate, node: version]
         }
     }
-    return null
+    return fallback ?: [npm: null, node: null]
 }
 
-def npmBinary = findNpm()
+def npmInstallation = findNpm()
+def npmBinary = npmInstallation.npm
+def nodeVersion = npmInstallation.node
 
 def configureNpmTask = { Exec task, List<String> arguments ->
     task.workingDir = uiDir
@@ -112,12 +156,25 @@ def configureNpmTask = { Exec task, List<String> arguments ->
         // npm shells out to node, which lives next to it - keep that directory on the PATH.
         task.environment 'PATH', npmBinary.parentFile.absolutePath + File.pathSeparator + (System.getenv('PATH') ?: '')
     }
+    // A Node upgrade changes which native binaries npm installs, so it invalidates node_modules.
+    task.inputs.property('nodeVersion', nodeVersion ?: 'unknown')
     task.doFirst {
         if (npmBinary == null) {
             throw new GradleException("""npm was not found.
-  Install Node.js, or point the build at it explicitly:
+  Install Node.js ${requiredNode}, or point the build at it explicitly:
     ./gradlew build -PnpmExecutable=/path/to/npm
   IDE builds: add npm's directory to the IDE's PATH, or set MEMORY_MCP_NPM.
+  To build the server without the dashboard: ./gradlew build -PskipUi""")
+        }
+        if (!nodeVersionSupported(nodeVersion)) {
+            throw new GradleException("""Node.js ${requiredNode} is required to build the dashboard, found ${nodeVersion ?: 'an unknown version'} (${npmBinary}).
+  Older versions look like they work: npm skips Vite's platform-specific native binaries
+  (they declare the same engines range) and the build then fails with "Cannot find native binding".
+  Upgrade, for example:
+    nvm install 22 && nvm use 22          # ui/.nvmrc pins 22
+    brew upgrade node                     # or: brew install node@22
+  Then let the build reinstall: rm -rf ui/node_modules && ./gradlew buildUi
+  Another Node is already installed? Point the build at it: -PnpmExecutable=/path/to/npm
   To build the server without the dashboard: ./gradlew build -PskipUi""")
         }
     }

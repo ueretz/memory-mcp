@@ -161,6 +161,12 @@ CSS-переменные, перенесённые в Tailwind через `@them
 
 ### Разработка UI
 
+Нужен **Node.js `^20.19.0 || >=22.12.0`** (`ui/.nvmrc` пинит 22). Vite 8 поставляет бандлер
+нативными бинарниками как optional-зависимости с тем же ограничением по `engines`: на более старой
+ноде npm их молча пропускает, и сборка падает с `Cannot find native binding`. Поэтому в
+`ui/.npmrc` включён `engine-strict`, а Gradle проверяет версию ноды до запуска npm и пишет, что
+делать. После апгрейда ноды: `rm -rf ui/node_modules && ./gradlew buildUi`.
+
 ```bash
 cd ui
 npm install
