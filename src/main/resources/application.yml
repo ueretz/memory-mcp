@@ -16,16 +16,4 @@ spring:
       server:
         name: memory-mcp
         version: 0.1.0
-        stdio: false
-
----
-spring:
-  config:
-    activate:
-      on-profile: mcp-stdio
-  main:
-    web-application-type: none
-  ai:
-    mcp:
-      server:
-        stdio: true
+        protocol: streamable

@@ -27,16 +27,16 @@ MCP-сервер для Claude Code, дающий агенту **долговр�
 |---|---|---|---|
 | Язык/платформа | Java | 25 | LTS, современный синтаксис (records, pattern matching) |
 | Фреймворк | Spring Boot | 4.1.0 | DI, автоконфигурация, embedded Tomcat для дашборда |
-| MCP-протокол | Spring AI MCP Server Starter (`spring-ai-starter-mcp-server`) | 2.0.0 (spring-ai-bom) | Аннотационный API (`@McpTool`/`@McpToolParam`) поверх `io.modelcontextprotocol.sdk`, транспорт stdio |
+| MCP-протокол | Spring AI MCP Server Starter (`spring-ai-starter-mcp-server-webmvc`) | 2.0.0 (spring-ai-bom) | Аннотационный API (`@McpTool`/`@McpToolParam`) поверх `io.modelcontextprotocol.sdk`, транспорт streamable HTTP (`/mcp`) на том же embedded Tomcat, что и дашборд |
 | БД | PostgreSQL | 17 (alpine, в Docker) | Реальный сервер с полнотекстовым поиском (`tsvector`/GIN) и запасом на рост нагрузки |
 | ORM | Spring Data JPA / Hibernate | (через Spring Boot BOM) | Entities, репозитории, нативные запросы для FTS |
 | Миграции схемы | Flyway (+ `flyway-database-postgresql`, + `spring-boot-flyway`) | 12.4.0 | Версионируемая схема БД (V1-V3), накатывается автоматически при старте |
 | Пул соединений | HikariCP | (входит в Spring Boot) | Стандартный пул для JDBC |
 | Сборка | Gradle (Groovy DSL) | wrapper в репозитории | `bootJar` собирает fat-jar `memory-mcp.jar` |
-| Логирование | Logback (`logback-spring.xml`) | — | `<springProfile>`: stdio-профиль пишет в `stderr` (протокол требует чистый stdout), дашборд-профиль — обычный цветной stdout |
-| Веб-слой (дашборд) | Spring MVC (`spring-boot-starter-web`) + embedded Tomcat | — | REST API для чтения данных и настройки |
+| Логирование | Logback (`logback-spring.xml`) | — | Обычный цветной вывод в stdout — больше нет ограничений stdio-транспорта |
+| Веб-слой (дашборд + MCP) | Spring MVC (`spring-boot-starter-web`) + embedded Tomcat | — | Один и тот же порт 8080 отдаёт и REST API дашборда, и `/mcp` |
 | Фронтенд дашборда | Vanilla HTML/CSS/JS, ES-модули, hash-роутинг (без сборки) | — | `static/index.html` + `static/js/*`, без фреймворков и CDN-зависимостей |
-| Контейнеризация | Docker (многостадийный `Dockerfile`) + Docker Compose | — | `docker compose up -d --build` поднимает и Postgres, и сам дашборд как долгоживущий контейнер |
+| Контейнеризация | Docker (многостадийный `Dockerfile`) + Docker Compose | — | `docker compose up -d --build` поднимает и Postgres, и сам сервис (дашборд + MCP) как долгоживущий контейнер |
 
 ## Как это работает
 
@@ -97,20 +97,14 @@ Java-слой (`ru.iuribabalin.memorymcp`):
 Такой подход даёт полноценный граф зависимостей классов только для Java, для прочих языков —
 просто плоский, но всё равно полезный индекс "имя → путь".
 
-### Два режима работы одного и того же jar
+### Один процесс, один транспорт: streamable HTTP
 
-Один процесс, два Spring-профиля (`src/main/resources/application.yml`, второй YAML-документ
-через `spring.config.activate.on-profile: mcp-stdio`), общая JPA/Postgres-прослойка:
-
-1. **`mcp-stdio`** — `spring.main.web-application-type=none`, `spring.ai.mcp.server.stdio=true`.
-   Именно этот режим запускает Claude Code как поддочерний процесс на время сессии.
-2. **default (без профиля)** — обычный embedded Tomcat на порту 8080 для дашборда — долгоживущий
-   процесс, поднимаемый вручную (или через IDE run-конфигурацию).
-
-**Критичный нюанс stdio-транспорта:** MCP по stdio требует, чтобы stdout содержал *только*
-JSON-RPC кадры. `logback-spring.xml` учитывает это через `<springProfile>`: только в
-`mcp-stdio`-профиле консольный appender явно таргетится на `System.err`; в дашборд-режиме логи
-идут в обычный цветной stdout — так что запуск дашборда из IDE больше не выглядит "весь красным".
+Раньше jar умел работать в двух режимах (stdio-профиль, который Claude Code запускал как
+поддочерний процесс, и отдельный долгоживущий дашборд). Сейчас режим один: обычный Spring Boot
+процесс с embedded Tomcat на порту 8080, который одновременно отдаёт REST API дашборда и MCP
+поверх streamable HTTP (`POST /mcp`, `spring.ai.mcp.server.protocol=streamable` в
+`application.yml`). Никакого поддочернего процесса — Claude Code просто ходит по URL, пока
+контейнер поднят (`docker compose up -d`).
 
 ### MCP-инструменты
 
@@ -147,8 +141,8 @@ Hash-роутинг (`static/js/router.js`) с навигацией в стил�
   сначала экранирует HTML целиком, потом добавляет заголовки/bold/italic/списки/ссылки/код;
   ссылки — только `http(s)`/относительные пути; `[[wiki-links]]` резолвятся в клик по реальным
   связям записи), плюс блоки "Links to"/"Linked from";
-- `#setup` — страница подключения: команда `claude mcp add` с автоматически подставленным путём
-  к jar и к `java` того самого JDK, что сейчас исполняет процесс, плюс кнопка скачивания
+- `#setup` — страница подключения: команда `claude mcp add --transport http` с автоматически
+  подставленным URL текущего инстанса (`http://<host>:<port>/mcp`), плюс кнопка скачивания
   `SKILL.md` с инструкцией положить его в `~/.claude/skills/memory-mcp/` (user scope — чтобы
   работало во всех проектах).
 
@@ -156,18 +150,21 @@ Hash-роутинг (`static/js/router.js`) с навигацией в стил�
 
 ## Запуск локально
 
-### Вариант A: дашборд в Docker (рекомендуется — не нужно держать IDE открытой)
+### Вариант A: всё в Docker (рекомендуется — не нужно держать IDE/терминал открытыми)
 
 `Dockerfile` — многостадийная сборка (`eclipse-temurin:25-jdk` компилирует jar, рантайм на
-`eclipse-temurin:25-jre`). `docker-compose.yml` поднимает и Postgres, и сам дашборд как сервис
-`app`, который ждёт готовности Postgres (`healthcheck`) и переживает перезапуски (`restart:
-unless-stopped`) — то есть один раз собрал и забыл, никакого `java -jar` в терминале/IDE.
+`eclipse-temurin:25-jre`). `docker-compose.yml` поднимает и Postgres, и сам сервис `app`
+(дашборд + MCP-сервер — один и тот же процесс, один и тот же порт 8080), который ждёт готовности
+Postgres (`healthcheck`) и переживает перезапуски (`restart: unless-stopped`) — то есть один раз
+собрал и забыл, никакого `java -jar` в терминале/IDE и никакого отдельного процесса, который
+Claude Code запускал бы сам.
 
 ```bash
 docker compose up -d --build    # соберёт образ приложения (если менялся код) и поднимет оба сервиса
 docker compose ps               # memory-mcp-postgres + memory-mcp-app, оба "Up"
-docker compose logs -f app      # логи дашборда
+docker compose logs -f app      # логи дашборда + MCP
 # -> http://localhost:8080/     (проекты → задачи/common → записи, плюс #setup)
+# -> http://localhost:8080/mcp  (MCP поверх streamable HTTP)
 
 docker compose down             # остановить (данные в volume memory-mcp-pgdata сохранятся)
 ```
@@ -181,37 +178,23 @@ docker compose up -d postgres        # только Postgres, на localhost:543
 ./gradlew bootJar                    # соберёт build/libs/memory-mcp.jar; Flyway применит миграции при старте
 
 java -jar build/libs/memory-mcp.jar
-# -> http://localhost:8080/
-```
-
-### MCP-сервер (то, что запускает Claude Code)
-
-Это отдельный процесс, который сам Claude Code запускает и останавливает на время каждой
-сессии — держать его в Docker/IDE не требуется в принципе, поэтому он остаётся как обычный
-`java -jar`, независимо от того, где крутится дашборд (вариант A или B выше):
-
-```bash
-java -jar build/libs/memory-mcp.jar --spring.profiles.active=mcp-stdio
+# -> http://localhost:8080/  и  http://localhost:8080/mcp
 ```
 
 ### Регистрация в Claude Code
 
-Проще всего — открыть дашборд и зайти на страницу **⚙️ Setup** (`#setup`): там уже готовая,
-подставленная под твою машину команда и кнопка скачивания скилла. Вручную это выглядит так:
+Проще всего — открыть дашборд и зайти на страницу **⚙️ Setup** (`#setup`): там уже готовая
+команда с URL твоего инстанса и кнопка скачивания скилла. Вручную это выглядит так:
 
 ```bash
-claude mcp add --scope user memory-mcp \
-  -e SPRING_DATASOURCE_URL=jdbc:postgresql://localhost:5433/memorymcp \
-  -e SPRING_DATASOURCE_USERNAME=memorymcp \
-  -e SPRING_DATASOURCE_PASSWORD=memorymcp \
-  -- java -jar $(pwd)/build/libs/memory-mcp.jar --spring.profiles.active=mcp-stdio
+claude mcp add --scope user --transport http memory-mcp http://localhost:8080/mcp
 
 claude mcp list   # проверить, что memory-mcp подключён
 ```
 
-> Важно: JDK для запуска должен быть версии 25 (Java 25 toolchain) — если системный `java`
-> старше, укажите полный путь к JDK 25 в команде вместо `java` (страница `#setup` делает это
-> автоматически).
+Никаких env-переменных и путей к java/jar в команде регистрации больше нет — сервер (Postgres,
+Docker-контейнер) настраивается один раз через `docker-compose.yml`, а Claude Code просто
+обращается по URL, пока контейнер поднят.
 
 Скилл `SKILL.md` (скачивается со страницы `#setup` или лежит в `src/main/resources/skill/`)
 нужно положить в `~/.claude/skills/memory-mcp/SKILL.md` — он учит агента: определять
@@ -234,8 +217,8 @@ src/main/java/ru/iuribabalin/memorymcp/
                                       SetupController, ApiExceptionHandler (read-only REST)
 
 src/main/resources/
-├── application.yml                — единый конфиг + профиль mcp-stdio
-├── logback-spring.xml             — stdio-профиль → stderr, дашборд → обычный stdout
+├── application.yml                — единый конфиг, MCP-транспорт streamable HTTP (protocol: streamable)
+├── logback-spring.xml             — обычный цветной вывод в stdout
 ├── db/migration/                  — V1 (nodes/edges), V2 (tasks), V3 (LOCATION + file_path)
 ├── skill/SKILL.md                 — скилл для агента (также раздаётся через /api/setup/skill)
 └── static/                        — index.html + css/style.css + js/ (router, views/*, markdown.js)
@@ -243,23 +226,24 @@ src/main/resources/
 .claude/skills/memory-mcp/SKILL.md — зеркало skill/SKILL.md для догфудинга в этом репо
 Dockerfile                         — многостадийная сборка jar (build) + рантайм-образ (25-jre)
 .dockerignore                      — исключает build/.gradle/.git из контекста сборки
-docker-compose.yml                 — Postgres (с healthcheck) + сервис app (дашборд)
+docker-compose.yml                 — Postgres (с healthcheck) + сервис app (дашборд + MCP)
 ```
 
 ## Статус и дальнейшие шаги
 
-Реализовано и проверено вручную (миграции, все 11 MCP-инструментов через прямой JSON-RPC по
-stdio, REST API, полный дашборд, регистрация в Claude Code, сканирование этого же репозитория
-как реальный тест `location_scan`):
+Реализовано и проверено вручную (миграции, все 11 MCP-инструментов через прямой JSON-RPC поверх
+streamable HTTP, REST API, полный дашборд, регистрация в Claude Code через URL, сканирование
+этого же репозитория как реальный тест `location_scan`):
 
-- [x] MCP-сервер над stdio с 11 инструментами, чистый stdout
+- [x] MCP-сервер поверх streamable HTTP (`/mcp`) с 11 инструментами, на одном порту с дашбордом
 - [x] Postgres + Flyway-схема (nodes/edges/tasks, тип LOCATION), самоисцеляющиеся dangling-связи
 - [x] Иерархия Project → Task → Common/записи
 - [x] Дашборд: навигация в стиле GitLab, страницы записей в стиле Confluence с рендерингом markdown
-- [x] Страница `#setup` с готовой командой подключения и скачиванием SKILL.md
+- [x] Страница `#setup` с готовой командой подключения (`--transport http`) и скачиванием SKILL.md
 - [x] Автоматический граф расположения файлов/классов (`location_scan`), реальные Java-зависимости
 - [x] `SKILL.md`, обучающий агента этому всему, включая always-ask про задачу
-- [x] Docker-сборка дашборда (`Dockerfile` + `docker-compose.yml`), не требует IDE/терминала
+- [x] Docker-сборка всего сервиса (`Dockerfile` + `docker-compose.yml`), не требует IDE/терминала —
+      `docker compose up -d --build`, и Claude Code подключается по URL, без запуска процессов
 
 Дальше по плану (пока не запрошено, возможные следующие шаги):
 - [ ] Графовая диаграмма (узлы/рёбра как визуальный граф, а не только дерево/списки) на дашборде

@@ -34,7 +34,7 @@ export async function renderSetupView() {
 
     app.appendChild(step(
         '2. Register the MCP server with Claude Code',
-        `Run this once. It registers memory-mcp at user scope, so it's available in every project, launched via ${info.javaExecutable}.`,
+        `Run this once. It registers memory-mcp at user scope over HTTP, so it's available in every project - no local process to launch, Claude Code just talks to ${info.mcpServerUrl}.`,
         info.mcpAddCommand,
     ));
 
