@@ -11,10 +11,20 @@ export async function renderProjectView(projectScope) {
     const app = document.getElementById('app');
     app.innerHTML = '';
 
+    const header = document.createElement('div');
+    header.style.display = 'flex';
+    header.style.alignItems = 'center';
+    header.style.justifyContent = 'space-between';
+    header.style.gap = '10px';
     const title = document.createElement('h1');
     title.className = 'page-title';
     title.textContent = projectScope;
-    app.appendChild(title);
+    const graphLink = document.createElement('a');
+    graphLink.className = 'btn';
+    graphLink.href = `#/${encodeURIComponent(projectScope)}/graph`;
+    graphLink.textContent = '🕸 Graph';
+    header.append(title, graphLink);
+    app.appendChild(header);
 
     const [common, tasks] = await Promise.all([
         fetchEntries(projectScope, null),

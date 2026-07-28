@@ -21,14 +21,24 @@ export async function renderTaskView(projectScope, taskKey) {
     const header = document.createElement('div');
     header.style.display = 'flex';
     header.style.alignItems = 'center';
+    header.style.justifyContent = 'space-between';
     header.style.gap = '10px';
+    const titleGroup = document.createElement('div');
+    titleGroup.style.display = 'flex';
+    titleGroup.style.alignItems = 'center';
+    titleGroup.style.gap = '10px';
     const title = document.createElement('h1');
     title.className = 'page-title';
     title.textContent = taskKey;
-    header.appendChild(title);
+    titleGroup.appendChild(title);
     if (task) {
-        header.appendChild(statusBadge(task.status));
+        titleGroup.appendChild(statusBadge(task.status));
     }
+    const graphLink = document.createElement('a');
+    graphLink.className = 'btn';
+    graphLink.href = `#/${encodeURIComponent(projectScope)}/${encodeURIComponent(taskKey)}/graph`;
+    graphLink.textContent = '🕸 Graph';
+    header.append(titleGroup, graphLink);
     app.appendChild(header);
 
     const subtitle = document.createElement('p');

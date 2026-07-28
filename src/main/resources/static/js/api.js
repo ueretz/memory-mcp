@@ -29,3 +29,10 @@ export function searchEntries(query, type) {
     if (type) params.set('type', type);
     return getJson(`/api/memory/search?${params}`);
 }
+
+export function fetchGraph(projectScope, taskKey, type) {
+    const params = new URLSearchParams({ projectScope });
+    if (taskKey) params.set('taskKey', taskKey);
+    if (type) params.set('type', type);
+    return getJson(`/api/memory/graph?${params}`);
+}

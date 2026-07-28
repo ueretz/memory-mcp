@@ -1,4 +1,4 @@
-export function initRouter({ home, project, task, entry, setup }) {
+export function initRouter({ home, project, task, entry, setup, graph }) {
     async function render() {
         try {
             const raw = location.hash.slice(1);
@@ -13,7 +13,13 @@ export function initRouter({ home, project, task, entry, setup }) {
             } else if (segments.length === 1) {
                 await project(segments[0]);
             } else if (segments.length === 2) {
-                await task(segments[0], segments[1]);
+                if (segments[1] === 'graph') {
+                    await graph(segments[0], null);
+                } else {
+                    await task(segments[0], segments[1]);
+                }
+            } else if (segments.length === 3 && segments[2] === 'graph') {
+                await graph(segments[0], segments[1]);
             } else {
                 await entry(segments[0], segments[1], segments[2]);
             }

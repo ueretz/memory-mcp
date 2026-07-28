@@ -7,6 +7,7 @@ import { renderProjectView } from './views/project.js';
 import { renderTaskView } from './views/task.js';
 import { renderEntryView } from './views/entry.js';
 import { renderSetupView } from './views/setup.js';
+import { renderGraphView } from './views/graph.js';
 
 const searchEl = document.getElementById('search');
 const typeFilterEl = document.getElementById('typeFilter');
@@ -17,6 +18,7 @@ const renderRoute = initRouter({
     task: renderTaskView,
     entry: renderEntryView,
     setup: renderSetupView,
+    graph: renderGraphView,
 });
 
 async function runSearch() {
