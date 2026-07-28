@@ -35,7 +35,7 @@ MCP-сервер для Claude Code, дающий агенту **долговр�
 | Сборка | Gradle (Groovy DSL) | wrapper в репозитории | `bootJar` собирает fat-jar `memory-mcp.jar` |
 | Логирование | Logback (`logback-spring.xml`) | — | Обычный цветной вывод в stdout — больше нет ограничений stdio-транспорта |
 | Веб-слой (дашборд + MCP) | Spring MVC (`spring-boot-starter-web`) + embedded Tomcat | — | Один и тот же порт 8080 отдаёт и REST API дашборда, и `/mcp` |
-| Фронтенд дашборда | Vanilla HTML/CSS/JS, ES-модули, hash-роутинг (без сборки) | — | `static/index.html` + `static/js/*`, без фреймворков и CDN-зависимостей |
+| Фронтенд дашборда | Vue 3 (SFC, `<script setup>` + TypeScript) + Vue Router + Vite + Tailwind CSS | Vue 3.5 / Router 5 / Vite 8 / Tailwind 4 | Отдельный проект `ui/`, собирается Gradle-задачей `buildUi` и упаковывается в jar как `static/`; граф — `d3-force`; markdown — `marked` + `DOMPurify` |
 | Контейнеризация | Docker (многостадийный `Dockerfile`) + Docker Compose | — | `docker compose up -d --build` поднимает и Postgres, и сам сервис (дашборд + MCP) как долгоживущий контейнер |
 
 ## Как это работает
@@ -132,27 +132,50 @@ Java-слой (`ru.iuribabalin.memorymcp`):
 
 ### Веб-дашборд
 
-Hash-роутинг (`static/js/router.js`) с навигацией в стиле GitLab:
-- `#/` — сетка карточек проектов;
-- `#/{projectScope}` — страница проекта: секции "Common" и "Tasks" (со статусом ACTIVE/DONE);
-- `#/{projectScope}/{taskKey}` — страница задачи со списком её записей;
-- `#/{projectScope}/{taskKey|common}/{entryName}` — страница записи в стиле Confluence:
-  markdown реально рендерится (`static/js/markdown.js` — собственный безопасный рендерер:
-  сначала экранирует HTML целиком, потом добавляет заголовки/bold/italic/списки/ссылки/код;
-  ссылки — только `http(s)`/относительные пути; `[[wiki-links]]` резолвятся в клик по реальным
-  связям записи), плюс блоки "Links to"/"Linked from";
-- `#/{projectScope}/graph` и `#/{projectScope}/{taskKey}/graph` — кнопка **🕸 Graph** на странице
-  проекта/задачи открывает визуальный граф её записей (`static/js/views/graph.js`): свой
-  force-directed layout на чистом SVG (узлы отталкиваются, связи стягивают как пружины, без
-  CDN/npm-зависимостей), перетаскивание узлов, зум колесом, панорамирование фона, фильтр по типу
-  (включая `LOCATION` — то есть тот же граф классов, что строит `location_scan`, но визуально, а
-  не списком), клик по узлу ведёт на страницу записи;
-- `#setup` — страница подключения: команда `claude mcp add --transport http` с автоматически
+SPA на Vue 3 (`ui/`, history-роутинг через `vue-router`; `SpaForwardController` отдаёт
+`index.html` на прямых заходах по `/setup` и `/p/**`):
+- `/` — сетка карточек проектов + сводка (проекты / common-записи / задачи);
+- `/p/{projectScope}` — страница проекта: секции "Common" (с фильтром по типу записи) и "Tasks"
+  (активные списком, выполненные — под сворачиваемым блоком);
+- `/p/{projectScope}/t/{taskKey}` — страница задачи со списком её записей;
+- `/p/{projectScope}/e/{entryName}` и `/p/{projectScope}/t/{taskKey}/e/{entryName}` — страница
+  записи в стиле Confluence: markdown рендерится через `marked` (GFM: таблицы, чеклисты, код) и
+  санитизируется `DOMPurify`; `[[wiki-links]]` — собственное inline-расширение `marked`, которое
+  резолвит имя в реальную связь записи (нерезолвленные видны как приглушённый чип), плюс блоки
+  "Links to"/"Linked from";
+- `/p/{projectScope}/graph` и `/p/{projectScope}/t/{taskKey}/graph` — кнопка **Graph** на странице
+  проекта/задачи открывает силовой граф записей на `d3-force` (SVG): перетаскивание узлов, зум и
+  панорамирование (`d3-zoom`), радиус узла зависит от числа связей, подсветка соседних рёбер при
+  наведении, фильтр по типу (включая `LOCATION` — тот же граф классов, что строит `location_scan`,
+  но визуально), клик по узлу ведёт на страницу записи;
+- `/setup` — страница подключения: команда `claude mcp add --transport http` с автоматически
   подставленным URL текущего инстанса (`http://<host>:<port>/mcp`), плюс кнопка скачивания
   `SKILL.md` с инструкцией положить его в `~/.claude/skills/memory-mcp/` (user scope — чтобы
   работало во всех проектах).
 
-Без сборки — чистый JS (ES-модули), без npm/CDN-зависимостей.
+Общая оболочка: сайдбар со списком проектов, хлебные крошки из параметров маршрута, командная
+палитра поиска по **Ctrl/⌘ + K** (живой поиск по всем записям с фильтром по типу и навигацией
+стрелками), переключатель светлой/тёмной темы с запоминанием выбора. Тема и вся палитра —
+CSS-переменные, перенесённые в Tailwind через `@theme inline` (`ui/src/styles/main.css`), поэтому
+цвета типов/статусов задаются в одном месте.
+
+### Разработка UI
+
+```bash
+cd ui
+npm install
+npm run dev          # http://localhost:5173, /api и /mcp проксируются на localhost:8080
+npm run build        # сборка в build/ui-dist (то же самое делает ./gradlew buildUi)
+npm run type-check   # vue-tsc
+```
+
+Для дев-режима нужен запущенный бэкенд (`docker compose up -d` или `./gradlew bootRun`); другой
+адрес бэкенда — через `MEMORY_MCP_BACKEND=http://host:port npm run dev`.
+
+Сборка jar (`./gradlew bootJar`) сама вызывает `npm ci` и `npm run build`. Если npm стоит через
+nvm/fnm/volta и IDE его не видит, Gradle ищет его в типовых местах установки; при необходимости
+можно указать явно: `./gradlew build -PnpmExecutable=/path/to/npm`. Собрать сервер без дашборда
+(например, когда бандл уже готов) — `-PskipUi`.
 
 ## Запуск локально
 
@@ -169,7 +192,7 @@ Claude Code запускал бы сам.
 docker compose up -d --build    # соберёт образ приложения (если менялся код) и поднимет оба сервиса
 docker compose ps               # memory-mcp-postgres + memory-mcp-app, оба "Up"
 docker compose logs -f app      # логи дашборда + MCP
-# -> http://localhost:8080/     (проекты → задачи/common → записи, плюс #setup)
+# -> http://localhost:8080/     (проекты → задачи/common → записи, плюс /setup)
 # -> http://localhost:8080/mcp  (MCP поверх streamable HTTP)
 
 docker compose down             # остановить (данные в volume memory-mcp-pgdata сохранятся)
@@ -189,7 +212,7 @@ java -jar build/libs/memory-mcp.jar
 
 ### Регистрация в Claude Code
 
-Проще всего — открыть дашборд и зайти на страницу **⚙️ Setup** (`#setup`): там уже готовая
+Проще всего — открыть дашборд и зайти на страницу **Setup** (`/setup`): там уже готовая
 команда с URL твоего инстанса и кнопка скачивания скилла. Вручную это выглядит так:
 
 ```bash
@@ -202,7 +225,7 @@ claude mcp list   # проверить, что memory-mcp подключён
 Docker-контейнер) настраивается один раз через `docker-compose.yml`, а Claude Code просто
 обращается по URL, пока контейнер поднят.
 
-Скилл `SKILL.md` (скачивается со страницы `#setup` или лежит в `src/main/resources/skill/`)
+Скилл `SKILL.md` (скачивается со страницы `/setup` или лежит в `src/main/resources/skill/`)
 нужно положить в `~/.claude/skills/memory-mcp/SKILL.md` — он учит агента: определять
 `projectScope` по git-репозиторию самостоятельно, всегда явно спрашивать про принадлежность к
 задаче, вести общий контекст продукта отдельно от задач, и запускать `location_scan` вместо
@@ -226,12 +249,22 @@ src/main/resources/
 ├── application.yml                — единый конфиг, MCP-транспорт streamable HTTP (protocol: streamable)
 ├── logback-spring.xml             — обычный цветной вывод в stdout
 ├── db/migration/                  — V1 (nodes/edges), V2 (tasks), V3 (LOCATION + file_path)
-├── skill/SKILL.md                 — скилл для агента (также раздаётся через /api/setup/skill)
-└── static/                        — index.html + css/style.css + js/ (router, views/*, markdown.js)
+└── skill/SKILL.md                 — скилл для агента (также раздаётся через /api/setup/skill)
+
+ui/                                — фронтенд-проект (Vue 3 + Vite + Tailwind), собирается в static/
+├── index.html                     — точка входа Vite (тема применяется до первой отрисовки)
+├── vite.config.ts                 — outDir = ../build/ui-dist, прокси /api и /mcp для dev-режима
+├── src/api/                       — types.ts (зеркало DTO бэкенда) + client.ts (типизированный fetch)
+├── src/components/                — оболочка (сайдбар, шапка, палитра поиска, крошки) и элементы
+│                                     списков/карточек, MemoryGraph.vue (d3-force), MarkdownBody.vue
+├── src/views/                     — Projects/Project/Task/Entry/Graph/Setup/NotFound
+├── src/composables/               — useAsyncData (загрузка + гонки запросов), useTheme
+├── src/lib/                       — links.ts (маршруты записей), markdown.ts, format.ts
+└── src/styles/main.css            — дизайн-токены (светлая/тёмная) + стили markdown
 
 .claude/skills/memory-mcp/SKILL.md — зеркало skill/SKILL.md для догфудинга в этом репо
-Dockerfile                         — многостадийная сборка jar (build) + рантайм-образ (25-jre)
-.dockerignore                      — исключает build/.gradle/.git из контекста сборки
+Dockerfile                         — многостадийная сборка: ui (node:24) → jar (25-jdk) → рантайм (25-jre)
+.dockerignore                      — исключает build/.gradle/.git/ui/node_modules из контекста сборки
 docker-compose.yml                 — Postgres (с healthcheck) + сервис app (дашборд + MCP)
 ```
 
@@ -244,13 +277,14 @@ streamable HTTP, REST API, полный дашборд, регистрация �
 - [x] MCP-сервер поверх streamable HTTP (`/mcp`) с 11 инструментами, на одном порту с дашбордом
 - [x] Postgres + Flyway-схема (nodes/edges/tasks, тип LOCATION), самоисцеляющиеся dangling-связи
 - [x] Иерархия Project → Task → Common/записи
-- [x] Дашборд: навигация в стиле GitLab, страницы записей в стиле Confluence с рендерингом markdown
-- [x] Страница `#setup` с готовой командой подключения (`--transport http`) и скачиванием SKILL.md
+- [x] Дашборд на Vue 3 + Tailwind (проект `ui/`): навигация в стиле GitLab, страницы записей в стиле
+      Confluence с рендерингом markdown, тёмная тема, поиск по Ctrl/⌘ + K
+- [x] Страница `/setup` с готовой командой подключения (`--transport http`) и скачиванием SKILL.md
 - [x] Автоматический граф расположения файлов/классов (`location_scan`), реальные Java-зависимости
 - [x] `SKILL.md`, обучающий агента этому всему, включая always-ask про задачу
 - [x] Docker-сборка всего сервиса (`Dockerfile` + `docker-compose.yml`), не требует IDE/терминала —
       `docker compose up -d --build`, и Claude Code подключается по URL, без запуска процессов
-- [x] Графовая диаграмма на дашборде (`#/{project}/graph`, `#/{project}/{task}/graph`) — узлы/рёбра
-      как настоящий силовой граф (свой vanilla SVG force-layout, без CDN-зависимостей), с
+- [x] Графовая диаграмма на дашборде (`/p/{project}/graph`, `/p/{project}/t/{task}/graph`) — узлы/рёбра
+      как настоящий силовой граф (`d3-force` + SVG), с
       перетаскиванием узлов, зумом/паном и фильтром по типу (включая `LOCATION`), а не только
       дерево/списки

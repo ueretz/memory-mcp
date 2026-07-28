@@ -115,10 +115,14 @@ function attachZoom() {
   select(svg).call(zoomBehaviour).on('dblclick.zoom', null)
 }
 
+// Vue re-runs template refs on every patch, and the simulation patches ~60 times a second.
+const dragBound = new WeakSet<SVGGElement>()
+
 function attachDrag(element: SVGGElement | null, node: SimNode) {
-  if (!element) {
+  if (!element || dragBound.has(element)) {
     return
   }
+  dragBound.add(element)
   select(element).call(
     d3drag<SVGGElement, unknown>()
       .on('start', () => {

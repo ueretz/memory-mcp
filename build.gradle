@@ -51,16 +51,82 @@ bootJar {
 // Vite writes to build/ui-dist; processResources packages it as /static inside the boot jar.
 // Pass -PskipUi when the bundle was built elsewhere (see the ui stage in the Dockerfile).
 
-def npmExecutable = System.getProperty('os.name').toLowerCase().contains('windows') ? 'npm.cmd' : 'npm'
+def isWindows = System.getProperty('os.name').toLowerCase().contains('windows')
 def uiDir = layout.projectDirectory.dir('ui')
 def uiDist = layout.buildDirectory.dir('ui-dist')
 def skipUi = providers.gradleProperty('skipUi').present
 
+/**
+ * Finds npm without relying on the PATH alone: Gradle daemons started by an IDE inherit the
+ * desktop session's environment, which usually misses nvm/fnm/volta shims set up in the shell.
+ * Override with -PnpmExecutable=/path/to/npm if the search misses your install.
+ */
+def findNpm = {
+    def names = isWindows ? ['npm.cmd', 'npm.exe'] : ['npm']
+
+    def override = providers.gradleProperty('npmExecutable').orNull ?: System.getenv('MEMORY_MCP_NPM')
+    if (override) {
+        return new File(override)
+    }
+
+    def home = new File(System.getProperty('user.home'))
+    def dirs = []
+    (System.getenv('PATH') ?: '').split(File.pathSeparator).findAll { it }.each { dirs << new File(it) }
+
+    def versionDirs = { File root, String suffix ->
+        root.isDirectory()
+                ? root.listFiles({ File f -> f.isDirectory() } as FileFilter)
+                .sort { it.name }.reverse().collect { new File(it, suffix) }
+                : []
+    }
+    dirs += versionDirs(new File(home, '.nvm/versions/node'), 'bin')
+    dirs += versionDirs(new File(home, '.local/share/fnm/node-versions'), 'installation/bin')
+    dirs += versionDirs(new File(home, 'AppData/Roaming/nvm'), '')
+    dirs += [
+            new File(home, '.volta/bin'),
+            new File(home, '.asdf/shims'),
+            new File('/usr/local/bin'),
+            new File('/opt/homebrew/bin'),
+            new File('/usr/bin'),
+            new File('C:/Program Files/nodejs'),
+    ]
+
+    for (dir in dirs) {
+        for (name in names) {
+            def candidate = new File(dir, name)
+            if (candidate.isFile()) {
+                return candidate
+            }
+        }
+    }
+    return null
+}
+
+def npmBinary = findNpm()
+
+def configureNpmTask = { Exec task, List<String> arguments ->
+    task.workingDir = uiDir
+    def npmPath = npmBinary?.absolutePath ?: 'npm'
+    task.commandLine(isWindows ? ['cmd', '/c', npmPath] + arguments : [npmPath] + arguments)
+    if (npmBinary != null) {
+        // npm shells out to node, which lives next to it - keep that directory on the PATH.
+        task.environment 'PATH', npmBinary.parentFile.absolutePath + File.pathSeparator + (System.getenv('PATH') ?: '')
+    }
+    task.doFirst {
+        if (npmBinary == null) {
+            throw new GradleException("""npm was not found.
+  Install Node.js, or point the build at it explicitly:
+    ./gradlew build -PnpmExecutable=/path/to/npm
+  IDE builds: add npm's directory to the IDE's PATH, or set MEMORY_MCP_NPM.
+  To build the server without the dashboard: ./gradlew build -PskipUi""")
+        }
+    }
+}
+
 tasks.register('npmInstall', Exec) {
     group = 'ui'
     description = 'Installs the dashboard dependencies'
-    workingDir = uiDir
-    commandLine npmExecutable, 'ci'
+    configureNpmTask(it, ['ci'])
     inputs.file(uiDir.file('package.json'))
     inputs.file(uiDir.file('package-lock.json'))
     outputs.file(uiDir.file('node_modules/.package-lock.json'))
@@ -70,8 +136,7 @@ tasks.register('buildUi', Exec) {
     group = 'ui'
     description = 'Builds the Vue dashboard into build/ui-dist'
     dependsOn 'npmInstall'
-    workingDir = uiDir
-    commandLine npmExecutable, 'run', 'build'
+    configureNpmTask(it, ['run', 'build'])
     inputs.dir(uiDir.dir('src'))
     inputs.file(uiDir.file('index.html'))
     inputs.file(uiDir.file('vite.config.ts'))
