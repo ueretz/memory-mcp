@@ -37,6 +37,7 @@ export interface MemoryEntryDetail extends MemoryEntrySummary {
   createdAt: string
   linkedTo: MemoryEntrySummary[]
   linkedFrom: MemoryEntrySummary[]
+  warnings: string[]
 }
 
 export interface GraphNode {

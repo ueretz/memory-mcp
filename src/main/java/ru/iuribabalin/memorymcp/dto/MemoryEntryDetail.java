@@ -16,6 +16,7 @@ public record MemoryEntryDetail(
         Instant createdAt,
         Instant updatedAt,
         List<MemoryEntrySummary> linkedTo,
-        List<MemoryEntrySummary> linkedFrom
+        List<MemoryEntrySummary> linkedFrom,
+        List<String> warnings
 ) {
 }

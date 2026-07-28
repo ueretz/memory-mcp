@@ -195,8 +195,27 @@ public class MemoryService {
                 node.getCreatedAt(),
                 node.getUpdatedAt(),
                 linkedTo,
-                linkedFrom
+                linkedFrom,
+                scopeWarnings(node, linkedTo)
         );
+    }
+
+    /**
+     * Catches the case that silently orphaned 18 GCBE-10157 entries: an unscoped memory_save
+     * links into an entry that already belongs to a task, so the new entry almost certainly
+     * should have carried the same projectScope/taskKey.
+     */
+    private List<String> scopeWarnings(MemoryNode node, List<MemoryEntrySummary> linkedTo) {
+        if (node.getTask() != null) {
+            return List.of();
+        }
+        return linkedTo.stream()
+                .filter(linked -> linked.taskKey() != null)
+                .map(linked -> "'%s' has no task scope but links to '%s', which belongs to task %s (project %s). "
+                        .formatted(node.getName(), linked.name(), linked.taskKey(), linked.projectScope())
+                        + "Pass projectScope/taskKey on memory_save if this entry belongs to that task.")
+                .distinct()
+                .toList();
     }
 
     private MemoryEntrySummary toSummary(MemoryNode node) {

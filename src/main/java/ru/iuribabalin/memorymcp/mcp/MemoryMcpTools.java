@@ -26,7 +26,9 @@ public class MemoryMcpTools {
             description = "Create or update a long-term memory entry. Upserts by name. Parses [[other-name]] " +
                     "references inside content into graph links. Call this whenever you learn a durable user " +
                     "preference, receive corrective feedback, discover a project-specific fact, or produce " +
-                    "reusable reference knowledge.")
+                    "reusable reference knowledge. If you're mid-task, pass projectScope/taskKey - omitting them " +
+                    "while linking to a task-scoped entry makes this one unreachable from that task's page and " +
+                    "graph, and the response's warnings field will flag it.")
     public MemoryEntryDetail memorySave(
             @McpToolParam(description = "Unique kebab-case slug identifying this entry (use the fully-qualified class name for type=LOCATION)", required = true) String name,
             @McpToolParam(description = "One of USER, FEEDBACK, PROJECT, REFERENCE, LOCATION", required = true) MemoryNode.Type type,

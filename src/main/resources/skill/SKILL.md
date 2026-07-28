@@ -40,6 +40,37 @@ not skip asking just because it seems obvious - it must be an explicit question 
 - If the user says no: proceed without a `taskKey`. Anything you save is project-level
   "common" context (durable knowledge about the product, not tied to one unit of work).
 
+## Answering questions - memory first, then ask before reading code
+
+Whenever the user asks a question about the project or a task - "how does X work",
+"give me context on task N", "what's the implementation of Y" - follow this order every time,
+without skipping steps:
+
+1. **Search memory first, before touching any source file.** Resolve `projectScope` (and
+   `taskKey` if the question is about a specific task) and call `memory_search` / `memory_list`
+   / `memory_get` for entries relevant to the question. Answer using whatever you find there.
+   If nothing relevant exists, say so explicitly instead of silently falling through to the
+   codebase.
+2. **Always ask before reading the code - this is not optional and not inferable.** Regardless
+   of whether memory had an answer, explicitly ask the user something like: "Нужно ли уточнить,
+   как это реализовано в коде сейчас?" / "Want me to check how this is actually implemented in
+   the code?". Do not decide on your own that the memory answer is "probably still right" or
+   "probably good enough" - ask every time, the same way task scope is always asked explicitly.
+   - If the user says no, stop - answer from memory alone.
+3. **If the user says yes, read the code** to find the current implementation/logic, then
+   reconcile it against what memory said:
+   - If the code confirms the memory entry, leave memory as-is - do **not** re-save it. Saving
+     an unchanged fact again just creates a duplicate.
+   - If the code disagrees with memory (the implementation changed, or memory was wrong/stale),
+     or memory had nothing on this at all, `memory_save` to update the existing entry in place
+     (upsert by name) or create a new one - and tell the user memory was out of date and has
+     been refreshed.
+4. **Before saving anything, check it isn't already there.** Upserting by `name` prevents
+   duplicate names, but the same fact can drift in under a different name. Before a `memory_save`
+   that isn't a confirmed update from step 3, run `memory_search`/`memory_get` on the topic and
+   compare content, not just the name - if an existing entry already says the same thing, update
+   that entry (or skip) instead of writing a near-duplicate one.
+
 ## Maintaining common project context
 
 Regardless of task scope, keep a small set of `PROJECT`-type entries with `projectScope` set

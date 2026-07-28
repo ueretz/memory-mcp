@@ -81,6 +81,16 @@ const links = computed<Array<{ title: string; items: MemoryEntrySummary[] }>>(()
         </div>
       </header>
 
+      <div
+        v-if="entry.warnings.length > 0"
+        class="mb-6 flex items-start gap-3 rounded-2xl border border-type-feedback/30 bg-type-feedback/5 px-5 py-4"
+      >
+        <AppIcon name="warning" class="mt-0.5 size-5 shrink-0 text-type-feedback" />
+        <ul class="min-w-0 flex-1 space-y-1 text-[13px] break-words text-muted">
+          <li v-for="warning in entry.warnings" :key="warning">{{ warning }}</li>
+        </ul>
+      </div>
+
       <MarkdownBody :content="entry.content" :resolve-link="resolveLink" />
 
       <section v-for="group in links" :key="group.title" class="mt-8">
