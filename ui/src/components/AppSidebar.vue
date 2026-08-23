@@ -64,6 +64,14 @@ const drawerClass = computed(() =>
         All projects
       </RouterLink>
       <RouterLink
+        :to="{ name: 'stats' }"
+        class="flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-[13px] font-medium text-muted transition hover:bg-elevated hover:text-content"
+        active-class="!bg-accent-soft !text-accent"
+      >
+        <AppIcon name="chart" class="size-4" />
+        Statistics
+      </RouterLink>
+      <RouterLink
         :to="{ name: 'setup' }"
         class="flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-[13px] font-medium text-muted transition hover:bg-elevated hover:text-content"
         active-class="!bg-accent-soft !text-accent"

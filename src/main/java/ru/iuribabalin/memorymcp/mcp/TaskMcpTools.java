@@ -5,7 +5,9 @@ import org.springframework.ai.mcp.annotation.McpToolParam;
 import org.springframework.stereotype.Component;
 import ru.iuribabalin.memorymcp.dto.TaskSummary;
 import ru.iuribabalin.memorymcp.entity.Task;
+import ru.iuribabalin.memorymcp.entity.UsageEvent;
 import ru.iuribabalin.memorymcp.service.TaskService;
+import ru.iuribabalin.memorymcp.service.UsageEventRecorder;
 
 import java.util.List;
 import java.util.Map;
@@ -14,9 +16,11 @@ import java.util.Map;
 public class TaskMcpTools {
 
     private final TaskService taskService;
+    private final UsageEventRecorder usageEventRecorder;
 
-    public TaskMcpTools(TaskService taskService) {
+    public TaskMcpTools(TaskService taskService, UsageEventRecorder usageEventRecorder) {
         this.taskService = taskService;
+        this.usageEventRecorder = usageEventRecorder;
     }
 
     @McpTool(name = "task_start",
@@ -30,7 +34,9 @@ public class TaskMcpTools {
             @McpToolParam(description = "The task/ticket key, e.g. a Jira key or any user-given task number", required = true) String taskKey,
             @McpToolParam(description = "Task title/summary, from the ticket tracker or the user", required = false) String title,
             @McpToolParam(description = "MANUAL if the user gave the key directly, JIRA if resolved via a ticket-tracker tool", required = false) Task.Source source) {
-        return taskService.start(projectScope, taskKey, title, source);
+        TaskSummary result = taskService.start(projectScope, taskKey, title, source);
+        usageEventRecorder.record(UsageEvent.Action.TASK_START, null, projectScope, taskKey, null);
+        return result;
     }
 
     @McpTool(name = "task_list",
@@ -47,6 +53,7 @@ public class TaskMcpTools {
             @McpToolParam(description = "Project identifier", required = true) String projectScope,
             @McpToolParam(description = "The task/ticket key", required = true) String taskKey) {
         boolean closed = taskService.close(projectScope, taskKey);
+        usageEventRecorder.record(UsageEvent.Action.TASK_CLOSE, null, projectScope, taskKey, null);
         return Map.of("closed", closed, "taskKey", taskKey);
     }
 }

@@ -16,7 +16,7 @@ const to = computed(() => taskLocation(props.projectScope, props.task.taskKey))
 <template>
   <RouterLink
     :to="to"
-    class="group flex items-center gap-3.5 rounded-xl border border-border bg-panel px-4 py-3 transition duration-150 hover:-translate-y-px hover:border-accent/40 hover:shadow-panel"
+    class="group flex items-center gap-3.5 rounded-xl border border-border bg-panel px-3.5 py-2.5 transition duration-150 hover:-translate-y-px hover:border-accent/40 hover:shadow-panel"
   >
     <span
       class="flex size-8 shrink-0 items-center justify-center rounded-lg border border-border bg-elevated text-muted transition group-hover:border-accent/30 group-hover:text-accent"

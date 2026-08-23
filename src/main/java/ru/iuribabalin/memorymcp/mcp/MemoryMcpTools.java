@@ -8,7 +8,9 @@ import ru.iuribabalin.memorymcp.dto.MemoryEntryDetail;
 import ru.iuribabalin.memorymcp.dto.MemoryEntrySummary;
 import ru.iuribabalin.memorymcp.dto.SaveMemoryRequest;
 import ru.iuribabalin.memorymcp.entity.MemoryNode;
+import ru.iuribabalin.memorymcp.entity.UsageEvent;
 import ru.iuribabalin.memorymcp.service.MemoryService;
+import ru.iuribabalin.memorymcp.service.UsageEventRecorder;
 
 import java.util.List;
 import java.util.Map;
@@ -17,9 +19,11 @@ import java.util.Map;
 public class MemoryMcpTools {
 
     private final MemoryService memoryService;
+    private final UsageEventRecorder usageEventRecorder;
 
-    public MemoryMcpTools(MemoryService memoryService) {
+    public MemoryMcpTools(MemoryService memoryService, UsageEventRecorder usageEventRecorder) {
         this.memoryService = memoryService;
+        this.usageEventRecorder = usageEventRecorder;
     }
 
     @McpTool(name = "memory_save",
@@ -38,9 +42,12 @@ public class MemoryMcpTools {
                     "as a real HTML page in the dashboard, not markdown-parsed", required = true) String content,
             @McpToolParam(description = "Project this entry is scoped to, auto-derived from the git repo name", required = false) String projectScope,
             @McpToolParam(description = "Task key to scope this entry to a specific task (must already exist via task_start); omit for project-level common context", required = false) String taskKey,
+            @McpToolParam(description = "Name of an existing folder (see folder_create/folder_list) to file this entry under; omit to save it at the root of its project/task scope", required = false) String folder,
             @McpToolParam(description = "Relative file path this entry points at, for type=LOCATION (e.g. a class or file you just worked on)", required = false) String filePath,
             @McpToolParam(description = "Who created this entry, e.g. 'Name <email>' - auto-derive from `git config user.name`/`user.email` in the current repo, never ask the user for it", required = false) String createdBy) {
-        return memoryService.save(new SaveMemoryRequest(name, type, description, content, projectScope, taskKey, filePath, createdBy));
+        MemoryEntryDetail result = memoryService.save(new SaveMemoryRequest(name, type, description, content, projectScope, taskKey, folder, filePath, createdBy));
+        usageEventRecorder.record(UsageEvent.Action.SAVE, result.name(), result.projectScope(), result.taskKey(), createdBy);
+        return result;
     }
 
     @McpTool(name = "memory_get",
@@ -48,7 +55,9 @@ public class MemoryMcpTools {
                     "entries that link to it.")
     public MemoryEntryDetail memoryGet(
             @McpToolParam(description = "The entry's name/slug", required = true) String name) {
-        return memoryService.get(name);
+        MemoryEntryDetail result = memoryService.get(name);
+        usageEventRecorder.record(UsageEvent.Action.GET, name, result.projectScope(), result.taskKey(), null);
+        return result;
     }
 
     @McpTool(name = "memory_list",
@@ -58,9 +67,12 @@ public class MemoryMcpTools {
             @McpToolParam(description = "Optional filter: USER, FEEDBACK, PROJECT, or REFERENCE", required = false) MemoryNode.Type type,
             @McpToolParam(description = "Project scope filter. Alone (no taskKey), returns only project-level common entries", required = false) String projectScope,
             @McpToolParam(description = "Task key filter - lists that task's entries instead of the project's common ones", required = false) String taskKey,
+            @McpToolParam(description = "Folder name to list entries directly inside; omit to list entries at the root of this project/task scope (folders' contents are hidden from the root listing)", required = false) String folder,
             @McpToolParam(description = "Max results, default 50", required = false) Integer limit,
             @McpToolParam(description = "Offset for pagination, default 0", required = false) Integer offset) {
-        return memoryService.list(type, projectScope, taskKey, limit == null ? 50 : limit, offset == null ? 0 : offset);
+        List<MemoryEntrySummary> result = memoryService.list(type, projectScope, taskKey, folder, limit == null ? 50 : limit, offset == null ? 0 : offset);
+        usageEventRecorder.record(UsageEvent.Action.LIST, null, projectScope, taskKey, null);
+        return result;
     }
 
     @McpTool(name = "memory_search",
@@ -71,8 +83,11 @@ public class MemoryMcpTools {
             @McpToolParam(description = "Optional filter: USER, FEEDBACK, PROJECT, or REFERENCE", required = false) MemoryNode.Type type,
             @McpToolParam(description = "Optional project scope filter", required = false) String projectScope,
             @McpToolParam(description = "Optional task key filter (requires projectScope)", required = false) String taskKey,
+            @McpToolParam(description = "Folder name to restrict the search to a single folder (non-recursive); omit to search every entry in this project/task scope regardless of folder", required = false) String folder,
             @McpToolParam(description = "Max results, default 20", required = false) Integer limit) {
-        return memoryService.search(query, type, projectScope, taskKey, limit == null ? 20 : limit);
+        List<MemoryEntrySummary> result = memoryService.search(query, type, projectScope, taskKey, folder, limit == null ? 20 : limit);
+        usageEventRecorder.record(UsageEvent.Action.SEARCH, null, projectScope, taskKey, null);
+        return result;
     }
 
     @McpTool(name = "memory_graph",
@@ -82,7 +97,9 @@ public class MemoryMcpTools {
             @McpToolParam(description = "Optional filter: USER, FEEDBACK, PROJECT, or REFERENCE", required = false) MemoryNode.Type type,
             @McpToolParam(description = "Project scope filter. Alone (no taskKey), returns only project-level common entries", required = false) String projectScope,
             @McpToolParam(description = "Task key filter - graph of that task's entries instead of the project's common ones", required = false) String taskKey) {
-        return memoryService.graph(type, projectScope, taskKey);
+        GraphResponse result = memoryService.graph(type, projectScope, taskKey);
+        usageEventRecorder.record(UsageEvent.Action.GRAPH, null, projectScope, taskKey, null);
+        return result;
     }
 
     @McpTool(name = "memory_related",
@@ -91,7 +108,9 @@ public class MemoryMcpTools {
     public List<MemoryEntrySummary> memoryRelated(
             @McpToolParam(description = "The entry's name/slug", required = true) String name,
             @McpToolParam(description = "Traversal depth, default 1 (only 1-hop is currently supported)", required = false) Integer depth) {
-        return memoryService.related(name, depth == null ? 1 : depth);
+        List<MemoryEntrySummary> result = memoryService.related(name, depth == null ? 1 : depth);
+        usageEventRecorder.record(UsageEvent.Action.RELATED, name, null, null, null);
+        return result;
     }
 
     @McpTool(name = "memory_delete",
@@ -99,6 +118,7 @@ public class MemoryMcpTools {
     public Map<String, Object> memoryDelete(
             @McpToolParam(description = "The entry's name/slug", required = true) String name) {
         boolean deleted = memoryService.delete(name);
+        usageEventRecorder.record(UsageEvent.Action.DELETE, name, null, null, null);
         return Map.of("deleted", deleted, "name", name);
     }
 }

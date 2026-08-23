@@ -30,6 +30,12 @@ export const router = createRouter({
       props: true,
     },
     {
+      path: '/p/:project/f/:folder',
+      name: 'folder',
+      component: () => import('@/views/FolderView.vue'),
+      props: true,
+    },
+    {
       path: '/p/:project/e/:name',
       name: 'entry',
       component: () => import('@/views/EntryView.vue'),
@@ -68,6 +74,7 @@ export const router = createRouter({
       meta: { bare: true },
     },
     { path: '/setup', name: 'setup', component: () => import('@/views/SetupView.vue') },
+    { path: '/stats', name: 'stats', component: () => import('@/views/StatsView.vue') },
     { path: '/:pathMatch(.*)*', name: 'not-found', component: () => import('@/views/NotFoundView.vue') },
   ],
   scrollBehavior(_to, _from, savedPosition) {

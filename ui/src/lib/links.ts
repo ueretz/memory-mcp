@@ -44,6 +44,10 @@ export function graphLocation(projectScope: string, taskKey?: string | null): Ro
     : { name: 'project-graph', params: { project: projectScope } }
 }
 
+export function folderLocation(projectScope: string, name: string): RouteLocationRaw {
+  return { name: 'folder', params: { project: projectScope, folder: name } }
+}
+
 /** Path string for anchors rendered outside of Vue templates (markdown, SVG). */
 export function entryHref(
   entry: Pick<MemoryEntrySummary, 'name' | 'projectScope' | 'taskKey'>,

@@ -29,6 +29,7 @@ export interface MemoryEntrySummary {
   projectScope: string | null
   taskKey: string | null
   filePath: string | null
+  folder?: string | null
   createdBy: string | null
   updatedAt: string
 }
@@ -60,4 +61,45 @@ export interface SetupInfo {
   mcpAddCommand: string
   mcpServerUrl: string
   skillInstallPath: string
+}
+
+export interface StatsTotals {
+  totalEntries: number
+  totalEvents: number
+}
+
+export interface DailyActivity {
+  day: string
+  count: number
+}
+
+export interface TypeBreakdown {
+  type: MemoryType
+  count: number
+}
+
+export interface TopEntry {
+  name: string
+  type: MemoryType
+  description: string
+  projectScope: string | null
+  taskKey: string | null
+  accessCount: number
+}
+
+export interface StatsOverview {
+  totals: StatsTotals
+  activityByDay: DailyActivity[]
+  byType: TypeBreakdown[]
+  topEntries: TopEntry[]
+}
+
+export interface FolderSummary {
+  name: string
+  description: string
+  projectScope: string
+  taskKey: string | null
+  parentFolder: string | null
+  createdBy: string | null
+  updatedAt: string
 }

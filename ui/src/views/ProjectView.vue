@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { computed, ref, toRef } from 'vue'
 
-import { fetchEntries, fetchTasks } from '@/api/client'
+import { fetchEntries, fetchFolders, fetchStats, fetchTasks } from '@/api/client'
 import { MEMORY_TYPES, type MemoryType } from '@/api/types'
 import AppIcon from '@/components/AppIcon.vue'
 import EmptyState from '@/components/EmptyState.vue'
 import EntryRow from '@/components/EntryRow.vue'
 import ErrorState from '@/components/ErrorState.vue'
+import FolderRow from '@/components/FolderRow.vue'
 import PageHeader from '@/components/PageHeader.vue'
 import SkeletonRows from '@/components/SkeletonRows.vue'
 import TaskRow from '@/components/TaskRow.vue'
@@ -26,6 +27,10 @@ const {
 } = useAsyncData(() => fetchEntries(project.value, null), [project])
 
 const { data: tasks, loading: tasksLoading } = useAsyncData(() => fetchTasks(project.value), [project])
+
+const { data: stats, loading: statsLoading } = useAsyncData(() => fetchStats(project.value, null, 30), [project])
+
+const { data: folders } = useAsyncData(() => fetchFolders(project.value, null, null), [project])
 
 const visibleEntries = computed(() =>
   (common.value ?? []).filter((entry) => !typeFilter.value || entry.type === typeFilter.value),
@@ -52,6 +57,19 @@ const doneTasks = computed(() => (tasks.value ?? []).filter((task) => task.statu
         </RouterLink>
       </template>
     </PageHeader>
+
+    <section v-if="folders?.length" class="mb-9">
+      <h2 class="mb-3 flex items-center gap-2 text-[13px] font-semibold tracking-wide text-content uppercase">
+        <AppIcon name="folder" class="size-4 text-faint" />
+        Folders
+        <span class="rounded-full bg-elevated px-1.5 py-0.5 text-[11px] font-medium text-muted tabular-nums">
+          {{ folders.length }}
+        </span>
+      </h2>
+      <div class="space-y-2">
+        <FolderRow v-for="folder in folders" :key="folder.name" :folder="folder" :project-scope="project" />
+      </div>
+    </section>
 
     <section class="mb-9">
       <div class="mb-3 flex flex-wrap items-center justify-between gap-3">
@@ -103,6 +121,28 @@ const doneTasks = computed(() => (tasks.value ?? []).filter((task) => task.statu
       />
       <div v-else class="space-y-2">
         <EntryRow v-for="entry in visibleEntries" :key="entry.name" :entry="entry" />
+      </div>
+    </section>
+
+    <section class="mb-9 rounded-2xl border border-border bg-panel p-5">
+      <h2 class="mb-4 flex items-center gap-2 text-[13px] font-semibold tracking-wide text-content uppercase">
+        <AppIcon name="chart" class="size-4 text-faint" />
+        Activity
+      </h2>
+      <SkeletonRows v-if="statsLoading" :rows="1" />
+      <div v-else-if="stats" class="flex flex-wrap gap-8">
+        <div>
+          <p class="text-2xl font-semibold tracking-tight text-content tabular-nums">
+            {{ stats.totals.totalEvents }}
+          </p>
+          <p class="mt-1 text-[12px] text-faint">Events · last 30 days</p>
+        </div>
+        <div v-if="stats.topEntries[0]" class="min-w-0">
+          <p class="truncate text-2xl font-semibold tracking-tight text-content">
+            {{ stats.topEntries[0].name }}
+          </p>
+          <p class="mt-1 text-[12px] text-faint">Most accessed</p>
+        </div>
       </div>
     </section>
 

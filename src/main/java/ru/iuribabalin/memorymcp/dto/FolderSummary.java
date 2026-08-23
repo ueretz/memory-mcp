@@ -1,17 +1,13 @@
 package ru.iuribabalin.memorymcp.dto;
 
-import ru.iuribabalin.memorymcp.entity.MemoryNode;
-
 import java.time.Instant;
 
-public record MemoryEntrySummary(
+public record FolderSummary(
         String name,
-        MemoryNode.Type type,
         String description,
         String projectScope,
         String taskKey,
-        String folder,
-        String filePath,
+        String parentFolder,
         String createdBy,
         Instant updatedAt
 ) {
