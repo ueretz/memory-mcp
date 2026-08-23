@@ -47,6 +47,7 @@ export const router = createRouter({
       props: true,
     },
     { path: '/setup', name: 'setup', component: () => import('@/views/SetupView.vue') },
+    { path: '/stats', name: 'stats', component: () => import('@/views/StatsView.vue') },
     { path: '/:pathMatch(.*)*', name: 'not-found', component: () => import('@/views/NotFoundView.vue') },
   ],
   scrollBehavior(_to, _from, savedPosition) {
