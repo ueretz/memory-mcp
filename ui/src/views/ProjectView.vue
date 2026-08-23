@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, toRef } from 'vue'
 
-import { fetchEntries, fetchTasks } from '@/api/client'
+import { fetchEntries, fetchStats, fetchTasks } from '@/api/client'
 import { MEMORY_TYPES, type MemoryType } from '@/api/types'
 import AppIcon from '@/components/AppIcon.vue'
 import EmptyState from '@/components/EmptyState.vue'
@@ -26,6 +26,8 @@ const {
 } = useAsyncData(() => fetchEntries(project.value, null), [project])
 
 const { data: tasks, loading: tasksLoading } = useAsyncData(() => fetchTasks(project.value), [project])
+
+const { data: stats, loading: statsLoading } = useAsyncData(() => fetchStats(project.value, null, 30), [project])
 
 const visibleEntries = computed(() =>
   (common.value ?? []).filter((entry) => !typeFilter.value || entry.type === typeFilter.value),
@@ -103,6 +105,28 @@ const doneTasks = computed(() => (tasks.value ?? []).filter((task) => task.statu
       />
       <div v-else class="space-y-2">
         <EntryRow v-for="entry in visibleEntries" :key="entry.name" :entry="entry" />
+      </div>
+    </section>
+
+    <section class="mb-9 rounded-2xl border border-border bg-panel p-5">
+      <h2 class="mb-4 flex items-center gap-2 text-[13px] font-semibold tracking-wide text-content uppercase">
+        <AppIcon name="chart" class="size-4 text-faint" />
+        Activity
+      </h2>
+      <SkeletonRows v-if="statsLoading" :rows="1" />
+      <div v-else-if="stats" class="flex flex-wrap gap-8">
+        <div>
+          <p class="text-2xl font-semibold tracking-tight text-content tabular-nums">
+            {{ stats.totals.totalEvents }}
+          </p>
+          <p class="mt-1 text-[12px] text-faint">Events · last 30 days</p>
+        </div>
+        <div v-if="stats.topEntries[0]" class="min-w-0">
+          <p class="truncate text-2xl font-semibold tracking-tight text-content">
+            {{ stats.topEntries[0].name }}
+          </p>
+          <p class="mt-1 text-[12px] text-faint">Most accessed</p>
+        </div>
       </div>
     </section>
 
