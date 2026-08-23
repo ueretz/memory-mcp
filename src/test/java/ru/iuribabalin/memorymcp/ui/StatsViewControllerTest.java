@@ -34,7 +34,9 @@ class StatsViewControllerTest {
 
     @BeforeEach
     void setUp() {
-        mockMvc = MockMvcBuilders.standaloneSetup(statsViewController).build();
+        mockMvc = MockMvcBuilders.standaloneSetup(statsViewController)
+                .setControllerAdvice(new ApiExceptionHandler())
+                .build();
     }
 
     @Test
