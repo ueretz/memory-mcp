@@ -15,8 +15,8 @@ public interface FolderRepository extends JpaRepository<Folder, Long> {
     @Query(value = """
             select f.* from folders f
             where f.project_scope = :projectScope
-            and (:taskId is null or f.task_id = :taskId)
-            and (:parentName is null or f.parent_id = (select id from folders where name = :parentName))
+            and ((:taskId is null and f.task_id is null) or f.task_id = :taskId)
+            and ((:parentName is null and f.parent_id is null) or f.parent_id = (select id from folders where name = :parentName))
             order by f.name
             """, nativeQuery = true)
     List<Folder> listChildren(@Param("parentName") String parentName,
