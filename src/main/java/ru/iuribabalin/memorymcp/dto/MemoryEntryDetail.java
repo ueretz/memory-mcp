@@ -12,6 +12,7 @@ public record MemoryEntryDetail(
         String content,
         String projectScope,
         String taskKey,
+        String folder,
         String filePath,
         Instant createdAt,
         Instant updatedAt,

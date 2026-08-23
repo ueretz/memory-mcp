@@ -9,6 +9,7 @@ public record SaveMemoryRequest(
         String content,
         String projectScope,
         String taskKey,
+        String folder,
         String filePath,
         String createdBy
 ) {

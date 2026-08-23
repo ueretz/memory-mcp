@@ -29,6 +29,7 @@ public interface MemoryNodeRepository extends JpaRepository<MemoryNode, Long> {
      */
     @Query("""
             select n from MemoryNode n
+            left join n.folder f
             where (:type is null or n.type = :type)
             and (:projectScope is null or n.projectScope = :projectScope)
             and (
@@ -36,16 +37,24 @@ public interface MemoryNodeRepository extends JpaRepository<MemoryNode, Long> {
                 or (:taskFilterMode = 'COMMON' and n.task is null)
                 or (:taskFilterMode = 'TASK' and n.task.id = :taskId)
             )
+            and (
+                :folderFilterMode = 'NONE'
+                or (:folderFilterMode = 'ROOT' and n.folder is null)
+                or (:folderFilterMode = 'IN' and f.name = :folderName)
+            )
             order by n.updatedAt desc
             """)
     List<MemoryNode> listByFilters(@Param("type") MemoryNode.Type type,
                                     @Param("projectScope") String projectScope,
                                     @Param("taskFilterMode") String taskFilterMode,
                                     @Param("taskId") Long taskId,
+                                    @Param("folderFilterMode") String folderFilterMode,
+                                    @Param("folderName") String folderName,
                                     Pageable pageable);
 
     @Query(value = """
             select n.* from memory_nodes n
+            left join folders f on f.id = n.folder_id
             where n.search_vector @@ plainto_tsquery('english', :query)
             and (:type is null or n.type = :type)
             and (:projectScope is null or n.project_scope = :projectScope)
@@ -54,6 +63,11 @@ public interface MemoryNodeRepository extends JpaRepository<MemoryNode, Long> {
                 or (:taskFilterMode = 'COMMON' and n.task_id is null)
                 or (:taskFilterMode = 'TASK' and n.task_id = :taskId)
             )
+            and (
+                :folderFilterMode = 'NONE'
+                or (:folderFilterMode = 'ROOT' and n.folder_id is null)
+                or (:folderFilterMode = 'IN' and f.name = :folderName)
+            )
             order by ts_rank(n.search_vector, plainto_tsquery('english', :query)) desc
             """, nativeQuery = true)
     List<MemoryNode> search(@Param("query") String query,
@@ -61,6 +75,8 @@ public interface MemoryNodeRepository extends JpaRepository<MemoryNode, Long> {
                             @Param("projectScope") String projectScope,
                             @Param("taskFilterMode") String taskFilterMode,
                             @Param("taskId") Long taskId,
+                            @Param("folderFilterMode") String folderFilterMode,
+                            @Param("folderName") String folderName,
                             Pageable pageable);
 
     interface TypeCountRow {

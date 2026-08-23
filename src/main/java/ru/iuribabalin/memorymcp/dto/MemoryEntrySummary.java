@@ -10,6 +10,7 @@ public record MemoryEntrySummary(
         String description,
         String projectScope,
         String taskKey,
+        String folder,
         String filePath,
         Instant updatedAt
 ) {

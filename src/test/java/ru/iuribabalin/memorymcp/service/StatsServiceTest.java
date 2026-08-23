@@ -29,7 +29,7 @@ class StatsServiceTest {
     void overviewAggregatesEntriesAndEventsForAProject() {
         memoryService.save(new SaveMemoryRequest(
                 "stats-test-entry", MemoryNode.Type.PROJECT, "desc", "content",
-                "stats-test-project", null, null, "Tester <t@example.com>"));
+                "stats-test-project", null, null, null, "Tester <t@example.com>"));
 
         UsageEvent get = new UsageEvent();
         get.setAction(UsageEvent.Action.GET);

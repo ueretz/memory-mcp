@@ -30,9 +30,10 @@ public class MemoryViewController {
             @RequestParam(required = false) MemoryNode.Type type,
             @RequestParam(required = false) String projectScope,
             @RequestParam(required = false) String taskKey,
+            @RequestParam(required = false) String folder,
             @RequestParam(required = false, defaultValue = "50") int limit,
             @RequestParam(required = false, defaultValue = "0") int offset) {
-        return memoryService.list(type, projectScope, taskKey, limit, offset);
+        return memoryService.list(type, projectScope, taskKey, folder, limit, offset);
     }
 
     @GetMapping("/api/memory/graph")
@@ -49,8 +50,9 @@ public class MemoryViewController {
             @RequestParam(required = false) MemoryNode.Type type,
             @RequestParam(required = false) String projectScope,
             @RequestParam(required = false) String taskKey,
+            @RequestParam(required = false) String folder,
             @RequestParam(required = false, defaultValue = "20") int limit) {
-        return memoryService.search(q, type, projectScope, taskKey, limit);
+        return memoryService.search(q, type, projectScope, taskKey, folder, limit);
     }
 
     @GetMapping("/api/memory/{name}")

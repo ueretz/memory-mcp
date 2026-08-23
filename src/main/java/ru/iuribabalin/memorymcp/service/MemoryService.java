@@ -8,9 +8,11 @@ import ru.iuribabalin.memorymcp.dto.GraphResponse;
 import ru.iuribabalin.memorymcp.dto.MemoryEntryDetail;
 import ru.iuribabalin.memorymcp.dto.MemoryEntrySummary;
 import ru.iuribabalin.memorymcp.dto.SaveMemoryRequest;
+import ru.iuribabalin.memorymcp.entity.Folder;
 import ru.iuribabalin.memorymcp.entity.MemoryEdge;
 import ru.iuribabalin.memorymcp.entity.MemoryNode;
 import ru.iuribabalin.memorymcp.entity.Task;
+import ru.iuribabalin.memorymcp.repository.FolderRepository;
 import ru.iuribabalin.memorymcp.repository.MemoryEdgeRepository;
 import ru.iuribabalin.memorymcp.repository.MemoryNodeRepository;
 
@@ -19,6 +21,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 
 @Service
@@ -28,13 +31,15 @@ public class MemoryService {
     private final MemoryEdgeRepository edgeRepository;
     private final LinkParser linkParser;
     private final TaskService taskService;
+    private final FolderRepository folderRepository;
 
     public MemoryService(MemoryNodeRepository nodeRepository, MemoryEdgeRepository edgeRepository,
-                          LinkParser linkParser, TaskService taskService) {
+                          LinkParser linkParser, TaskService taskService, FolderRepository folderRepository) {
         this.nodeRepository = nodeRepository;
         this.edgeRepository = edgeRepository;
         this.linkParser = linkParser;
         this.taskService = taskService;
+        this.folderRepository = folderRepository;
     }
 
     @Transactional
@@ -48,6 +53,7 @@ public class MemoryService {
         node.setContent(request.content());
         node.setProjectScope(request.projectScope());
         node.setFilePath(request.filePath());
+        node.setFolder(resolveFolder(request.projectScope(), request.taskKey(), request.folder()));
         if (request.taskKey() != null) {
             if (request.projectScope() == null) {
                 throw new IllegalArgumentException("projectScope is required when taskKey is set");
@@ -88,22 +94,26 @@ public class MemoryService {
     }
 
     @Transactional(readOnly = true)
-    public List<MemoryEntrySummary> list(MemoryNode.Type type, String projectScope, String taskKey, int limit, int offset) {
+    public List<MemoryEntrySummary> list(MemoryNode.Type type, String projectScope, String taskKey, String folderName, int limit, int offset) {
         int pageSize = limit > 0 ? limit : 50;
         int page = pageSize > 0 ? offset / pageSize : 0;
         Pageable pageable = PageRequest.of(page, pageSize);
         TaskFilter taskFilter = resolveTaskFilter(projectScope, taskKey);
-        return nodeRepository.listByFilters(type, projectScope, taskFilter.mode(), taskFilter.taskId(), pageable).stream()
+        FolderFilter folderFilter = resolveFolderFilter(folderName);
+        return nodeRepository.listByFilters(type, projectScope, taskFilter.mode(), taskFilter.taskId(),
+                        folderFilter.mode(), folderFilter.name(), pageable).stream()
                 .map(this::toSummary)
                 .toList();
     }
 
     @Transactional(readOnly = true)
-    public List<MemoryEntrySummary> search(String query, MemoryNode.Type type, String projectScope, String taskKey, int limit) {
+    public List<MemoryEntrySummary> search(String query, MemoryNode.Type type, String projectScope, String taskKey, String folderName, int limit) {
         int pageSize = limit > 0 ? limit : 20;
         String typeName = type != null ? type.name() : null;
         TaskFilter taskFilter = resolveTaskFilter(projectScope, taskKey);
-        return nodeRepository.search(query, typeName, projectScope, taskFilter.mode(), taskFilter.taskId(), PageRequest.of(0, pageSize)).stream()
+        FolderFilter folderFilter = resolveFolderFilter(folderName);
+        return nodeRepository.search(query, typeName, projectScope, taskFilter.mode(), taskFilter.taskId(),
+                        folderFilter.mode(), folderFilter.name(), PageRequest.of(0, pageSize)).stream()
                 .map(this::toSummary)
                 .toList();
     }
@@ -111,7 +121,7 @@ public class MemoryService {
     @Transactional(readOnly = true)
     public GraphResponse graph(MemoryNode.Type type, String projectScope, String taskKey) {
         TaskFilter taskFilter = resolveTaskFilter(projectScope, taskKey);
-        List<MemoryNode> nodes = nodeRepository.listByFilters(type, projectScope, taskFilter.mode(), taskFilter.taskId(), Pageable.unpaged());
+        List<MemoryNode> nodes = nodeRepository.listByFilters(type, projectScope, taskFilter.mode(), taskFilter.taskId(), "NONE", null, Pageable.unpaged());
         Set<Long> nodeIds = nodes.stream().map(MemoryNode::getId).collect(java.util.stream.Collectors.toSet());
 
         List<GraphResponse.GraphNode> graphNodes = nodes.stream()
@@ -175,6 +185,28 @@ public class MemoryService {
     private record TaskFilter(String mode, Long taskId) {
     }
 
+    private Folder resolveFolder(String projectScope, String taskKey, String folderName) {
+        if (folderName == null) {
+            return null;
+        }
+        Folder folder = folderRepository.findByName(folderName)
+                .orElseThrow(() -> new FolderNotFoundException(folderName));
+        String folderTaskKey = folder.getTask() != null ? folder.getTask().getTaskKey() : null;
+        if (!Objects.equals(folder.getProjectScope(), projectScope) || !Objects.equals(folderTaskKey, taskKey)) {
+            throw new IllegalArgumentException(
+                    "Folder '%s' belongs to a different project/task scope".formatted(folderName));
+        }
+        return folder;
+    }
+
+    /** No folder given -> browsing the root (folder IS NULL), matching a file-explorer model. */
+    private FolderFilter resolveFolderFilter(String folderName) {
+        return folderName != null ? new FolderFilter("IN", folderName) : new FolderFilter("ROOT", null);
+    }
+
+    private record FolderFilter(String mode, String name) {
+    }
+
     private MemoryEntryDetail toDetail(MemoryNode node) {
         List<MemoryEntrySummary> linkedTo = edgeRepository.findBySourceId(node.getId()).stream()
                 .map(MemoryEdge::getTarget)
@@ -191,6 +223,7 @@ public class MemoryService {
                 node.getContent(),
                 node.getProjectScope(),
                 node.getTask() != null ? node.getTask().getTaskKey() : null,
+                node.getFolder() != null ? node.getFolder().getName() : null,
                 node.getFilePath(),
                 node.getCreatedAt(),
                 node.getUpdatedAt(),
@@ -225,6 +258,7 @@ public class MemoryService {
                 node.getDescription(),
                 node.getProjectScope(),
                 node.getTask() != null ? node.getTask().getTaskKey() : null,
+                node.getFolder() != null ? node.getFolder().getName() : null,
                 node.getFilePath(),
                 node.getUpdatedAt()
         );

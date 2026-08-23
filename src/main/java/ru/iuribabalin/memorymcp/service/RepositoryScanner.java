@@ -79,7 +79,7 @@ public class RepositoryScanner {
             }
 
             memoryService.save(new SaveMemoryRequest(
-                    name, MemoryNode.Type.LOCATION, description, content, projectScope, null, relativePath, null));
+                    name, MemoryNode.Type.LOCATION, description, content, projectScope, null, null, relativePath, null));
             count++;
         }
         return count;
