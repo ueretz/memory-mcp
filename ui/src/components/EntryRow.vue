@@ -9,9 +9,10 @@ import { entryLocation } from '@/lib/links'
 import AppIcon from './AppIcon.vue'
 import TypeBadge from './TypeBadge.vue'
 
-const props = withDefaults(defineProps<{ entry: MemoryEntrySummary; showScope?: boolean }>(), {
-  showScope: false,
-})
+const props = withDefaults(
+  defineProps<{ entry: MemoryEntrySummary; showScope?: boolean; accessCount?: number }>(),
+  { showScope: false },
+)
 
 const to = computed(() => entryLocation(props.entry))
 
@@ -25,7 +26,8 @@ const scope = computed(() => {
   <component
     :is="to ? RouterLink : 'div'"
     :to="to ?? undefined"
-    class="group flex items-center gap-3.5 rounded-xl border border-border bg-panel px-4 py-3 transition duration-150"
+    class="group flex items-center gap-3.5 rounded-xl border border-l-2 border-border bg-panel px-3.5 py-2.5 transition duration-150"
+    :style="{ borderLeftColor: `var(--color-type-${entry.type.toLowerCase()})` }"
     :class="to ? 'hover:-translate-y-px hover:border-accent/40 hover:shadow-panel' : 'opacity-80'"
   >
     <span
@@ -48,6 +50,12 @@ const scope = computed(() => {
       <span class="mt-0.5 block truncate text-[12.5px] text-muted">{{ entry.description }}</span>
     </span>
 
+    <span
+      v-if="accessCount !== undefined"
+      class="hidden shrink-0 rounded-full bg-elevated px-2 py-0.5 text-[11px] font-medium text-muted tabular-nums sm:inline"
+    >
+      {{ accessCount }} {{ accessCount === 1 ? 'view' : 'views' }}
+    </span>
     <time
       class="hidden shrink-0 text-[12px] whitespace-nowrap text-faint sm:block"
       :datetime="entry.updatedAt"

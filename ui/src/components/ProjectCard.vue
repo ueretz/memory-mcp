@@ -3,6 +3,7 @@ import type { ProjectSummary } from '@/api/types'
 import { projectLocation } from '@/lib/links'
 
 import AppIcon from './AppIcon.vue'
+import ConstellationField from './ConstellationField.vue'
 
 defineProps<{ project: ProjectSummary }>()
 </script>
@@ -10,11 +11,9 @@ defineProps<{ project: ProjectSummary }>()
 <template>
   <RouterLink
     :to="projectLocation(project.projectScope)"
-    class="group relative overflow-hidden rounded-2xl border border-border bg-panel p-5 transition duration-200 hover:-translate-y-0.5 hover:border-accent/40 hover:shadow-panel"
+    class="group relative overflow-hidden rounded-2xl border border-border bg-panel p-4 transition duration-200 hover:-translate-y-0.5 hover:border-accent/40 hover:shadow-panel"
   >
-    <div
-      class="pointer-events-none absolute -top-16 -right-16 size-32 rounded-full bg-accent/10 opacity-0 blur-2xl transition duration-300 group-hover:opacity-100"
-    />
+    <ConstellationField class="opacity-0 transition-opacity duration-300 group-hover:opacity-100" />
 
     <div class="flex items-start justify-between gap-3">
       <span
