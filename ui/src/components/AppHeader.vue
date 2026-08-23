@@ -1,6 +1,8 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 
+import { fetchStats } from '@/api/client'
+import { useAsyncData } from '@/composables/useAsyncData'
 import { useTheme } from '@/composables/useTheme'
 
 import AppIcon from './AppIcon.vue'
@@ -16,6 +18,9 @@ onMounted(() => {
     shortcut.value = '⌘ K'
   }
 })
+
+const { data: pulse } = useAsyncData(() => fetchStats(null, null, 7))
+const eventCount = computed(() => pulse.value?.totals.totalEvents ?? null)
 </script>
 
 <template>
@@ -32,6 +37,15 @@ onMounted(() => {
     </button>
 
     <BreadcrumbBar class="min-w-0 flex-1" />
+
+    <RouterLink
+      v-if="eventCount !== null"
+      :to="{ name: 'stats' }"
+      class="hidden items-center gap-1.5 rounded-full bg-elevated px-2.5 py-1 text-[11.5px] font-medium text-muted transition hover:text-content md:inline-flex"
+    >
+      <span class="size-1.5 rounded-full bg-accent" />
+      {{ eventCount }} {{ eventCount === 1 ? 'event' : 'events' }} this week
+    </RouterLink>
 
     <button
       type="button"
