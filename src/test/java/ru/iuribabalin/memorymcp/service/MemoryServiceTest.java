@@ -43,6 +43,21 @@ class MemoryServiceTest {
     }
 
     @Test
+    void searchWithoutAFolderFindsEntriesInsideFoldersToo() {
+        folderService.create("mem-svc-test-search-project", null, "mem-svc-test-search-folder", "desc", null, "Tester");
+        memoryService.save(new SaveMemoryRequest(
+                "mem-svc-test-search-in-folder", MemoryNode.Type.PROJECT, "findable-in-folder-test description", "c",
+                "mem-svc-test-search-project", null, "mem-svc-test-search-folder", null, "Tester"));
+        memoryService.save(new SaveMemoryRequest(
+                "mem-svc-test-search-at-root", MemoryNode.Type.PROJECT, "findable-in-folder-test description", "c",
+                "mem-svc-test-search-project", null, null, null, "Tester"));
+
+        assertThat(memoryService.search("findable-in-folder-test", null, "mem-svc-test-search-project", null, null, 50))
+                .extracting(s -> s.name())
+                .containsExactlyInAnyOrder("mem-svc-test-search-in-folder", "mem-svc-test-search-at-root");
+    }
+
+    @Test
     void rejectsAFolderFromADifferentProject() {
         folderService.create("mem-svc-test-project-a", null, "mem-svc-test-a-folder", "desc", null, "Tester");
 

@@ -83,7 +83,7 @@ public class MemoryMcpTools {
             @McpToolParam(description = "Optional filter: USER, FEEDBACK, PROJECT, or REFERENCE", required = false) MemoryNode.Type type,
             @McpToolParam(description = "Optional project scope filter", required = false) String projectScope,
             @McpToolParam(description = "Optional task key filter (requires projectScope)", required = false) String taskKey,
-            @McpToolParam(description = "Folder name to restrict the search to; omit to search only entries at the root of this project/task scope", required = false) String folder,
+            @McpToolParam(description = "Folder name to restrict the search to a single folder (non-recursive); omit to search every entry in this project/task scope regardless of folder", required = false) String folder,
             @McpToolParam(description = "Max results, default 20", required = false) Integer limit) {
         List<MemoryEntrySummary> result = memoryService.search(query, type, projectScope, taskKey, folder, limit == null ? 20 : limit);
         usageEventRecorder.record(UsageEvent.Action.SEARCH, null, projectScope, taskKey, null);

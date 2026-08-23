@@ -111,7 +111,7 @@ public class MemoryService {
         int pageSize = limit > 0 ? limit : 20;
         String typeName = type != null ? type.name() : null;
         TaskFilter taskFilter = resolveTaskFilter(projectScope, taskKey);
-        FolderFilter folderFilter = resolveFolderFilter(folderName);
+        FolderFilter folderFilter = resolveSearchFolderFilter(folderName);
         return nodeRepository.search(query, typeName, projectScope, taskFilter.mode(), taskFilter.taskId(),
                         folderFilter.mode(), folderFilter.name(), PageRequest.of(0, pageSize)).stream()
                 .map(this::toSummary)
@@ -202,6 +202,11 @@ public class MemoryService {
     /** No folder given -> browsing the root (folder IS NULL), matching a file-explorer model. */
     private FolderFilter resolveFolderFilter(String folderName) {
         return folderName != null ? new FolderFilter("IN", folderName) : new FolderFilter("ROOT", null);
+    }
+
+    /** Search defaults to everywhere in scope, not root-only - unlike browsing, folders shouldn't make entries unfindable. */
+    private FolderFilter resolveSearchFolderFilter(String folderName) {
+        return folderName != null ? new FolderFilter("IN", folderName) : new FolderFilter("NONE", null);
     }
 
     private record FolderFilter(String mode, String name) {
