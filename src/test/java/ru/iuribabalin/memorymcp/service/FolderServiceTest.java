@@ -36,4 +36,25 @@ class FolderServiceTest {
                 "folder-svc-test-project-b", null, "folder-svc-test-b-child", "desc", "folder-svc-test-a-root", "Tester"))
                 .isInstanceOf(IllegalArgumentException.class);
     }
+
+    @Test
+    void rejectsReScopingAnExistingFolderToADifferentProject() {
+        folderService.create("folder-svc-test-rescope-a", null, "folder-svc-test-rescope-target", "desc", null, "Tester");
+
+        assertThatThrownBy(() -> folderService.create(
+                "folder-svc-test-rescope-b", null, "folder-svc-test-rescope-target", "desc", null, "Tester"))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void allowsUpdatingDescriptionOfAnExistingFolderInTheSameScope() {
+        folderService.create(
+                "folder-svc-test-update-project", null, "folder-svc-test-update-target", "original desc", null, "Tester");
+
+        FolderSummary updated = folderService.create(
+                "folder-svc-test-update-project", null, "folder-svc-test-update-target", "updated desc", null, "Tester");
+
+        assertThat(updated.description()).isEqualTo("updated desc");
+        assertThat(updated.projectScope()).isEqualTo("folder-svc-test-update-project");
+    }
 }

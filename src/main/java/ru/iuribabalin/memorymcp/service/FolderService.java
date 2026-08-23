@@ -29,8 +29,16 @@ public class FolderService {
         boolean isNew = folder.getId() == null;
         folder.setName(name);
         folder.setDescription(description);
-        folder.setProjectScope(projectScope);
-        folder.setTask(taskKey != null ? taskService.resolve(projectScope, taskKey) : null);
+        if (isNew) {
+            folder.setProjectScope(projectScope);
+            folder.setTask(taskKey != null ? taskService.resolve(projectScope, taskKey) : null);
+        } else {
+            String existingTaskKey = folder.getTask() != null ? folder.getTask().getTaskKey() : null;
+            if (!Objects.equals(folder.getProjectScope(), projectScope) || !Objects.equals(existingTaskKey, taskKey)) {
+                throw new IllegalArgumentException(
+                        "Folder '%s' already belongs to a different project/task scope and cannot be re-scoped".formatted(name));
+            }
+        }
         folder.setParent(resolveParent(parentFolder, projectScope, taskKey));
         if (isNew) {
             folder.setCreatedBy(createdBy);
