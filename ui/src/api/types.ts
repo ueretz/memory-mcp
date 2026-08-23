@@ -29,6 +29,7 @@ export interface MemoryEntrySummary {
   projectScope: string | null
   taskKey: string | null
   filePath: string | null
+  folder?: string | null
   updatedAt: string
 }
 
@@ -90,4 +91,14 @@ export interface StatsOverview {
   activityByDay: DailyActivity[]
   byType: TypeBreakdown[]
   topEntries: TopEntry[]
+}
+
+export interface FolderSummary {
+  name: string
+  description: string
+  projectScope: string
+  taskKey: string | null
+  parentFolder: string | null
+  createdBy: string | null
+  updatedAt: string
 }

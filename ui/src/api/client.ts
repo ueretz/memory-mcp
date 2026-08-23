@@ -1,4 +1,5 @@
 import type {
+  FolderSummary,
   GraphResponse,
   MemoryEntryDetail,
   MemoryEntrySummary,
@@ -56,11 +57,13 @@ export function fetchEntries(
   projectScope: string,
   taskKey?: string | null,
   type?: MemoryType | null,
+  folder?: string | null,
 ): Promise<MemoryEntrySummary[]> {
   return getJson('/api/memory', {
     projectScope,
     taskKey: taskKey ?? undefined,
     type: type ?? undefined,
+    folder: folder ?? undefined,
     limit: 200,
   })
 }
@@ -108,4 +111,20 @@ export function fetchStats(
     taskKey: taskKey ?? undefined,
     days,
   })
+}
+
+export function fetchFolders(
+  projectScope: string,
+  taskKey?: string | null,
+  parentFolder?: string | null,
+): Promise<FolderSummary[]> {
+  return getJson('/api/folders', {
+    projectScope,
+    taskKey: taskKey ?? undefined,
+    parent: parentFolder ?? undefined,
+  })
+}
+
+export function fetchFolder(name: string): Promise<FolderSummary> {
+  return getJson(`/api/folders/${encodeURIComponent(name)}`)
 }

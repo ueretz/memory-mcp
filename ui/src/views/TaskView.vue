@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { computed, toRef } from 'vue'
 
-import { fetchEntries, fetchTasks } from '@/api/client'
+import { fetchEntries, fetchFolders, fetchTasks } from '@/api/client'
 import AppIcon from '@/components/AppIcon.vue'
 import EmptyState from '@/components/EmptyState.vue'
 import EntryRow from '@/components/EntryRow.vue'
 import ErrorState from '@/components/ErrorState.vue'
+import FolderRow from '@/components/FolderRow.vue'
 import PageHeader from '@/components/PageHeader.vue'
 import SkeletonRows from '@/components/SkeletonRows.vue'
 import StatusBadge from '@/components/StatusBadge.vue'
@@ -23,6 +24,8 @@ const { data: entries, error, loading, reload } = useAsyncData(
 )
 
 const { data: tasks } = useAsyncData(() => fetchTasks(project.value), [project])
+
+const { data: folders } = useAsyncData(() => fetchFolders(project.value, taskKey.value, null), [project, taskKey])
 
 const task = computed(() => (tasks.value ?? []).find((item) => item.taskKey === taskKey.value) ?? null)
 </script>
@@ -47,6 +50,19 @@ const task = computed(() => (tasks.value ?? []).find((item) => item.taskKey === 
         </RouterLink>
       </template>
     </PageHeader>
+
+    <section v-if="folders?.length" class="mb-9">
+      <h2 class="mb-3 flex items-center gap-2 text-[13px] font-semibold tracking-wide text-content uppercase">
+        <AppIcon name="folder" class="size-4 text-faint" />
+        Folders
+        <span class="rounded-full bg-elevated px-1.5 py-0.5 text-[11px] font-medium text-muted tabular-nums">
+          {{ folders.length }}
+        </span>
+      </h2>
+      <div class="space-y-2">
+        <FolderRow v-for="folder in folders" :key="folder.name" :folder="folder" :project-scope="project" />
+      </div>
+    </section>
 
     <ErrorState v-if="error" :message="error" @retry="reload" />
     <SkeletonRows v-else-if="loading" :rows="3" />

@@ -23,6 +23,12 @@ export const router = createRouter({
       props: true,
     },
     {
+      path: '/p/:project/f/:folder',
+      name: 'folder',
+      component: () => import('@/views/FolderView.vue'),
+      props: true,
+    },
+    {
       path: '/p/:project/e/:name',
       name: 'entry',
       component: () => import('@/views/EntryView.vue'),
