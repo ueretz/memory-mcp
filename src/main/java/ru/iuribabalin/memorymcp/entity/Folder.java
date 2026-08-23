@@ -2,8 +2,6 @@ package ru.iuribabalin.memorymcp.entity;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
-import jakarta.persistence.EnumType;
-import jakarta.persistence.Enumerated;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
@@ -14,12 +12,8 @@ import jakarta.persistence.Table;
 import java.time.Instant;
 
 @Entity
-@Table(name = "memory_nodes")
-public class MemoryNode {
-
-    public enum Type {
-        USER, FEEDBACK, PROJECT, REFERENCE, LOCATION
-    }
+@Table(name = "folders")
+public class Folder {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -28,17 +22,10 @@ public class MemoryNode {
     @Column(nullable = false, unique = true, length = 500)
     private String name;
 
-    @Enumerated(EnumType.STRING)
-    @Column(nullable = false, length = 20)
-    private Type type;
-
     @Column(nullable = false, length = 500)
     private String description;
 
-    @Column(nullable = false, columnDefinition = "text")
-    private String content;
-
-    @Column(name = "project_scope", length = 200)
+    @Column(name = "project_scope", nullable = false, length = 200)
     private String projectScope;
 
     @ManyToOne
@@ -46,11 +33,11 @@ public class MemoryNode {
     private Task task;
 
     @ManyToOne
-    @JoinColumn(name = "folder_id")
-    private Folder folder;
+    @JoinColumn(name = "parent_id")
+    private Folder parent;
 
-    @Column(name = "file_path", length = 1000)
-    private String filePath;
+    @Column(name = "created_by", length = 300)
+    private String createdBy;
 
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
@@ -70,28 +57,12 @@ public class MemoryNode {
         this.name = name;
     }
 
-    public Type getType() {
-        return type;
-    }
-
-    public void setType(Type type) {
-        this.type = type;
-    }
-
     public String getDescription() {
         return description;
     }
 
     public void setDescription(String description) {
         this.description = description;
-    }
-
-    public String getContent() {
-        return content;
-    }
-
-    public void setContent(String content) {
-        this.content = content;
     }
 
     public String getProjectScope() {
@@ -110,20 +81,20 @@ public class MemoryNode {
         this.task = task;
     }
 
-    public Folder getFolder() {
-        return folder;
+    public Folder getParent() {
+        return parent;
     }
 
-    public void setFolder(Folder folder) {
-        this.folder = folder;
+    public void setParent(Folder parent) {
+        this.parent = parent;
     }
 
-    public String getFilePath() {
-        return filePath;
+    public String getCreatedBy() {
+        return createdBy;
     }
 
-    public void setFilePath(String filePath) {
-        this.filePath = filePath;
+    public void setCreatedBy(String createdBy) {
+        this.createdBy = createdBy;
     }
 
     public Instant getCreatedAt() {
