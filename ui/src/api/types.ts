@@ -60,3 +60,34 @@ export interface SetupInfo {
   mcpServerUrl: string
   skillInstallPath: string
 }
+
+export interface StatsTotals {
+  totalEntries: number
+  totalEvents: number
+}
+
+export interface DailyActivity {
+  day: string
+  count: number
+}
+
+export interface TypeBreakdown {
+  type: MemoryType
+  count: number
+}
+
+export interface TopEntry {
+  name: string
+  type: MemoryType
+  description: string
+  projectScope: string | null
+  taskKey: string | null
+  accessCount: number
+}
+
+export interface StatsOverview {
+  totals: StatsTotals
+  activityByDay: DailyActivity[]
+  byType: TypeBreakdown[]
+  topEntries: TopEntry[]
+}

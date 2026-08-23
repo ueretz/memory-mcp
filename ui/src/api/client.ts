@@ -5,6 +5,7 @@ import type {
   MemoryType,
   ProjectSummary,
   SetupInfo,
+  StatsOverview,
   TaskSummary,
 } from './types'
 
@@ -95,4 +96,16 @@ export function fetchGraph(
 
 export function fetchSetupInfo(): Promise<SetupInfo> {
   return getJson('/api/setup')
+}
+
+export function fetchStats(
+  projectScope?: string | null,
+  taskKey?: string | null,
+  days = 30,
+): Promise<StatsOverview> {
+  return getJson('/api/stats/overview', {
+    projectScope: projectScope ?? undefined,
+    taskKey: taskKey ?? undefined,
+    days,
+  })
 }
