@@ -32,5 +32,15 @@ FROM eclipse-temurin:25-jre
 WORKDIR /app
 COPY --from=build /workspace/build/libs/memory-mcp.jar app.jar
 
+# PDF export needs headless Chromium. `jarmode=tools extract` unpacks the fat jar onto a flat
+# classpath so Playwright's bundled installer CLI can run directly (no separate Gradle/JDK
+# needed here); `--with-deps` also apt-installs whatever OS packages *this* base image needs to
+# actually launch Chromium, so the list doesn't have to be hand-maintained.
+RUN java -Djarmode=tools -jar app.jar extract --destination /app/extracted \
+    && apt-get update \
+    && java -cp "/app/extracted/BOOT-INF/classes:/app/extracted/BOOT-INF/lib/*" \
+         com.microsoft.playwright.CLI install --with-deps chromium \
+    && rm -rf /app/extracted /var/lib/apt/lists/*
+
 EXPOSE 8080
 ENTRYPOINT ["java", "-jar", "app.jar"]

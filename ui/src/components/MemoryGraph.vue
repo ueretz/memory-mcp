@@ -45,6 +45,7 @@ const NODE_FILL: Record<MemoryType, string> = {
   PROJECT: 'fill-type-project',
   REFERENCE: 'fill-type-reference',
   LOCATION: 'fill-type-location',
+  REPORT: 'fill-type-report',
 }
 
 let simulation: Simulation<SimNode, SimulationLinkDatum<SimNode>> | null = null

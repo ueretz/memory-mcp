@@ -31,13 +31,16 @@ public class MemoryMcpTools {
                     "graph, and the response's warnings field will flag it.")
     public MemoryEntryDetail memorySave(
             @McpToolParam(description = "Unique kebab-case slug identifying this entry (use the fully-qualified class name for type=LOCATION)", required = true) String name,
-            @McpToolParam(description = "One of USER, FEEDBACK, PROJECT, REFERENCE, LOCATION", required = true) MemoryNode.Type type,
+            @McpToolParam(description = "One of USER, FEEDBACK, PROJECT, REFERENCE, LOCATION, REPORT", required = true) MemoryNode.Type type,
             @McpToolParam(description = "One-line summary shown in cheap listings", required = true) String description,
-            @McpToolParam(description = "Full markdown content; may reference other entries via [[name]]", required = true) String content,
+            @McpToolParam(description = "Full markdown content; may reference other entries via [[name]]. For type=REPORT, a full " +
+                    "self-contained HTML document instead (inline CSS/JS, no external CDN/resources) - it's rendered " +
+                    "as a real HTML page in the dashboard, not markdown-parsed", required = true) String content,
             @McpToolParam(description = "Project this entry is scoped to, auto-derived from the git repo name", required = false) String projectScope,
             @McpToolParam(description = "Task key to scope this entry to a specific task (must already exist via task_start); omit for project-level common context", required = false) String taskKey,
-            @McpToolParam(description = "Relative file path this entry points at, for type=LOCATION (e.g. a class or file you just worked on)", required = false) String filePath) {
-        return memoryService.save(new SaveMemoryRequest(name, type, description, content, projectScope, taskKey, filePath));
+            @McpToolParam(description = "Relative file path this entry points at, for type=LOCATION (e.g. a class or file you just worked on)", required = false) String filePath,
+            @McpToolParam(description = "Who created this entry, e.g. 'Name <email>' - auto-derive from `git config user.name`/`user.email` in the current repo, never ask the user for it", required = false) String createdBy) {
+        return memoryService.save(new SaveMemoryRequest(name, type, description, content, projectScope, taskKey, filePath, createdBy));
     }
 
     @McpTool(name = "memory_get",

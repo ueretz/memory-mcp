@@ -13,6 +13,7 @@ public record MemoryEntryDetail(
         String projectScope,
         String taskKey,
         String filePath,
+        String createdBy,
         Instant createdAt,
         Instant updatedAt,
         List<MemoryEntrySummary> linkedTo,

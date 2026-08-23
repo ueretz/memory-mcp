@@ -35,8 +35,23 @@ dependencies {
     implementation 'org.flywaydb:flyway-core'
     implementation 'org.flywaydb:flyway-database-postgresql'
 
+    // PDF export: commonmark renders markdown entries to HTML, Playwright prints that (or a
+    // REPORT entry's own HTML) to PDF via headless Chromium.
+    implementation 'org.commonmark:commonmark:0.30.0'
+    implementation 'com.microsoft.playwright:playwright:1.62.0'
+
     testImplementation 'org.springframework.boot:spring-boot-starter-test'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+// One-time setup for PDF export: downloads the headless Chromium build Playwright drives.
+// Re-run after bumping the playwright version above.
+tasks.register('installPlaywrightBrowsers', JavaExec) {
+    group = 'setup'
+    description = 'Downloads the Chromium browser used for HTML/Markdown PDF export.'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'com.microsoft.playwright.CLI'
+    args = ['install', 'chromium']
 }
 
 tasks.named('test') {

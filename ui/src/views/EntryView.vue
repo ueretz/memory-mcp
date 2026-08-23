@@ -10,7 +10,7 @@ import SkeletonRows from '@/components/SkeletonRows.vue'
 import TypeBadge from '@/components/TypeBadge.vue'
 import { useAsyncData } from '@/composables/useAsyncData'
 import { absoluteDateTime, relativeTime } from '@/lib/format'
-import { entryHref, entryLocation } from '@/lib/links'
+import { entryHref, entryLocation, markdownHref, pdfHref, reportLocation } from '@/lib/links'
 
 const props = defineProps<{ project: string; name: string; task?: string }>()
 
@@ -40,6 +40,8 @@ const scope = computed(() => {
   }
   return [current.projectScope, current.taskKey].filter(Boolean).join(' / ') || 'no scope'
 })
+
+const isReport = computed(() => entry.value?.type === 'REPORT')
 
 const links = computed<Array<{ title: string; items: MemoryEntrySummary[] }>>(() =>
   [
@@ -74,10 +76,32 @@ const links = computed<Array<{ title: string; items: MemoryEntrySummary[] }>>(()
             <AppIcon name="document" class="size-3.5" />
             <span class="font-mono break-all">{{ entry.filePath }}</span>
           </span>
+          <span v-if="entry.createdBy" class="inline-flex items-center gap-1.5">
+            <AppIcon name="sparkles" class="size-3.5" />
+            created by {{ entry.createdBy }}
+          </span>
           <span :title="absoluteDateTime(entry.updatedAt)" class="inline-flex items-center gap-1.5">
             <AppIcon name="refresh" class="size-3.5" />
             updated {{ relativeTime(entry.updatedAt) }}
           </span>
+        </div>
+
+        <div class="mt-4 flex flex-wrap items-center gap-2">
+          <a
+            :href="pdfHref(entry.name)"
+            class="inline-flex items-center gap-1.5 rounded-lg border border-border bg-panel px-2.5 py-1.5 text-[12.5px] text-content transition hover:border-accent/40 hover:text-accent"
+          >
+            <AppIcon name="download" class="size-3.5" />
+            Download PDF
+          </a>
+          <a
+            v-if="!isReport"
+            :href="markdownHref(entry.name)"
+            class="inline-flex items-center gap-1.5 rounded-lg border border-border bg-panel px-2.5 py-1.5 text-[12.5px] text-content transition hover:border-accent/40 hover:text-accent"
+          >
+            <AppIcon name="download" class="size-3.5" />
+            Download .md
+          </a>
         </div>
       </header>
 
@@ -91,7 +115,23 @@ const links = computed<Array<{ title: string; items: MemoryEntrySummary[] }>>(()
         </ul>
       </div>
 
-      <MarkdownBody :content="entry.content" :resolve-link="resolveLink" />
+      <RouterLink
+        v-if="isReport"
+        :to="reportLocation(entry) ?? {}"
+        class="group flex items-center gap-4 rounded-2xl border border-border bg-panel px-5 py-5 transition hover:border-accent/40"
+      >
+        <span class="flex size-11 shrink-0 items-center justify-center rounded-xl bg-type-report/10 text-type-report">
+          <AppIcon name="document" class="size-5" />
+        </span>
+        <span class="min-w-0 flex-1">
+          <span class="block text-[14px] font-semibold text-content">Open report</span>
+          <span class="block text-[12.5px] text-muted">
+            Reads full-screen on its own page, with its own layout and scripts sandboxed
+          </span>
+        </span>
+        <AppIcon name="enter" class="size-4 shrink-0 text-faint transition group-hover:text-accent" />
+      </RouterLink>
+      <MarkdownBody v-else :content="entry.content" :resolve-link="resolveLink" />
 
       <section v-for="group in links" :key="group.title" class="mt-8">
         <h2 class="mb-2.5 flex items-center gap-2 text-[12px] font-semibold tracking-wide text-muted uppercase">

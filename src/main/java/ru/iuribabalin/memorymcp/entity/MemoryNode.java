@@ -18,7 +18,7 @@ import java.time.Instant;
 public class MemoryNode {
 
     public enum Type {
-        USER, FEEDBACK, PROJECT, REFERENCE, LOCATION
+        USER, FEEDBACK, PROJECT, REFERENCE, LOCATION, REPORT
     }
 
     @Id
@@ -47,6 +47,9 @@ public class MemoryNode {
 
     @Column(name = "file_path", length = 1000)
     private String filePath;
+
+    @Column(name = "created_by", length = 300)
+    private String createdBy;
 
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
@@ -112,6 +115,14 @@ public class MemoryNode {
 
     public void setFilePath(String filePath) {
         this.filePath = filePath;
+    }
+
+    public String getCreatedBy() {
+        return createdBy;
+    }
+
+    public void setCreatedBy(String createdBy) {
+        this.createdBy = createdBy;
     }
 
     public Instant getCreatedAt() {

@@ -18,8 +18,11 @@ MCP-сервер для Claude Code, дающий агенту **долговр�
 - нет единой точки для нескольких агентов/проектов, если понадобится расшириться.
 
 `memory-mcp` заменяет файловое хранилище на Postgres, сохраняя категории записей
-(`USER/FEEDBACK/PROJECT/REFERENCE/LOCATION`) и идею связей между ними, но даёт агенту
+(`USER/FEEDBACK/PROJECT/REFERENCE/LOCATION/REPORT`) и идею связей между ними, но даёт агенту
 типизированный API, иерархию проект/задача, автоматический индекс кода и дашборд для просмотра.
+Отдельно — тип `REPORT`: агент может собрать полноценный HTML-отчёт и сохранить его в память
+как готовую страницу вместо файла в проекте, а человек открывает его в дашборде или скачивает
+как PDF.
 
 ## Стек технологий
 
@@ -35,6 +38,7 @@ MCP-сервер для Claude Code, дающий агенту **долговр�
 | Сборка | Gradle (Groovy DSL) | wrapper в репозитории | `bootJar` собирает fat-jar `memory-mcp.jar` |
 | Логирование | Logback (`logback-spring.xml`) | — | Обычный цветной вывод в stdout — больше нет ограничений stdio-транспорта |
 | Веб-слой (дашборд + MCP) | Spring MVC (`spring-boot-starter-web`) + embedded Tomcat | — | Один и тот же порт 8080 отдаёт и REST API дашборда, и `/mcp` |
+| PDF-экспорт | Playwright (Java) + commonmark-java | 1.62.0 / 0.30.0 | Headless Chromium печатает HTML (REPORT — как есть, остальное — после рендера markdown→HTML через commonmark) в PDF |
 | Фронтенд дашборда | Vue 3 (SFC, `<script setup>` + TypeScript) + Vue Router + Vite + Tailwind CSS | Vue 3.5 / Router 5 / Vite 8 / Tailwind 4 | Отдельный проект `ui/`, собирается Gradle-задачей `buildUi` и упаковывается в jar как `static/`; граф — `d3-force`; markdown — `marked` + `DOMPurify` |
 | Контейнеризация | Docker (многостадийный `Dockerfile`) + Docker Compose | — | `docker compose up -d --build` поднимает и Postgres, и сам сервис (дашборд + MCP) как долгоживущий контейнер |
 
@@ -42,14 +46,16 @@ MCP-сервер для Claude Code, дающий агенту **долговр�
 
 ### Модель данных
 
-Три таблицы, миграции `src/main/resources/db/migration/V1..V3`:
+Три таблицы, миграции `src/main/resources/db/migration/V1..V4`:
 
 - **`memory_nodes`** — сама запись памяти: `name` (уникальный slug, до 500 символов — для
   `LOCATION`-записей это может быть полное имя класса), `type`
-  (`USER`/`FEEDBACK`/`PROJECT`/`REFERENCE`/`LOCATION`), `description` (короткое summary для
-  дешёвых списков), `content` (полный markdown), `project_scope`, `task_id` (nullable FK на
-  `tasks`), `file_path` (nullable, для `LOCATION`), `search_vector` — генерируемая колонка
-  `tsvector` (name/description/content с весами A/B/C) с GIN-индексом для полнотекстового поиска.
+  (`USER`/`FEEDBACK`/`PROJECT`/`REFERENCE`/`LOCATION`/`REPORT`), `description` (короткое summary
+  для дешёвых списков), `content` (полный markdown, а для `REPORT` — целиком самодостаточный
+  HTML-документ), `project_scope`, `task_id` (nullable FK на `tasks`), `file_path` (nullable, для
+  `LOCATION`), `created_by` (nullable, "Имя <email>", резолвится агентом из `git config`),
+  `search_vector` — генерируемая колонка `tsvector` (name/description/content с весами A/B/C) с
+  GIN-индексом для полнотекстового поиска.
 - **`memory_edges`** — связи, извлечённые из `[[other-name]]` внутри `content` (regex поддерживает
   и точки — для `[[fully.qualified.ClassName]]`). `target_id` nullable: если запись ссылается на
   ещё не существующую сущность, связь остаётся "висячей" и **самоисцеляется** при создании нужной
@@ -69,8 +75,11 @@ Java-слой (`ru.iuribabalin.memorymcp`):
 - `service/TaskService` — start (upsert)/list/close задач;
 - `service/ProjectService` — агрегация списка проектов со счётчиками;
 - `service/RepositoryScanner` — обход дерева проекта и построение `LOCATION`-записей (см. ниже);
-- `dto/` — `MemoryEntrySummary`/`MemoryEntryDetail` (включая `projectScope`/`taskKey`/`filePath`),
-  `GraphResponse`, `TaskSummary`, `ProjectSummary`, `SetupInfo`.
+- `service/MemoryExportService` + `service/PdfRenderer` — экспорт записи в PDF/markdown (см.
+  "PDF-экспорт" ниже);
+- `dto/` — `MemoryEntrySummary`/`MemoryEntryDetail` (включая
+  `projectScope`/`taskKey`/`filePath`/`createdBy`), `GraphResponse`, `TaskSummary`,
+  `ProjectSummary`, `SetupInfo`.
 
 ### Иерархия Project → Task → Записи
 
@@ -110,7 +119,7 @@ Java-слой (`ru.iuribabalin.memorymcp`):
 
 | Инструмент | Параметры | Возвращает |
 |---|---|---|
-| `memory_save` | `name`, `type`, `description`, `content`, `projectScope?`, `taskKey?`, `filePath?` | Upsert по имени, парсит `[[links]]` |
+| `memory_save` | `name`, `type`, `description`, `content`, `projectScope?`, `taskKey?`, `filePath?`, `createdBy?` | Upsert по имени, парсит `[[links]]`. Для `type=REPORT` `content` — самодостаточный HTML вместо markdown |
 | `memory_get` | `name` | Полная запись + `linkedTo`/`linkedFrom` |
 | `memory_list` | `type?`, `projectScope?`, `taskKey?`, `limit?`, `offset?` | Дешёвый список (без содержимого); без `taskKey` — только common-записи проекта |
 | `memory_search` | `query`, `type?`, `projectScope?`, `taskKey?`, `limit?` | Полнотекстовый поиск, тот же дешёвый формат |
@@ -127,8 +136,10 @@ Java-слой (`ru.iuribabalin.memorymcp`):
 Без авторизации (рассчитано на localhost-only персональное использование):
 `GET /api/projects`, `GET /api/projects/{scope}/tasks`, `GET /api/memory`,
 `GET /api/memory/{name}`, `GET /api/memory/search?q=`, `GET /api/memory/graph`,
-`GET /api/setup`, `GET /api/setup/skill`. `ApiExceptionHandler` превращает отсутствие
-записи/задачи в HTTP 404 вместо 500.
+`GET /api/memory/{name}/pdf`, `GET /api/memory/{name}/markdown`, `GET /api/setup`,
+`GET /api/setup/skill`. `ApiExceptionHandler` превращает отсутствие записи/задачи в HTTP 404,
+экспорт markdown у `REPORT`-записи — в 400, а сбой рендера PDF — в 500 (вместо голого 500 без
+объяснения).
 
 ### Веб-дашборд
 
@@ -142,7 +153,15 @@ SPA на Vue 3 (`ui/`, history-роутинг через `vue-router`; `SpaForwa
   записи в стиле Confluence: markdown рендерится через `marked` (GFM: таблицы, чеклисты, код) и
   санитизируется `DOMPurify`; `[[wiki-links]]` — собственное inline-расширение `marked`, которое
   резолвит имя в реальную связь записи (нерезолвленные видны как приглушённый чип), плюс блоки
-  "Links to"/"Linked from";
+  "Links to"/"Linked from". На любой странице записи есть кнопка **Download PDF**
+  (`GET /api/memory/{name}/pdf`), а для не-REPORT записей — ещё и **Download .md**
+  (`GET /api/memory/{name}/markdown`);
+- `/p/{projectScope}/e/{entryName}/report` и `/p/{projectScope}/t/{taskKey}/e/{entryName}/report`
+  — записи `type=REPORT` открываются не инлайново, а на отдельной full-bleed странице (роут с
+  `meta.bare`, `App.vue` пропускает сайдбар/хедер/колонку контента для неё): весь экран занимает
+  `<iframe sandbox="allow-scripts" srcdoc="...">` с сохранённым HTML, сверху только тонкий бар
+  (имя, тип, "Download PDF", ссылка назад). На обычной странице записи для REPORT вместо контента
+  — карточка-ссылка "Open report" на эту страницу;
 - `/p/{projectScope}/graph` и `/p/{projectScope}/t/{taskKey}/graph` — кнопка **Graph** на странице
   проекта/задачи открывает силовой граф записей на `d3-force` (SVG): перетаскивание узлов, зум и
   панорамирование (`d3-zoom`), радиус узла зависит от числа связей, подсветка соседних рёбер при
@@ -158,6 +177,24 @@ SPA на Vue 3 (`ui/`, history-роутинг через `vue-router`; `SpaForwa
 стрелками), переключатель светлой/тёмной темы с запоминанием выбора. Тема и вся палитра —
 CSS-переменные, перенесённые в Tailwind через `@theme inline` (`ui/src/styles/main.css`), поэтому
 цвета типов/статусов задаются в одном месте.
+
+### PDF-экспорт
+
+`GET /api/memory/{name}/pdf` печатает запись в PDF через headless Chromium (Playwright):
+для `REPORT` — как есть (это уже цельный HTML-документ), для остальных типов —
+`MemoryExportService` сначала рендерит markdown в HTML через `commonmark-java` и оборачивает в
+минимальную печатную стилизацию. Браузер поднимается лениво при первом запросе и живёт в одном
+выделенном потоке (`PdfRenderer`) — Playwright требует, чтобы все вызовы шли с того потока, что
+его создал.
+
+Разово нужно скачать сам Chromium (~300 МБ), которым управляет Playwright:
+
+```bash
+./gradlew installPlaywrightBrowsers
+```
+
+Без этого шага `/pdf` вернёт 500 с понятным сообщением, что нужно выполнить эту команду. Внутри
+Docker-образа (`Dockerfile`) шаг уже встроен в сборку — для варианта A ничего делать не нужно.
 
 ### Разработка UI
 
@@ -245,16 +282,19 @@ src/main/java/ru/iuribabalin/memorymcp/
 ├── entity/                        — MemoryNode, MemoryEdge, Task
 ├── repository/                    — Spring Data репозитории + нативные FTS/edge-запросы
 ├── service/                       — LinkParser, MemoryService, TaskService, ProjectService,
-│                                     RepositoryScanner, *NotFoundException
+│                                     RepositoryScanner, MemoryExportService, PdfRenderer,
+│                                     *NotFoundException, PdfRenderException, UnsupportedExportException
 ├── dto/                           — Summary/Detail/Graph/Task/Project/Setup DTO
 ├── mcp/                           — MemoryMcpTools, TaskMcpTools, CodeMapMcpTools (11 @McpTool)
-└── ui/                            — MemoryViewController, ProjectViewController,
-                                      SetupController, ApiExceptionHandler (read-only REST)
+└── ui/                            — MemoryViewController, MemoryExportController,
+                                      ProjectViewController, SetupController, ApiExceptionHandler
+                                      (read-only REST + PDF/markdown export)
 
 src/main/resources/
 ├── application.yml                — единый конфиг, MCP-транспорт streamable HTTP (protocol: streamable)
 ├── logback-spring.xml             — обычный цветной вывод в stdout
-├── db/migration/                  — V1 (nodes/edges), V2 (tasks), V3 (LOCATION + file_path)
+├── db/migration/                  — V1 (nodes/edges), V2 (tasks), V3 (LOCATION + file_path),
+│                                     V4 (REPORT + created_by)
 └── skill/SKILL.md                 — скилл для агента (также раздаётся через /api/setup/skill)
 
 ui/                                — фронтенд-проект (Vue 3 + Vite + Tailwind), собирается в static/
@@ -263,7 +303,7 @@ ui/                                — фронтенд-проект (Vue 3 + Vi
 ├── src/api/                       — types.ts (зеркало DTO бэкенда) + client.ts (типизированный fetch)
 ├── src/components/                — оболочка (сайдбар, шапка, палитра поиска, крошки) и элементы
 │                                     списков/карточек, MemoryGraph.vue (d3-force), MarkdownBody.vue
-├── src/views/                     — Projects/Project/Task/Entry/Graph/Setup/NotFound
+├── src/views/                     — Projects/Project/Task/Entry/Report/Graph/Setup/NotFound
 ├── src/composables/               — useAsyncData (загрузка + гонки запросов), useTheme
 ├── src/lib/                       — links.ts (маршруты записей), markdown.ts, format.ts
 └── src/styles/main.css            — дизайн-токены (светлая/тёмная) + стили markdown
@@ -294,3 +334,10 @@ streamable HTTP, REST API, полный дашборд, регистрация �
       как настоящий силовой граф (`d3-force` + SVG), с
       перетаскиванием узлов, зумом/паном и фильтром по типу (включая `LOCATION`), а не только
       дерево/списки
+- [x] Тип записи `REPORT` — агент сохраняет готовый самодостаточный HTML-отчёт в память вместо
+      файла в проекте, читается на отдельной full-bleed странице (`.../e/{name}/report`) вместо
+      обычной страницы записи
+- [x] Экспорт любой записи в PDF (`GET /api/memory/{name}/pdf`, headless Chromium через
+      Playwright) и экспорт не-REPORT записей в исходный `.md` (`GET /api/memory/{name}/markdown`)
+- [x] Поле `createdBy` — агент резолвит автора из `git config user.name`/`user.email` и передаёт
+      его в `memory_save`, без вопросов пользователю

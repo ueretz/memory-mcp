@@ -19,6 +19,42 @@ in a local dashboard - so prefer these tools over writing memory markdown files 
 
 Never ask the user what the project is - this should be invisible to them.
 
+## Determine createdBy automatically - never ask for it
+`createdBy` records who authored an entry. Resolve it yourself before every `memory_save`:
+`git config user.name` and `git config user.email` in the current repo, combined as
+`"Name <email>"`. If either is unset, pass whatever you have (or omit it) - don't prompt the
+user for their identity.
+
+## MANDATORY: any file you generate for the project goes in memory, not on disk
+
+This is a hard rule, not a preference. Any time you're about to `Write` a **new** file that
+*you* generated - your own notes, a plan, a summary, an analysis, a review writeup, a changelog
+draft, a checklist, a design doc, a report - you are **required** to save it via `memory_save`
+instead. Not "prefer to," not "usually" - required, every time, no exceptions besides the one
+below. This applies everywhere, not just mid-task: brainstorming, planning, answering a
+question, reviewing code, anything. If you catch yourself reaching for `Write`/`Edit` to create
+a file for something that isn't code the user asked you to ship, stop - this rule fires.
+
+1. **Markdown content** (notes, plans, summaries, analysis, checklists, writeups) ->
+   `memory_save` with `type: "PROJECT"` (or task-scoped if a `taskKey` is set).
+2. **A full report** (HTML, with tables/charts/styling - anything you'd otherwise hand the user
+   as a standalone HTML file) -> `memory_save` with `type: "REPORT"` and `content` set to a
+   **full self-contained HTML document**: inline all CSS/JS, no external CDN scripts or
+   stylesheets, embed images as data URIs. Same constraint as an Artifact - it has to render
+   correctly with nothing but the HTML itself. REPORT content is rendered as a real HTML page
+   (sandboxed iframe), not markdown-parsed.
+3. Tell the user it's saved and give them the dashboard link instead of a file path - never a
+   path, always this:
+   - project-level: `http://<host>:<port>/p/<projectScope>/e/<name>`
+   - task-scoped: `http://<host>:<port>/p/<projectScope>/t/<taskKey>/e/<name>`
+   - use the host/port the MCP server is actually running on (default `http://localhost:8080`).
+   For REPORT entries, mention they can also download it as a PDF from that page (a
+   "Download PDF" button backed by `GET /api/memory/{name}/pdf`, works for any entry type).
+
+**The only exception:** the user explicitly asked for a file - a source file the app needs to
+run, or a deliverable they said to commit/ship. If you're unsure whether something is "your own
+notes/output" or a real requested deliverable, treat it as notes - default to memory.
+
 ## Determine task scope - always ask explicitly
 
 At the start of any substantive piece of work, **always ask the user explicitly** whether
@@ -99,12 +135,16 @@ specific classes, you can also save/update a single location directly via
 - **PROJECT** - durable facts about the product/codebase being built (see above).
 - **REFERENCE** - pointers to where information lives in external systems.
 - **LOCATION** - where a class or file lives in the project (see "Code locations" above).
+- **REPORT** - a full self-contained HTML document (see "HTML reports" above), rendered as a
+  real page in the dashboard rather than markdown.
 
 ## Tools
 
-- `memory_save(name, type, description, content, projectScope?, taskKey?, filePath?)` - upsert
-  by name. `content` may reference other entries via `[[other-entry-name]]` - these become graph
-  links. For `type: "LOCATION"`, use the fully-qualified class name as `name` when applicable.
+- `memory_save(name, type, description, content, projectScope?, taskKey?, filePath?, createdBy?)` -
+  upsert by name. `content` may reference other entries via `[[other-entry-name]]` - these become
+  graph links. For `type: "LOCATION"`, use the fully-qualified class name as `name`. For
+  `type: "REPORT"`, `content` is a full self-contained HTML document instead of markdown. Pass
+  `createdBy` every time, resolved as described above.
 - `memory_get(name)` - full content of one entry, plus what it links to/from.
 - `memory_list(type?, projectScope?, taskKey?, limit?, offset?)` - cheap index (no content).
   With `projectScope` and no `taskKey`, lists the project's common entries. With both, lists

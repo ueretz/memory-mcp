@@ -16,6 +16,20 @@ export function entryLocation(entry: {
     : { name: 'entry', params: { project: entry.projectScope, name: entry.name } }
 }
 
+/** Where a REPORT entry's full-bleed reading page lives - distinct from its metadata page. */
+export function reportLocation(entry: {
+  name: string
+  projectScope?: string | null
+  taskKey?: string | null
+}): RouteLocationRaw | null {
+  if (!entry.projectScope) {
+    return null
+  }
+  return entry.taskKey
+    ? { name: 'task-entry-report', params: { project: entry.projectScope, task: entry.taskKey, name: entry.name } }
+    : { name: 'entry-report', params: { project: entry.projectScope, name: entry.name } }
+}
+
 export function projectLocation(projectScope: string): RouteLocationRaw {
   return { name: 'project', params: { project: projectScope } }
 }
@@ -41,4 +55,12 @@ export function entryHref(
   const base = `/p/${encodeURIComponent(project)}`
   const task = entry.taskKey ? `/t/${encodeURIComponent(entry.taskKey)}` : ''
   return `${base}${task}/e/${encodeURIComponent(entry.name)}`
+}
+
+export function pdfHref(name: string): string {
+  return `/api/memory/${encodeURIComponent(name)}/pdf`
+}
+
+export function markdownHref(name: string): string {
+  return `/api/memory/${encodeURIComponent(name)}/markdown`
 }

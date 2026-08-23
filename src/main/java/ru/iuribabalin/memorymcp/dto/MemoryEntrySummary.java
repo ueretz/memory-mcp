@@ -11,6 +11,7 @@ public record MemoryEntrySummary(
         String projectScope,
         String taskKey,
         String filePath,
+        String createdBy,
         Instant updatedAt
 ) {
 }

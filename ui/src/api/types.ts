@@ -1,6 +1,6 @@
 /** Mirrors the records in ru.iuribabalin.memorymcp.dto — keep in sync with the backend. */
 
-export const MEMORY_TYPES = ['USER', 'FEEDBACK', 'PROJECT', 'REFERENCE', 'LOCATION'] as const
+export const MEMORY_TYPES = ['USER', 'FEEDBACK', 'PROJECT', 'REFERENCE', 'LOCATION', 'REPORT'] as const
 
 export type MemoryType = (typeof MEMORY_TYPES)[number]
 
@@ -29,6 +29,7 @@ export interface MemoryEntrySummary {
   projectScope: string | null
   taskKey: string | null
   filePath: string | null
+  createdBy: string | null
   updatedAt: string
 }
 

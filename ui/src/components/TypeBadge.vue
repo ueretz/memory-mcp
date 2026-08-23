@@ -14,6 +14,7 @@ const DOT: Record<MemoryType, string> = {
   PROJECT: 'bg-type-project',
   REFERENCE: 'bg-type-reference',
   LOCATION: 'bg-type-location',
+  REPORT: 'bg-type-report',
 }
 
 const PILL: Record<MemoryType, string> = {
@@ -22,6 +23,7 @@ const PILL: Record<MemoryType, string> = {
   PROJECT: 'text-type-project bg-type-project/10 ring-type-project/20',
   REFERENCE: 'text-type-reference bg-type-reference/10 ring-type-reference/20',
   LOCATION: 'text-type-location bg-type-location/10 ring-type-location/20',
+  REPORT: 'text-type-report bg-type-report/10 ring-type-report/20',
 }
 
 const dotClass = computed(() => DOT[props.type])

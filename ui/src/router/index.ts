@@ -2,6 +2,13 @@ import { createRouter, createWebHistory } from 'vue-router'
 
 import ProjectsView from '@/views/ProjectsView.vue'
 
+declare module 'vue-router' {
+  interface RouteMeta {
+    /** Full-bleed page: App.vue skips the sidebar/header/content column for these. */
+    bare?: boolean
+  }
+}
+
 /**
  * Paths are mirrored by SpaForwardController on the backend — adding a new top-level
  * prefix here means adding it there too, or a hard refresh will 404.
@@ -29,6 +36,13 @@ export const router = createRouter({
       props: true,
     },
     {
+      path: '/p/:project/e/:name/report',
+      name: 'entry-report',
+      component: () => import('@/views/ReportView.vue'),
+      props: true,
+      meta: { bare: true },
+    },
+    {
       path: '/p/:project/t/:task',
       name: 'task',
       component: () => import('@/views/TaskView.vue'),
@@ -45,6 +59,13 @@ export const router = createRouter({
       name: 'task-entry',
       component: () => import('@/views/EntryView.vue'),
       props: true,
+    },
+    {
+      path: '/p/:project/t/:task/e/:name/report',
+      name: 'task-entry-report',
+      component: () => import('@/views/ReportView.vue'),
+      props: true,
+      meta: { bare: true },
     },
     { path: '/setup', name: 'setup', component: () => import('@/views/SetupView.vue') },
     { path: '/:pathMatch(.*)*', name: 'not-found', component: () => import('@/views/NotFoundView.vue') },

@@ -48,6 +48,7 @@ public class MemoryService {
         node.setContent(request.content());
         node.setProjectScope(request.projectScope());
         node.setFilePath(request.filePath());
+        node.setCreatedBy(request.createdBy());
         if (request.taskKey() != null) {
             if (request.projectScope() == null) {
                 throw new IllegalArgumentException("projectScope is required when taskKey is set");
@@ -192,6 +193,7 @@ public class MemoryService {
                 node.getProjectScope(),
                 node.getTask() != null ? node.getTask().getTaskKey() : null,
                 node.getFilePath(),
+                node.getCreatedBy(),
                 node.getCreatedAt(),
                 node.getUpdatedAt(),
                 linkedTo,
@@ -226,6 +228,7 @@ public class MemoryService {
                 node.getProjectScope(),
                 node.getTask() != null ? node.getTask().getTaskKey() : null,
                 node.getFilePath(),
+                node.getCreatedBy(),
                 node.getUpdatedAt()
         );
     }

@@ -24,6 +24,7 @@
   --c-project: #2563eb;
   --c-reference: #c026d3;
   --c-location: #64748b;
+  --c-report: #e11d48;
 
   --c-active: #1d6fd8;
   --c-done: #6b7280;
@@ -52,6 +53,7 @@
   --c-project: #60a5fa;
   --c-reference: #e879f9;
   --c-location: #94a3b8;
+  --c-report: #fb7185;
 
   --c-active: #60a5fa;
   --c-done: #8b8b9e;
@@ -78,6 +80,7 @@
   --color-type-project: var(--c-project);
   --color-type-reference: var(--c-reference);
   --color-type-location: var(--c-location);
+  --color-type-report: var(--c-report);
 
   --color-status-active: var(--c-active);
   --color-status-done: var(--c-done);
