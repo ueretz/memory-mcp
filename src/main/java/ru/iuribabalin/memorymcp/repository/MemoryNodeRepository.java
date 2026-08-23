@@ -88,7 +88,7 @@ public interface MemoryNodeRepository extends JpaRepository<MemoryNode, Long> {
 
     @Query(value = """
             select n.name as name, n.type as type, n.description as description,
-                   n.project_scope as projectScope, t.task_key as taskKey, count(ue.id) as cnt
+                   n.project_scope as "projectScope", t.task_key as "taskKey", count(ue.id) as cnt
             from memory_nodes n
             join usage_events ue on ue.entry_name = n.name
             left join tasks t on t.id = n.task_id

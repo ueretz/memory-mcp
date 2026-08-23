@@ -46,5 +46,7 @@ class StatsServiceTest {
         assertThat(overview.topEntries()).hasSize(1);
         assertThat(overview.topEntries().get(0).name()).isEqualTo("stats-test-entry");
         assertThat(overview.topEntries().get(0).accessCount()).isEqualTo(1);
+        assertThat(overview.topEntries().get(0).projectScope()).isEqualTo("stats-test-project");
+        assertThat(overview.topEntries().get(0).taskKey()).isNull();
     }
 }
