@@ -16,7 +16,7 @@ import java.time.Instant;
 public class UsageEvent {
 
     public enum Action {
-        SAVE, GET, LIST, SEARCH, GRAPH, RELATED, DELETE, TASK_START, TASK_CLOSE
+        SAVE, GET, LIST, SEARCH, GRAPH, RELATED, DELETE, TASK_START, TASK_CLOSE, FOLDER_CREATE
     }
 
     @Id
