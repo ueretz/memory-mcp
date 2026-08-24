@@ -29,13 +29,13 @@ const stats = computed(() => {
       subtitle="Every project memory-mcp has stored long-term context for."
     />
 
-    <div v-if="projects?.length" class="mb-7 grid grid-cols-3 gap-3">
+    <div v-if="projects?.length" class="mb-7 grid grid-cols-3 gap-4">
       <div
         v-for="stat in stats"
         :key="stat.label"
-        class="rounded-xl border border-border bg-panel px-4 py-3"
+        class="rounded-2xl border border-border bg-panel px-4 py-3.5"
       >
-        <p class="text-xl font-semibold tracking-tight text-content tabular-nums">{{ stat.value }}</p>
+        <p class="text-2xl font-semibold tracking-tight text-content tabular-nums">{{ stat.value }}</p>
         <p class="mt-0.5 text-[12px] text-muted">{{ stat.label }}</p>
       </div>
     </div>
@@ -51,7 +51,7 @@ const stats = computed(() => {
       hint="Save a memory entry from Claude Code and the project shows up here."
     />
 
-    <div v-else class="grid gap-3 sm:grid-cols-2">
+    <div v-else class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
       <ProjectCard v-for="project in projects ?? []" :key="project.projectScope" :project="project" />
     </div>
   </div>

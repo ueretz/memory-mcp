@@ -4,9 +4,9 @@ import { computed, toRef } from 'vue'
 import { fetchEntries, fetchFolder, fetchFolders } from '@/api/client'
 import AppIcon from '@/components/AppIcon.vue'
 import EmptyState from '@/components/EmptyState.vue'
-import EntryRow from '@/components/EntryRow.vue'
+import EntryCard from '@/components/EntryCard.vue'
 import ErrorState from '@/components/ErrorState.vue'
-import FolderRow from '@/components/FolderRow.vue'
+import FolderCard from '@/components/FolderCard.vue'
 import PageHeader from '@/components/PageHeader.vue'
 import SkeletonRows from '@/components/SkeletonRows.vue'
 import { useAsyncData } from '@/composables/useAsyncData'
@@ -68,8 +68,8 @@ const backLink = computed(() => {
         </h2>
         <SkeletonRows v-if="subfoldersLoading" :rows="2" />
         <EmptyState v-else-if="!subfolders?.length" icon="folder" title="No subfolders" />
-        <div v-else class="space-y-2">
-          <FolderRow v-for="sub in subfolders" :key="sub.name" :folder="sub" :project-scope="project" />
+        <div v-else class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <FolderCard v-for="sub in subfolders" :key="sub.name" :folder="sub" :project-scope="project" />
         </div>
       </section>
 
@@ -81,8 +81,8 @@ const backLink = computed(() => {
         <ErrorState v-if="entriesError" :message="entriesError" @retry="reload" />
         <SkeletonRows v-else-if="entriesLoading" :rows="3" />
         <EmptyState v-else-if="!entries?.length" icon="document" title="No entries in this folder yet" />
-        <div v-else class="space-y-2">
-          <EntryRow v-for="entry in entries" :key="entry.name" :entry="entry" />
+        <div v-else class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <EntryCard v-for="entry in entries" :key="entry.name" :entry="entry" />
         </div>
       </section>
     </template>

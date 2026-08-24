@@ -11,35 +11,35 @@ defineProps<{ project: ProjectSummary }>()
 <template>
   <RouterLink
     :to="projectLocation(project.projectScope)"
-    class="group relative overflow-hidden rounded-2xl border border-border bg-panel p-4 transition duration-200 hover:-translate-y-0.5 hover:border-accent/40 hover:shadow-panel"
+    class="group flex flex-col overflow-hidden rounded-2xl border border-border bg-panel transition duration-200 hover:-translate-y-1 hover:border-accent/40 hover:shadow-panel"
   >
-    <ConstellationField class="opacity-0 transition-opacity duration-300 group-hover:opacity-100" />
-
-    <div class="flex items-start justify-between gap-3">
-      <span
-        class="flex size-10 items-center justify-center rounded-xl border border-border bg-elevated text-muted transition group-hover:border-accent/30 group-hover:text-accent"
-      >
-        <AppIcon name="folder" class="size-5" />
-      </span>
+    <div
+      class="relative flex h-24 shrink-0 items-center justify-center overflow-hidden"
+      style="background: linear-gradient(135deg, color-mix(in oklab, var(--color-accent) 24%, transparent), color-mix(in oklab, var(--color-accent) 6%, transparent))"
+    >
+      <ConstellationField :density="22" class="opacity-0 transition-opacity duration-300 group-hover:opacity-100" />
+      <AppIcon name="sparkles" class="relative size-9 text-accent" />
       <AppIcon
         name="chevron"
-        class="size-4 text-faint transition group-hover:translate-x-0.5 group-hover:text-accent"
+        class="absolute top-2.5 right-2.5 size-4 text-accent/60 transition group-hover:translate-x-0.5 group-hover:text-accent"
       />
     </div>
 
-    <h3 class="mt-4 truncate text-[15px] font-semibold tracking-tight text-content">
-      {{ project.projectScope }}
-    </h3>
+    <div class="flex flex-1 flex-col gap-1.5 p-3.5">
+      <h3 class="truncate text-[14.5px] font-semibold tracking-tight text-content">
+        {{ project.projectScope }}
+      </h3>
 
-    <div class="mt-3 flex items-center gap-4 text-[12.5px] text-muted">
-      <span class="inline-flex items-center gap-1.5">
-        <AppIcon name="document" class="size-3.5 text-faint" />
-        {{ project.commonEntryCount }} common
-      </span>
-      <span class="inline-flex items-center gap-1.5">
-        <AppIcon name="task" class="size-3.5 text-faint" />
-        {{ project.taskCount }} {{ project.taskCount === 1 ? 'task' : 'tasks' }}
-      </span>
+      <div class="mt-auto flex items-center gap-4 pt-2.5 text-[12px] text-muted">
+        <span class="inline-flex items-center gap-1.5">
+          <AppIcon name="document" class="size-3.5 text-faint" />
+          {{ project.commonEntryCount }} common
+        </span>
+        <span class="inline-flex items-center gap-1.5">
+          <AppIcon name="task" class="size-3.5 text-faint" />
+          {{ project.taskCount }} {{ project.taskCount === 1 ? 'task' : 'tasks' }}
+        </span>
+      </div>
     </div>
   </RouterLink>
 </template>

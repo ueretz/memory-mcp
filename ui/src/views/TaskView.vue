@@ -4,9 +4,9 @@ import { computed, toRef } from 'vue'
 import { fetchEntries, fetchFolders, fetchTasks } from '@/api/client'
 import AppIcon from '@/components/AppIcon.vue'
 import EmptyState from '@/components/EmptyState.vue'
-import EntryRow from '@/components/EntryRow.vue'
+import EntryCard from '@/components/EntryCard.vue'
 import ErrorState from '@/components/ErrorState.vue'
-import FolderRow from '@/components/FolderRow.vue'
+import FolderCard from '@/components/FolderCard.vue'
 import PageHeader from '@/components/PageHeader.vue'
 import SkeletonRows from '@/components/SkeletonRows.vue'
 import StatusBadge from '@/components/StatusBadge.vue'
@@ -59,8 +59,8 @@ const task = computed(() => (tasks.value ?? []).find((item) => item.taskKey === 
           {{ folders.length }}
         </span>
       </h2>
-      <div class="space-y-2">
-        <FolderRow v-for="folder in folders" :key="folder.name" :folder="folder" :project-scope="project" />
+      <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <FolderCard v-for="folder in folders" :key="folder.name" :folder="folder" :project-scope="project" />
       </div>
     </section>
 
@@ -72,8 +72,8 @@ const task = computed(() => (tasks.value ?? []).find((item) => item.taskKey === 
       title="No entries saved for this task yet"
       hint="Entries Claude scopes to this task will collect here."
     />
-    <div v-else class="space-y-2">
-      <EntryRow v-for="entry in entries" :key="entry.name" :entry="entry" />
+    <div v-else class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      <EntryCard v-for="entry in entries" :key="entry.name" :entry="entry" />
     </div>
   </div>
 </template>

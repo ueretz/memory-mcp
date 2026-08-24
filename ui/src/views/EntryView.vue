@@ -2,7 +2,7 @@
 import { computed, toRef } from 'vue'
 
 import { fetchEntry } from '@/api/client'
-import type { MemoryEntrySummary } from '@/api/types'
+import type { MemoryEntrySummary, MemoryType } from '@/api/types'
 import AppIcon from '@/components/AppIcon.vue'
 import ErrorState from '@/components/ErrorState.vue'
 import MarkdownBody from '@/components/MarkdownBody.vue'
@@ -49,6 +49,33 @@ const links = computed<Array<{ title: string; items: MemoryEntrySummary[] }>>(()
     { title: 'Linked from', items: entry.value?.linkedFrom ?? [] },
   ].filter((group) => group.items.length > 0),
 )
+
+// Matches EntryCard's cover treatment so the card and its detail page read as the same object.
+const COVER_ICON: Record<MemoryType, string> = {
+  USER: 'user',
+  FEEDBACK: 'chat',
+  PROJECT: 'document',
+  REFERENCE: 'link',
+  LOCATION: 'pin',
+  REPORT: 'chart',
+}
+const ICON_TEXT: Record<MemoryType, string> = {
+  USER: 'text-type-user',
+  FEEDBACK: 'text-type-feedback',
+  PROJECT: 'text-type-project',
+  REFERENCE: 'text-type-reference',
+  LOCATION: 'text-type-location',
+  REPORT: 'text-type-report',
+}
+const heroStyle = computed(() => {
+  if (!entry.value) {
+    return {}
+  }
+  const token = `var(--color-type-${entry.value.type.toLowerCase()})`
+  return {
+    background: `linear-gradient(135deg, color-mix(in oklab, ${token} 26%, transparent), color-mix(in oklab, ${token} 6%, transparent))`,
+  }
+})
 </script>
 
 <template>
@@ -57,53 +84,60 @@ const links = computed<Array<{ title: string; items: MemoryEntrySummary[] }>>(()
     <SkeletonRows v-else-if="loading" :rows="4" />
 
     <article v-else-if="entry">
-      <header class="mb-6 border-b border-border pb-6">
-        <div class="flex flex-wrap items-center gap-3">
+      <div class="mb-6 overflow-hidden rounded-2xl border border-border">
+        <div class="flex items-center justify-between px-6 py-7" :style="heroStyle">
+          <span class="flex size-12 items-center justify-center rounded-2xl bg-panel/70" :class="ICON_TEXT[entry.type]">
+            <AppIcon :name="COVER_ICON[entry.type]" class="size-6" />
+          </span>
+          <TypeBadge :type="entry.type" variant="pill" />
+        </div>
+
+        <div class="bg-panel px-6 py-6">
           <h1 class="text-2xl font-semibold tracking-tight break-words text-content">
             {{ entry.name }}
           </h1>
-          <TypeBadge :type="entry.type" />
-        </div>
+          <p v-if="entry.description" class="mt-2.5 text-[14.5px] leading-relaxed text-muted">
+            {{ entry.description }}
+          </p>
 
-        <p class="mt-3 text-[14.5px] leading-relaxed text-muted">{{ entry.description }}</p>
+          <div class="mt-4 flex flex-wrap items-center gap-2 text-[12px] text-muted">
+            <span class="inline-flex items-center gap-1.5 rounded-full bg-elevated px-2.5 py-1 font-mono">
+              <AppIcon name="folder" class="size-3.5 text-faint" />
+              {{ scope }}
+            </span>
+            <span v-if="entry.filePath" class="inline-flex items-center gap-1.5 rounded-full bg-elevated px-2.5 py-1 font-mono break-all">
+              <AppIcon name="document" class="size-3.5 text-faint" />
+              {{ entry.filePath }}
+            </span>
+            <span v-if="entry.createdBy" class="inline-flex items-center gap-1.5 rounded-full bg-elevated px-2.5 py-1">
+              <AppIcon name="sparkles" class="size-3.5 text-faint" />
+              {{ entry.createdBy }}
+            </span>
+            <span :title="absoluteDateTime(entry.updatedAt)" class="inline-flex items-center gap-1.5 rounded-full bg-elevated px-2.5 py-1">
+              <AppIcon name="refresh" class="size-3.5 text-faint" />
+              updated {{ relativeTime(entry.updatedAt) }}
+            </span>
+          </div>
 
-        <div class="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2 text-[12px] text-faint">
-          <span class="inline-flex items-center gap-1.5">
-            <AppIcon name="folder" class="size-3.5" />
-            <span class="font-mono">{{ scope }}</span>
-          </span>
-          <span v-if="entry.filePath" class="inline-flex items-center gap-1.5">
-            <AppIcon name="document" class="size-3.5" />
-            <span class="font-mono break-all">{{ entry.filePath }}</span>
-          </span>
-          <span v-if="entry.createdBy" class="inline-flex items-center gap-1.5">
-            <AppIcon name="sparkles" class="size-3.5" />
-            created by {{ entry.createdBy }}
-          </span>
-          <span :title="absoluteDateTime(entry.updatedAt)" class="inline-flex items-center gap-1.5">
-            <AppIcon name="refresh" class="size-3.5" />
-            updated {{ relativeTime(entry.updatedAt) }}
-          </span>
+          <div class="mt-5 flex flex-wrap items-center gap-2">
+            <a
+              :href="pdfHref(entry.name)"
+              class="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-[12.5px] font-medium text-content transition hover:border-accent/40 hover:text-accent"
+            >
+              <AppIcon name="download" class="size-3.5" />
+              Download PDF
+            </a>
+            <a
+              v-if="!isReport"
+              :href="markdownHref(entry.name)"
+              class="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-[12.5px] font-medium text-content transition hover:border-accent/40 hover:text-accent"
+            >
+              <AppIcon name="download" class="size-3.5" />
+              Download .md
+            </a>
+          </div>
         </div>
-
-        <div class="mt-4 flex flex-wrap items-center gap-2">
-          <a
-            :href="pdfHref(entry.name)"
-            class="inline-flex items-center gap-1.5 rounded-lg border border-border bg-panel px-2.5 py-1.5 text-[12.5px] text-content transition hover:border-accent/40 hover:text-accent"
-          >
-            <AppIcon name="download" class="size-3.5" />
-            Download PDF
-          </a>
-          <a
-            v-if="!isReport"
-            :href="markdownHref(entry.name)"
-            class="inline-flex items-center gap-1.5 rounded-lg border border-border bg-panel px-2.5 py-1.5 text-[12.5px] text-content transition hover:border-accent/40 hover:text-accent"
-          >
-            <AppIcon name="download" class="size-3.5" />
-            Download .md
-          </a>
-        </div>
-      </header>
+      </div>
 
       <div
         v-if="entry.warnings.length > 0"
@@ -118,7 +152,7 @@ const links = computed<Array<{ title: string; items: MemoryEntrySummary[] }>>(()
       <RouterLink
         v-if="isReport"
         :to="reportLocation(entry) ?? {}"
-        class="group flex items-center gap-4 rounded-2xl border border-border bg-panel px-5 py-5 transition hover:border-accent/40"
+        class="group flex items-center gap-4 rounded-2xl border border-border bg-panel px-5 py-5 transition hover:border-accent/40 hover:shadow-panel"
       >
         <span class="flex size-11 shrink-0 items-center justify-center rounded-xl bg-type-report/10 text-type-report">
           <AppIcon name="document" class="size-5" />
@@ -131,7 +165,9 @@ const links = computed<Array<{ title: string; items: MemoryEntrySummary[] }>>(()
         </span>
         <AppIcon name="enter" class="size-4 shrink-0 text-faint transition group-hover:text-accent" />
       </RouterLink>
-      <MarkdownBody v-else :content="entry.content" :resolve-link="resolveLink" />
+      <div v-else class="rounded-2xl border border-border bg-panel p-6">
+        <MarkdownBody :content="entry.content" :resolve-link="resolveLink" />
+      </div>
 
       <section v-for="group in links" :key="group.title" class="mt-8">
         <h2 class="mb-2.5 flex items-center gap-2 text-[12px] font-semibold tracking-wide text-muted uppercase">

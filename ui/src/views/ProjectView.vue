@@ -5,12 +5,12 @@ import { fetchEntries, fetchFolders, fetchStats, fetchTasks } from '@/api/client
 import { MEMORY_TYPES, type MemoryType } from '@/api/types'
 import AppIcon from '@/components/AppIcon.vue'
 import EmptyState from '@/components/EmptyState.vue'
-import EntryRow from '@/components/EntryRow.vue'
+import EntryCard from '@/components/EntryCard.vue'
 import ErrorState from '@/components/ErrorState.vue'
-import FolderRow from '@/components/FolderRow.vue'
+import FolderCard from '@/components/FolderCard.vue'
 import PageHeader from '@/components/PageHeader.vue'
 import SkeletonRows from '@/components/SkeletonRows.vue'
-import TaskRow from '@/components/TaskRow.vue'
+import TaskCard from '@/components/TaskCard.vue'
 import { useAsyncData } from '@/composables/useAsyncData'
 import { graphLocation } from '@/lib/links'
 
@@ -66,8 +66,8 @@ const doneTasks = computed(() => (tasks.value ?? []).filter((task) => task.statu
           {{ folders.length }}
         </span>
       </h2>
-      <div class="space-y-2">
-        <FolderRow v-for="folder in folders" :key="folder.name" :folder="folder" :project-scope="project" />
+      <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <FolderCard v-for="folder in folders" :key="folder.name" :folder="folder" :project-scope="project" />
       </div>
     </section>
 
@@ -119,8 +119,8 @@ const doneTasks = computed(() => (tasks.value ?? []).filter((task) => task.statu
         :title="typeFilter ? `No ${typeFilter} entries` : 'No common entries yet'"
         hint="Anything Claude saves without a task scope shows up in this list."
       />
-      <div v-else class="space-y-2">
-        <EntryRow v-for="entry in visibleEntries" :key="entry.name" :entry="entry" />
+      <div v-else class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <EntryCard v-for="entry in visibleEntries" :key="entry.name" :entry="entry" />
       </div>
     </section>
 
@@ -162,23 +162,25 @@ const doneTasks = computed(() => (tasks.value ?? []).filter((task) => task.statu
         title="No tasks yet"
         hint="Ask Claude to scope work to a task and its notes get their own space."
       />
-      <div v-else class="space-y-2">
-        <TaskRow
-          v-for="task in activeTasks"
-          :key="task.taskKey"
-          :task="task"
-          :project-scope="project"
-        />
+      <div v-else>
+        <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <TaskCard
+            v-for="task in activeTasks"
+            :key="task.taskKey"
+            :task="task"
+            :project-scope="project"
+          />
+        </div>
 
-        <details v-if="doneTasks.length" class="group pt-1">
+        <details v-if="doneTasks.length" class="group pt-4">
           <summary
             class="inline-flex cursor-pointer list-none items-center gap-1.5 rounded-lg px-1 py-1.5 text-[12.5px] text-muted transition hover:text-content"
           >
             <AppIcon name="chevron" class="size-3 transition group-open:rotate-90" />
             {{ doneTasks.length }} done
           </summary>
-          <div class="mt-2 space-y-2">
-            <TaskRow
+          <div class="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            <TaskCard
               v-for="task in doneTasks"
               :key="task.taskKey"
               :task="task"
