@@ -6,6 +6,8 @@ import org.springframework.stereotype.Service;
 import ru.iuribabalin.memorymcp.dto.MemoryEntryDetail;
 import ru.iuribabalin.memorymcp.entity.MemoryNode;
 
+import java.util.regex.Pattern;
+
 /**
  * Turns a memory entry into a downloadable PDF or markdown file. REPORT entries already hold a
  * full HTML document (rendered as-is); every other type holds markdown, wrapped in a minimal
@@ -13,6 +15,9 @@ import ru.iuribabalin.memorymcp.entity.MemoryNode;
  */
 @Service
 public class MemoryExportService {
+
+    private static final Pattern DATA_THEME_ATTR = Pattern.compile("data-theme=\"[^\"]*\"");
+    private static final Pattern HTML_TAG = Pattern.compile("(?i)<html");
 
     private final Parser markdownParser = Parser.builder().build();
     private final HtmlRenderer htmlRenderer = HtmlRenderer.builder().build();
@@ -23,8 +28,22 @@ public class MemoryExportService {
     }
 
     public byte[] toPdf(MemoryEntryDetail entry) {
-        String html = entry.type() == MemoryNode.Type.REPORT ? entry.content() : wrapMarkdown(entry);
+        String html = entry.type() == MemoryNode.Type.REPORT ? forceLightTheme(entry.content()) : wrapMarkdown(entry);
         return pdfRenderer.renderToPdf(html);
+    }
+
+    /**
+     * REPORT entries follow the Artifacts convention of a `data-theme="dark"/"light"` attribute
+     * on the root <html> element overriding prefers-color-scheme (see the dashboard's own
+     * ReportView.vue, which uses the same attribute to let a viewer flip a report's theme). A
+     * PDF is a fixed export, so it's always forced light here independent of whatever theme the
+     * report currently defaults to or was last viewed in.
+     */
+    private String forceLightTheme(String html) {
+        if (DATA_THEME_ATTR.matcher(html).find()) {
+            return DATA_THEME_ATTR.matcher(html).replaceFirst("data-theme=\"light\"");
+        }
+        return HTML_TAG.matcher(html).replaceFirst("<html data-theme=\"light\"");
     }
 
     public String toMarkdown(MemoryEntryDetail entry) {

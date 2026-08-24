@@ -4,6 +4,7 @@ import com.microsoft.playwright.Browser;
 import com.microsoft.playwright.BrowserType;
 import com.microsoft.playwright.Page;
 import com.microsoft.playwright.Playwright;
+import com.microsoft.playwright.options.ColorScheme;
 import com.microsoft.playwright.options.Margin;
 import jakarta.annotation.PreDestroy;
 import org.springframework.stereotype.Component;
@@ -46,7 +47,12 @@ public class PdfRenderer {
 
     private byte[] renderOnRendererThread(String html) {
         ensureBrowser();
-        try (Page page = browser.newPage()) {
+        // A PDF is a fixed, printed artifact - it always renders in light mode regardless of
+        // what color scheme a report's CSS would otherwise pick (OS preference, dashboard theme),
+        // so exports never come out unreadable-dark on paper. Covers reports that key off
+        // prefers-color-scheme; MemoryExportService additionally forces `data-theme="light"` for
+        // reports that use that attribute convention instead.
+        try (Page page = browser.newPage(new Browser.NewPageOptions().setColorScheme(ColorScheme.LIGHT))) {
             page.setContent(html);
             return page.pdf(new Page.PdfOptions()
                     .setFormat("A4")
