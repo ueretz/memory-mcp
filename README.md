@@ -119,13 +119,15 @@ Java-слой (`ru.iuribabalin.memorymcp`):
 
 | Инструмент | Параметры | Возвращает |
 |---|---|---|
-| `memory_save` | `name`, `type`, `description`, `content`, `projectScope?`, `taskKey?`, `filePath?`, `createdBy?` | Upsert по имени, парсит `[[links]]`. Для `type=REPORT` `content` — самодостаточный HTML вместо markdown |
+| `memory_save` | `name`, `type`, `description`, `content`, `projectScope?`, `taskKey?`, `folder?`, `filePath?`, `createdBy?` | Upsert по имени, парсит `[[links]]`. Для `type=REPORT` `content` — самодостаточный HTML вместо markdown. `folder` — имя существующей папки (см. `folder_create`), без него запись сохраняется в корне своего scope |
 | `memory_get` | `name` | Полная запись + `linkedTo`/`linkedFrom` |
-| `memory_list` | `type?`, `projectScope?`, `taskKey?`, `limit?`, `offset?` | Дешёвый список (без содержимого); без `taskKey` — только common-записи проекта |
-| `memory_search` | `query`, `type?`, `projectScope?`, `taskKey?`, `limit?` | Полнотекстовый поиск, тот же дешёвый формат |
-| `memory_graph` | `type?`, `projectScope?`, `taskKey?` | `{nodes, edges}` для визуализации |
+| `memory_list` | `type?`, `projectScope?`, `taskKey?`, `folder?`, `limit?`, `offset?` | Дешёвый список (без содержимого); без `taskKey` — только common-записи проекта. Без `folder` — только корень scope (содержимое папок скрыто, как в файловом менеджере) |
+| `memory_search` | `query`, `type?`, `projectScope?`, `taskKey?`, `folder?`, `limit?` | Полнотекстовый поиск, тот же дешёвый формат. В отличие от `memory_list`, без `folder` ищет по всему scope, включая записи внутри папок |
+| `memory_graph` | `type?`, `projectScope?`, `taskKey?` | `{nodes, edges}` для визуализации; всегда весь scope, папки не фильтрует |
 | `memory_related` | `name`, `depth?` | Записи, связанные напрямую (сейчас только depth=1) |
 | `memory_delete` | `name` | Удаление записи и её связей (каскад по FK) |
+| `folder_create` | `projectScope`, `taskKey?`, `name`, `description`, `parentFolder?`, `createdBy?` | Создать/обновить папку (upsert по имени); scope (project/task) после создания неизменен, `parentFolder` должен быть в том же scope |
+| `folder_list` | `projectScope`, `taskKey?`, `parentFolder?` | Список папок верхнего уровня (или дочерних для `parentFolder`) в данном scope |
 | `task_start` | `projectScope`, `taskKey`, `title?`, `source?` | Создать/возобновить задачу (upsert) |
 | `task_list` | `projectScope` | Список задач проекта |
 | `task_close` | `projectScope`, `taskKey` | Пометить задачу выполненной |
@@ -137,7 +139,8 @@ Java-слой (`ru.iuribabalin.memorymcp`):
 `GET /api/projects`, `GET /api/projects/{scope}/tasks`, `GET /api/memory`,
 `GET /api/memory/{name}`, `GET /api/memory/search?q=`, `GET /api/memory/graph`,
 `GET /api/memory/{name}/pdf`, `GET /api/memory/{name}/markdown`, `GET /api/setup`,
-`GET /api/setup/skill`. `ApiExceptionHandler` превращает отсутствие записи/задачи в HTTP 404,
+`GET /api/setup/skill`, `GET /api/folders`, `GET /api/folders/{name}`,
+`GET /api/stats/overview`. `ApiExceptionHandler` превращает отсутствие записи/задачи/папки в HTTP 404,
 экспорт markdown у `REPORT`-записи — в 400, а сбой рендера PDF — в 500 (вместо голого 500 без
 объяснения).
 

@@ -1,14 +1,15 @@
 ---
 name: memory-mcp
-description: Use whenever you learn a durable user preference, receive corrective feedback, discover a project-specific fact, or want to check prior context before starting work in a repo that has the memory-mcp MCP server connected. Also use at the start of any substantive task to determine whether work is task-scoped. Call the memory_* and task_* MCP tools instead of writing memory files under ~/.claude/projects/.../memory/.
+description: Use whenever you learn a durable user preference, receive corrective feedback, discover a project-specific fact, or want to check prior context before starting work in a repo that has the memory-mcp MCP server connected. Also use at the start of any substantive task to determine whether work is task-scoped. Call the memory_*, task_*, and folder_* MCP tools instead of writing memory files under ~/.claude/projects/.../memory/ or anywhere in the local repository.
 ---
 
 # memory-mcp: Postgres-backed long-term memory
 
 This project has the `memory-mcp` MCP server connected, giving you a database-backed
 alternative to Claude Code's built-in flat-file memory. Entries live in Postgres, are
-organized like a GitHub repo (project → common context + per-task folders), and are visible
-in a local dashboard - so prefer these tools over writing memory markdown files by hand.
+organized like a real filesystem (project → common context or per-task space → optional
+nested folders), and are visible in a local dashboard - so prefer these tools over writing
+memory markdown files by hand, and never write them into the local repository (see below).
 
 ## Determine the project scope automatically - never ask for it
 
@@ -20,20 +21,23 @@ in a local dashboard - so prefer these tools over writing memory markdown files 
 Never ask the user what the project is - this should be invisible to them.
 
 ## Determine createdBy automatically - never ask for it
+
 `createdBy` records who authored an entry. Resolve it yourself before every `memory_save`:
 `git config user.name` and `git config user.email` in the current repo, combined as
 `"Name <email>"`. If either is unset, pass whatever you have (or omit it) - don't prompt the
 user for their identity.
 
-## MANDATORY: any file you generate for the project goes in memory, not on disk
+## FORBIDDEN: writing generated files into the local repository
 
-This is a hard rule, not a preference. Any time you're about to `Write` a **new** file that
-*you* generated - your own notes, a plan, a summary, an analysis, a review writeup, a changelog
-draft, a checklist, a design doc, a report - you are **required** to save it via `memory_save`
-instead. Not "prefer to," not "usually" - required, every time, no exceptions besides the one
-below. This applies everywhere, not just mid-task: brainstorming, planning, answering a
-question, reviewing code, anything. If you catch yourself reaching for `Write`/`Edit` to create
-a file for something that isn't code the user asked you to ship, stop - this rule fires.
+It is **forbidden**, with no exceptions besides the one below, to `Write` a file *you*
+generated - your own notes, a plan, a summary, an analysis, a review writeup, a changelog
+draft, a checklist, a design doc, a report - anywhere inside this local repository (or any
+other local path standing in for it, e.g. a scratch/temp directory used as a substitute for
+committing it). This is not "prefer memory," not "usually" - it is a hard, unconditional
+prohibition. Save it via `memory_save` instead, every time. This applies everywhere, not just
+mid-task: brainstorming, planning, answering a question, reviewing code, anything. If you catch
+yourself reaching for `Write`/`Edit` to create a file for something that isn't code the user
+asked you to ship, stop - this rule fires, no matter how small or "temporary" the file feels.
 
 1. **Markdown content** (notes, plans, summaries, analysis, checklists, writeups) ->
    `memory_save` with `type: "PROJECT"` (or task-scoped if a `taskKey` is set).
@@ -107,6 +111,29 @@ without skipping steps:
    compare content, not just the name - if an existing entry already says the same thing, update
    that entry (or skip) instead of writing a near-duplicate one.
 
+## Folders - organizing entries within a project or task
+
+Entries can optionally be filed into a folder, an arbitrarily-nestable grouping scoped to a
+project's common space or to one task (a folder can't span both). Folders exist purely for
+organization when a project/task accumulates enough entries that a flat list gets unwieldy -
+most work doesn't need them.
+
+- Folders are created only by you, via `folder_create` - there is no UI for creating them, only
+  for browsing. Call `folder_list` first to check whether a suitable folder already exists
+  before creating a near-duplicate.
+- Pass `folder` on `memory_save` to file an entry into an existing folder. The folder must
+  already exist (via `folder_create`) and must belong to the exact same `projectScope`/`taskKey`
+  as the entry itself - a folder from a different project or task is rejected.
+- **Browsing (`memory_list`) treats folders like a real file explorer**: omitting `folder`
+  lists only the root of that project/task scope - entries filed into a folder are hidden from
+  the root listing and only show up when you pass that folder's name. This means after filing
+  entries into a folder, call `memory_list` with `folder` set (or `folder_list` for the
+  subfolders) to see them again, not the bare root call.
+- **Searching (`memory_search`) does not have this restriction** - by default it searches every
+  entry in the project/task scope regardless of folder, because search is for finding things,
+  not browsing a location. Pass `folder` on `memory_search` only if you want to narrow the
+  search to one specific folder (non-recursive - it won't also search that folder's subfolders).
+
 ## Maintaining common project context
 
 Regardless of task scope, keep a small set of `PROJECT`-type entries with `projectScope` set
@@ -140,23 +167,35 @@ specific classes, you can also save/update a single location directly via
 
 ## Tools
 
-- `memory_save(name, type, description, content, projectScope?, taskKey?, filePath?, createdBy?)` -
+- `memory_save(name, type, description, content, projectScope?, taskKey?, folder?, filePath?, createdBy?)` -
   upsert by name. `content` may reference other entries via `[[other-entry-name]]` - these become
   graph links. For `type: "LOCATION"`, use the fully-qualified class name as `name`. For
   `type: "REPORT"`, `content` is a full self-contained HTML document instead of markdown. Pass
-  `createdBy` every time, resolved as described above.
+  `folder` to file the entry under an existing folder (see "Folders" above) - omit to save it at
+  the root of its project/task scope. Pass `createdBy` every time, resolved as described above.
 - `memory_get(name)` - full content of one entry, plus what it links to/from.
-- `memory_list(type?, projectScope?, taskKey?, limit?, offset?)` - cheap index (no content).
-  With `projectScope` and no `taskKey`, lists the project's common entries. With both, lists
-  that task's entries. Call this before `memory_get` on everything - don't burn tokens reading
-  full content you don't need yet.
-- `memory_search(query, type?, projectScope?, taskKey?, limit?)` - full-text search, same cheap
-  shape as `memory_list`, ranked by relevance.
+- `memory_list(type?, projectScope?, taskKey?, folder?, limit?, offset?)` - cheap index (no
+  content). With `projectScope` and no `taskKey`, lists the project's common entries. With both,
+  lists that task's entries. Omitting `folder` lists only that scope's root - entries filed into
+  a folder need `folder` set to show up (see "Folders" above). Call this before `memory_get` on
+  everything - don't burn tokens reading full content you don't need yet.
+- `memory_search(query, type?, projectScope?, taskKey?, folder?, limit?)` - full-text search,
+  same cheap shape as `memory_list`, ranked by relevance. Unlike `memory_list`, omitting `folder`
+  searches every entry in scope regardless of folder - pass `folder` only to narrow the search to
+  one specific folder (non-recursive).
 - `memory_graph(type?, projectScope?, taskKey?)` - nodes + edges for a scope, used by the
-  dashboard and useful for understanding how entries relate.
+  dashboard and useful for understanding how entries relate. Always shows every entry in scope
+  regardless of folder.
 - `memory_related(name, depth?)` - entries directly linked to/from one entry - cheaper than
   `memory_get` when you just need to know what's connected.
 - `memory_delete(name)` - remove a stale or wrong entry.
+- `folder_create(projectScope, taskKey?, name, description, parentFolder?, createdBy?)` - create
+  or update a folder (see "Folders" above). Idempotent by name - calling again with the same name
+  updates its description/parent, but its project/task scope can't be changed once set. Pass
+  `parentFolder` to nest it inside another folder (must already exist, same project/task scope).
+- `folder_list(projectScope, taskKey?, parentFolder?)` - list folders directly under a project's
+  common space, a task, or another folder. Omitting `parentFolder` lists top-level folders. Use
+  before `folder_create` to avoid duplicates.
 - `task_start(projectScope, taskKey, title?, source?)` - create or resume a task.
 - `task_list(projectScope)` - list a project's tasks; check before creating a duplicate.
 - `task_close(projectScope, taskKey)` - mark a task done.
