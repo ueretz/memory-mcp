@@ -48,6 +48,43 @@ class MemoryExportServiceTest {
         assertThat(htmlCaptor.getValue()).contains("<html data-theme=\"light\">");
     }
 
+    @Test
+    void reportPdfExportForcesEveryTabPanelVisible() {
+        MemoryExportService service = new MemoryExportService(pdfRenderer);
+        MemoryEntryDetail entry = report("""
+                <!doctype html><html><head><style>.tab-panel { display: none; }</style></head>
+                <body>
+                  <div class="tabs"><button class="tab-btn">Plan</button></div>
+                  <section class="tab-panel active">Overview</section>
+                  <section class="tab-panel">Risks</section>
+                </body></html>
+                """);
+        when(pdfRenderer.renderToPdf(anyString())).thenReturn(new byte[0]);
+
+        service.toPdf(entry);
+
+        ArgumentCaptor<String> htmlCaptor = ArgumentCaptor.forClass(String.class);
+        verify(pdfRenderer).renderToPdf(htmlCaptor.capture());
+        String rendered = htmlCaptor.getValue();
+        assertThat(rendered).contains(".tab-panel, .tab-content, .tabpanel, [role=\"tabpanel\"] { display: block !important; }");
+        assertThat(rendered).contains(".tabs, .tab-nav, [role=\"tablist\"] { display: none !important; }");
+        // both panels still present in the markup - the override is what makes the hidden one show
+        assertThat(rendered).contains("Overview").contains("Risks");
+    }
+
+    @Test
+    void reportPdfExportInjectsTabOverrideBeforeBodyCloseWhenNoHeadTag() {
+        MemoryExportService service = new MemoryExportService(pdfRenderer);
+        MemoryEntryDetail entry = report("<!doctype html><html><body><section class=\"tab-panel\">x</section></body></html>");
+        when(pdfRenderer.renderToPdf(anyString())).thenReturn(new byte[0]);
+
+        service.toPdf(entry);
+
+        ArgumentCaptor<String> htmlCaptor = ArgumentCaptor.forClass(String.class);
+        verify(pdfRenderer).renderToPdf(htmlCaptor.capture());
+        assertThat(htmlCaptor.getValue()).contains("<style>").contains("</body></html>");
+    }
+
     private MemoryEntryDetail report(String content) {
         return new MemoryEntryDetail(
                 "report-entry", MemoryNode.Type.REPORT, "desc", content,

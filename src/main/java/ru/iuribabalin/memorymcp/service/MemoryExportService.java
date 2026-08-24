@@ -6,6 +6,7 @@ import org.springframework.stereotype.Service;
 import ru.iuribabalin.memorymcp.dto.MemoryEntryDetail;
 import ru.iuribabalin.memorymcp.entity.MemoryNode;
 
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
@@ -18,6 +19,20 @@ public class MemoryExportService {
 
     private static final Pattern DATA_THEME_ATTR = Pattern.compile("data-theme=\"[^\"]*\"");
     private static final Pattern HTML_TAG = Pattern.compile("(?i)<html");
+    private static final Pattern HEAD_CLOSE = Pattern.compile("(?i)</head>");
+    private static final Pattern BODY_CLOSE = Pattern.compile("(?i)</body>");
+
+    private static final String PRINT_TAB_OVERRIDE = """
+            <style>
+              /* A PDF has no click-to-switch-tabs interaction, so every tab panel a report
+                 hides behind "active" state needs to print, not just whichever was active when
+                 it was saved - covers this project's own task-planner-style .tab-panel markup
+                 plus the generic ARIA tabpanel role. Reports that hide content some other way
+                 are unaffected - there's no signal to hook into without knowing their markup. */
+              .tab-panel, .tab-content, .tabpanel, [role="tabpanel"] { display: block !important; }
+              .tabs, .tab-nav, [role="tablist"] { display: none !important; }
+            </style>
+            """;
 
     private final Parser markdownParser = Parser.builder().build();
     private final HtmlRenderer htmlRenderer = HtmlRenderer.builder().build();
@@ -28,8 +43,27 @@ public class MemoryExportService {
     }
 
     public byte[] toPdf(MemoryEntryDetail entry) {
-        String html = entry.type() == MemoryNode.Type.REPORT ? forceLightTheme(entry.content()) : wrapMarkdown(entry);
+        String html = entry.type() == MemoryNode.Type.REPORT
+                ? expandTabsForPrint(forceLightTheme(entry.content()))
+                : wrapMarkdown(entry);
         return pdfRenderer.renderToPdf(html);
+    }
+
+    /**
+     * Multi-section REPORT entries (e.g. the task-planner skill's tabbed plans) hide every tab
+     * but the active one behind CSS - fine for browsing, but a PDF has no tab strip to click, so
+     * a reader who only sees the tab that happened to be active when the report was saved is
+     * missing the rest of the document. Force every panel visible and drop the now-inert tab
+     * nav so the export reads as one continuous document instead of stacking dead controls.
+     */
+    private String expandTabsForPrint(String html) {
+        if (HEAD_CLOSE.matcher(html).find()) {
+            return HEAD_CLOSE.matcher(html).replaceFirst(Matcher.quoteReplacement(PRINT_TAB_OVERRIDE) + "</head>");
+        }
+        if (BODY_CLOSE.matcher(html).find()) {
+            return BODY_CLOSE.matcher(html).replaceFirst(Matcher.quoteReplacement(PRINT_TAB_OVERRIDE) + "</body>");
+        }
+        return html + PRINT_TAB_OVERRIDE;
     }
 
     /**
