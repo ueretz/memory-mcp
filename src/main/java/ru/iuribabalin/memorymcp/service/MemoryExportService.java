@@ -22,7 +22,7 @@ public class MemoryExportService {
     private static final Pattern HEAD_CLOSE = Pattern.compile("(?i)</head>");
     private static final Pattern BODY_CLOSE = Pattern.compile("(?i)</body>");
 
-    private static final String PRINT_TAB_OVERRIDE = """
+    private static final String PRINT_LAYOUT_OVERRIDE = """
             <style>
               /* A PDF has no click-to-switch-tabs interaction, so every tab panel a report
                  hides behind "active" state needs to print, not just whichever was active when
@@ -31,6 +31,15 @@ public class MemoryExportService {
                  are unaffected - there's no signal to hook into without knowing their markup. */
               .tab-panel, .tab-content, .tabpanel, [role="tabpanel"] { display: block !important; }
               .tabs, .tab-nav, [role="tablist"] { display: none !important; }
+
+              /* overflow-x:auto containers (diagram wrappers, wide code blocks) rely on a
+                 scrollbar a printed page doesn't have - anything wider than the container was
+                 being silently cut off at its edge instead of shown. Diagrams are typically an
+                 <svg> with explicit width/height attributes wider than the page, so shrinking
+                 that to fit (preserving aspect ratio via height:auto) plus letting the container
+                 stop clipping is what actually fixes it, rather than overflow alone. */
+              .diagram, pre { overflow: visible !important; }
+              svg { max-width: 100% !important; height: auto !important; }
             </style>
             """;
 
@@ -44,7 +53,7 @@ public class MemoryExportService {
 
     public byte[] toPdf(MemoryEntryDetail entry) {
         String html = entry.type() == MemoryNode.Type.REPORT
-                ? expandTabsForPrint(forceLightTheme(entry.content()))
+                ? applyPrintLayoutFixes(forceLightTheme(entry.content()))
                 : wrapMarkdown(entry);
         return pdfRenderer.renderToPdf(html);
     }
@@ -53,17 +62,19 @@ public class MemoryExportService {
      * Multi-section REPORT entries (e.g. the task-planner skill's tabbed plans) hide every tab
      * but the active one behind CSS - fine for browsing, but a PDF has no tab strip to click, so
      * a reader who only sees the tab that happened to be active when the report was saved is
-     * missing the rest of the document. Force every panel visible and drop the now-inert tab
-     * nav so the export reads as one continuous document instead of stacking dead controls.
+     * missing the rest of the document. Same underlying problem for wide inline-SVG diagrams:
+     * they're sized for an on-screen horizontal scrollbar that doesn't exist on paper. Force
+     * every panel visible, drop the now-inert tab nav, and let oversized diagrams shrink to the
+     * page instead of getting clipped.
      */
-    private String expandTabsForPrint(String html) {
+    private String applyPrintLayoutFixes(String html) {
         if (HEAD_CLOSE.matcher(html).find()) {
-            return HEAD_CLOSE.matcher(html).replaceFirst(Matcher.quoteReplacement(PRINT_TAB_OVERRIDE) + "</head>");
+            return HEAD_CLOSE.matcher(html).replaceFirst(Matcher.quoteReplacement(PRINT_LAYOUT_OVERRIDE) + "</head>");
         }
         if (BODY_CLOSE.matcher(html).find()) {
-            return BODY_CLOSE.matcher(html).replaceFirst(Matcher.quoteReplacement(PRINT_TAB_OVERRIDE) + "</body>");
+            return BODY_CLOSE.matcher(html).replaceFirst(Matcher.quoteReplacement(PRINT_LAYOUT_OVERRIDE) + "</body>");
         }
-        return html + PRINT_TAB_OVERRIDE;
+        return html + PRINT_LAYOUT_OVERRIDE;
     }
 
     /**
@@ -105,7 +116,7 @@ public class MemoryExportService {
                   h1.entry-title { font-size: 22px; margin-bottom: 4px; }
                   .meta { color: #6b7080; font-size: 12px; margin-bottom: 24px; }
                   code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
-                  pre { background: #f6f6fa; padding: 10px 12px; border-radius: 8px; overflow-x: auto; }
+                  pre { background: #f6f6fa; padding: 10px 12px; border-radius: 8px; white-space: pre-wrap; overflow-wrap: break-word; }
                   code { background: #f6f6fa; padding: 1px 5px; border-radius: 4px; }
                   pre code { background: none; padding: 0; }
                   table { border-collapse: collapse; width: 100%%; }

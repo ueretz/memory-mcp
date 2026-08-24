@@ -73,6 +73,26 @@ class MemoryExportServiceTest {
     }
 
     @Test
+    void reportPdfExportShrinksOversizedDiagramsInsteadOfClippingThem() {
+        MemoryExportService service = new MemoryExportService(pdfRenderer);
+        MemoryEntryDetail entry = report("""
+                <!doctype html><html><head></head>
+                <body>
+                  <div class="diagram"><svg width="1030" height="380"><text>wide diagram</text></svg></div>
+                </body></html>
+                """);
+        when(pdfRenderer.renderToPdf(anyString())).thenReturn(new byte[0]);
+
+        service.toPdf(entry);
+
+        ArgumentCaptor<String> htmlCaptor = ArgumentCaptor.forClass(String.class);
+        verify(pdfRenderer).renderToPdf(htmlCaptor.capture());
+        String rendered = htmlCaptor.getValue();
+        assertThat(rendered).contains(".diagram, pre { overflow: visible !important; }");
+        assertThat(rendered).contains("svg { max-width: 100% !important; height: auto !important; }");
+    }
+
+    @Test
     void reportPdfExportInjectsTabOverrideBeforeBodyCloseWhenNoHeadTag() {
         MemoryExportService service = new MemoryExportService(pdfRenderer);
         MemoryEntryDetail entry = report("<!doctype html><html><body><section class=\"tab-panel\">x</section></body></html>");
