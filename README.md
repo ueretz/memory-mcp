@@ -138,8 +138,8 @@ Java-слой (`ru.iuribabalin.memorymcp`):
 Без авторизации (рассчитано на localhost-only персональное использование):
 `GET /api/projects`, `GET /api/projects/{scope}/tasks`, `GET /api/memory`,
 `GET /api/memory/{name}`, `GET /api/memory/search?q=`, `GET /api/memory/graph`,
-`GET /api/memory/{name}/pdf`, `GET /api/memory/{name}/markdown`, `GET /api/setup`,
-`GET /api/setup/skill`, `GET /api/folders`, `GET /api/folders/{name}`,
+`GET /api/memory/{name}/pdf`, `GET /api/memory/{name}/html`, `GET /api/memory/{name}/markdown`,
+`GET /api/setup`, `GET /api/setup/skill`, `GET /api/folders`, `GET /api/folders/{name}`,
 `GET /api/stats/overview`. `ApiExceptionHandler` превращает отсутствие записи/задачи/папки в HTTP 404,
 экспорт markdown у `REPORT`-записи — в 400, а сбой рендера PDF — в 500 (вместо голого 500 без
 объяснения).
@@ -157,14 +157,16 @@ SPA на Vue 3 (`ui/`, history-роутинг через `vue-router`; `SpaForwa
   санитизируется `DOMPurify`; `[[wiki-links]]` — собственное inline-расширение `marked`, которое
   резолвит имя в реальную связь записи (нерезолвленные видны как приглушённый чип), плюс блоки
   "Links to"/"Linked from". На любой странице записи есть кнопка **Download PDF**
-  (`GET /api/memory/{name}/pdf`), а для не-REPORT записей — ещё и **Download .md**
-  (`GET /api/memory/{name}/markdown`);
+  (`GET /api/memory/{name}/pdf`); для `REPORT` — ещё и **Download HTML**
+  (`GET /api/memory/{name}/html`, тот же самодостаточный документ без рендера через Chromium), а
+  для не-REPORT записей — **Download .md** (`GET /api/memory/{name}/markdown`);
 - `/p/{projectScope}/e/{entryName}/report` и `/p/{projectScope}/t/{taskKey}/e/{entryName}/report`
   — записи `type=REPORT` открываются не инлайново, а на отдельной full-bleed странице (роут с
   `meta.bare`, `App.vue` пропускает сайдбар/хедер/колонку контента для неё): весь экран занимает
   `<iframe sandbox="allow-scripts" srcdoc="...">` с сохранённым HTML, сверху только тонкий бар
-  (имя, тип, "Download PDF", ссылка назад). На обычной странице записи для REPORT вместо контента
-  — карточка-ссылка "Open report" на эту страницу;
+  (имя, тип, переключатель тёмной/светлой темы для превью самого отчёта — независимый от темы
+  дашборда, "Download HTML", "Download PDF", ссылка назад). На обычной странице записи для REPORT
+  вместо контента — карточка-ссылка "Open report" на эту страницу;
 - `/p/{projectScope}/graph` и `/p/{projectScope}/t/{taskKey}/graph` — кнопка **Graph** на странице
   проекта/задачи открывает силовой граф записей на `d3-force` (SVG): перетаскивание узлов, зум и
   панорамирование (`d3-zoom`), радиус узла зависит от числа связей, подсветка соседних рёбер при
@@ -188,7 +190,31 @@ CSS-переменные, перенесённые в Tailwind через `@them
 `MemoryExportService` сначала рендерит markdown в HTML через `commonmark-java` и оборачивает в
 минимальную печатную стилизацию. Браузер поднимается лениво при первом запросе и живёт в одном
 выделенном потоке (`PdfRenderer`) — Playwright требует, чтобы все вызовы шли с того потока, что
-его создал.
+его создал. `newPage` эмулирует светлую цветовую схему, а для `REPORT` дополнительно форсится
+`data-theme="light"` (см. `forceLightTheme`) — экспорт не зависит от темы, в которой отчёт
+сохранился или просматривался.
+
+Многостраничные `REPORT`-отчёты (например, HTML-планы скилла task-planner с вкладками и
+flow-диаграммами) печатаются не как есть — `MemoryExportService.applyPrintLayoutFixes` перед
+рендером инжектит `<style>` прямо в HTML записи, компенсируя то, что у печати нет ни клика по
+вкладке, ни скролла:
+- `.tab-panel`/`[role="tabpanel"]` — принудительно `display: block`, а сама панель вкладок
+  скрывается (`display: none`), иначе в PDF попадала бы только та вкладка, что была активна на
+  момент сохранения отчёта;
+- `overflow-x: auto`-контейнеры (диаграммы, широкие блоки кода) и `<svg>` с фиксированной шириной
+  больше печатной страницы — раньше просто обрезались по краю контейнера (нет скролла на бумаге);
+  теперь `overflow: visible` + `svg { max-width: 100%; height: auto }` вписывают их в страницу
+  вместо обрезки;
+- `.flow-node`/`.flow-arrow`/`.diagram`/`.stat-tile`/`tr` и т.п. получают
+  `break-inside: avoid` — без этого движок печати мог разрезать блок ровно по границе страницы
+  где попало, и текст внутри узла диаграммы пропадал, оставляя только стрелку без подписи; теперь
+  такой блок целиком переносится на следующую страницу.
+
+Это эвристика по разметке (свой `.tab-panel`/`.flow-node` конвент этого проекта + общий ARIA
+`role="tabpanel"`) — отчёт с другой вёрсткой ею не покрывается. Поэтому у `REPORT`-записей есть
+и **`GET /api/memory/{name}/html`** — скачивание того же документа без прогона через Chromium и
+без print-компромиссов вообще: открывается в браузере с рабочими вкладками, темой и
+интерактивностью, как оригинал.
 
 Разово нужно скачать сам Chromium (~300 МБ), которым управляет Playwright:
 
@@ -341,6 +367,10 @@ streamable HTTP, REST API, полный дашборд, регистрация �
       файла в проекте, читается на отдельной full-bleed странице (`.../e/{name}/report`) вместо
       обычной страницы записи
 - [x] Экспорт любой записи в PDF (`GET /api/memory/{name}/pdf`, headless Chromium через
-      Playwright) и экспорт не-REPORT записей в исходный `.md` (`GET /api/memory/{name}/markdown`)
+      Playwright, со всеми вкладками/диаграммами многостраничных REPORT-отчётов, а не только
+      активной вкладкой на момент сохранения) и экспорт не-REPORT записей в исходный `.md`
+      (`GET /api/memory/{name}/markdown`)
+- [x] Экспорт REPORT-записи в исходный `.html` (`GET /api/memory/{name}/html`) — тот же документ
+      без прогона через Chromium, надёжный фолбэк, когда печать в PDF капризничает
 - [x] Поле `createdBy` — агент резолвит автора из `git config user.name`/`user.email` и передаёт
       его в `memory_save`, без вопросов пользователю
