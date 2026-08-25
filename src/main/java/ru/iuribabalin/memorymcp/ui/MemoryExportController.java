@@ -39,6 +39,16 @@ public class MemoryExportController {
                 .body(pdf);
     }
 
+    @GetMapping("/api/memory/{name}/html")
+    public ResponseEntity<byte[]> html(@PathVariable String name) {
+        MemoryEntryDetail entry = memoryService.get(name);
+        String html = exportService.toHtml(entry);
+        return ResponseEntity.ok()
+                .contentType(MediaType.valueOf("text/html;charset=UTF-8"))
+                .header(HttpHeaders.CONTENT_DISPOSITION, attachment(entry.name() + ".html"))
+                .body(html.getBytes(StandardCharsets.UTF_8));
+    }
+
     @GetMapping("/api/memory/{name}/markdown")
     public ResponseEntity<byte[]> markdown(@PathVariable String name) {
         MemoryEntryDetail entry = memoryService.get(name);

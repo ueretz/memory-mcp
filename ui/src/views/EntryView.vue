@@ -10,7 +10,7 @@ import SkeletonRows from '@/components/SkeletonRows.vue'
 import TypeBadge from '@/components/TypeBadge.vue'
 import { useAsyncData } from '@/composables/useAsyncData'
 import { absoluteDateTime, relativeTime } from '@/lib/format'
-import { entryHref, entryLocation, markdownHref, pdfHref, reportLocation } from '@/lib/links'
+import { entryHref, entryLocation, htmlHref, markdownHref, pdfHref, reportLocation } from '@/lib/links'
 
 const props = defineProps<{ project: string; name: string; task?: string }>()
 
@@ -120,6 +120,15 @@ const heroStyle = computed(() => {
           </div>
 
           <div class="mt-5 flex flex-wrap items-center gap-2">
+            <a
+              v-if="isReport"
+              :href="htmlHref(entry.name)"
+              title="Standalone .html file - opens in any browser with tabs and interactivity intact, no print pagination"
+              class="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-[12.5px] font-medium text-content transition hover:border-accent/40 hover:text-accent"
+            >
+              <AppIcon name="download" class="size-3.5" />
+              Download HTML
+            </a>
             <a
               :href="pdfHref(entry.name)"
               class="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-[12.5px] font-medium text-content transition hover:border-accent/40 hover:text-accent"

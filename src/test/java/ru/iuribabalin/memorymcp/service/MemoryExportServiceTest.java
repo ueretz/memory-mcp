@@ -105,6 +105,42 @@ class MemoryExportServiceTest {
         assertThat(htmlCaptor.getValue()).contains("<style>").contains("</body></html>");
     }
 
+    @Test
+    void reportPdfExportKeepsFlowBoxesAtomicAcrossPageBreaks() {
+        MemoryExportService service = new MemoryExportService(pdfRenderer);
+        MemoryEntryDetail entry = report("<!doctype html><html><body><div class=\"flow-node\">x</div></body></html>");
+        when(pdfRenderer.renderToPdf(anyString())).thenReturn(new byte[0]);
+
+        service.toPdf(entry);
+
+        ArgumentCaptor<String> htmlCaptor = ArgumentCaptor.forClass(String.class);
+        verify(pdfRenderer).renderToPdf(htmlCaptor.capture());
+        assertThat(htmlCaptor.getValue()).contains(".flow-node, .flow-arrow, .flow-branch, .diagram, .stat-tile, .overview-link-card,");
+        assertThat(htmlCaptor.getValue()).contains("break-inside: avoid; page-break-inside: avoid;");
+    }
+
+    @Test
+    void reportHtmlExportReturnsRawContentUnmodified() {
+        MemoryExportService service = new MemoryExportService(pdfRenderer);
+        String content = "<!doctype html><html data-theme=\"dark\"><body><div class=\"tab-panel\">x</div></body></html>";
+        MemoryEntryDetail entry = report(content);
+
+        assertThat(service.toHtml(entry)).isEqualTo(content);
+    }
+
+    @Test
+    void nonReportHtmlExportWrapsMarkdownAsHtml() {
+        MemoryExportService service = new MemoryExportService(pdfRenderer);
+        MemoryEntryDetail entry = new MemoryEntryDetail(
+                "note", MemoryNode.Type.PROJECT, "desc", "# Heading\n\nbody text",
+                null, null, null, null, null, Instant.now(), Instant.now(),
+                List.of(), List.of(), List.of());
+
+        String html = service.toHtml(entry);
+
+        assertThat(html).contains("<h1>Heading</h1>").contains("body text").contains("<!doctype html>");
+    }
+
     private MemoryEntryDetail report(String content) {
         return new MemoryEntryDetail(
                 "report-entry", MemoryNode.Type.REPORT, "desc", content,

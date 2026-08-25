@@ -65,6 +65,10 @@ export function pdfHref(name: string): string {
   return `/api/memory/${encodeURIComponent(name)}/pdf`
 }
 
+export function htmlHref(name: string): string {
+  return `/api/memory/${encodeURIComponent(name)}/html`
+}
+
 export function markdownHref(name: string): string {
   return `/api/memory/${encodeURIComponent(name)}/markdown`
 }

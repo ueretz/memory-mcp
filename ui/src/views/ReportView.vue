@@ -8,7 +8,7 @@ import SkeletonRows from '@/components/SkeletonRows.vue'
 import TypeBadge from '@/components/TypeBadge.vue'
 import { useAsyncData } from '@/composables/useAsyncData'
 import { useTheme } from '@/composables/useTheme'
-import { entryLocation, pdfHref } from '@/lib/links'
+import { entryLocation, htmlHref, pdfHref } from '@/lib/links'
 
 const props = defineProps<{ project: string; name: string; task?: string }>()
 
@@ -66,6 +66,16 @@ const themedContent = computed(() => (entry.value ? withTheme(entry.value.conten
       >
         <AppIcon :name="reportDark ? 'sun' : 'moon'" class="size-3.5" />
       </button>
+
+      <a
+        v-if="entry"
+        :href="htmlHref(entry.name)"
+        title="Standalone .html file - opens in any browser with tabs and interactivity intact, no print pagination"
+        class="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-border bg-panel px-2.5 py-1.5 text-[12.5px] text-content transition hover:border-accent/40 hover:text-accent"
+      >
+        <AppIcon name="download" class="size-3.5" />
+        <span class="hidden sm:inline">Download HTML</span>
+      </a>
 
       <a
         v-if="entry"

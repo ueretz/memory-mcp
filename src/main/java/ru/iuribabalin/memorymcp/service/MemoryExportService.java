@@ -40,6 +40,16 @@ public class MemoryExportService {
                  stop clipping is what actually fixes it, rather than overflow alone. */
               .diagram, pre { overflow: visible !important; }
               svg { max-width: 100% !important; height: auto !important; }
+
+              /* Print pagination splits any box taller than the remaining space on a page
+                 wherever it happens to land, mid-border or mid-text-line, with no regard for
+                 the box's contents - a flow-node's label can end up entirely on the far side of
+                 a page break from the arrow pointing at it, reading as an arrow with no text.
+                 break-inside:avoid keeps each of these atomic, pushing the whole box to the next
+                 page instead of slicing it. */
+              .flow-node, .flow-arrow, .flow-branch, .diagram, .stat-tile, .overview-link-card,
+              .callout, tr, li { break-inside: avoid; page-break-inside: avoid; }
+              h1, h2, h3, h4 { break-after: avoid; page-break-after: avoid; }
             </style>
             """;
 
@@ -56,6 +66,16 @@ public class MemoryExportService {
                 ? applyPrintLayoutFixes(forceLightTheme(entry.content()))
                 : wrapMarkdown(entry);
         return pdfRenderer.renderToPdf(html);
+    }
+
+    /**
+     * A standalone .html download of the exact same document, with none of the fixed-paper
+     * compromises toPdf() has to make (headless Chromium, forced light theme, print pagination
+     * cutting through tall boxes). Opens in any browser with tabs, theme toggle, and diagram
+     * interactivity intact - the reliable fallback when a report's PDF rendering misbehaves.
+     */
+    public String toHtml(MemoryEntryDetail entry) {
+        return entry.type() == MemoryNode.Type.REPORT ? entry.content() : wrapMarkdown(entry);
     }
 
     /**
