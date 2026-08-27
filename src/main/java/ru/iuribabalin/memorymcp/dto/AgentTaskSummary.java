@@ -10,6 +10,7 @@ public record AgentTaskSummary(
         AgentTask.Type type,
         AgentTask.Status status,
         String description,
-        Instant updatedAt
+        Instant updatedAt,
+        Long dependsOnId
 ) {
 }

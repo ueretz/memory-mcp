@@ -33,7 +33,7 @@ public class AgentTaskMcpTools {
             @McpToolParam(description = "Short subtask title", required = true) String title,
             @McpToolParam(description = "Subtask category: ANALYSIS, IMPLEMENTATION, TESTING, REVIEW, or REPORTING", required = true) AgentTask.Type type,
             @McpToolParam(description = "Markdown notes/analysis for this subtask - what it covers, findings so far", required = false) String description) {
-        AgentTaskSummary result = agentTaskService.create(projectScope, taskKey, title, type, description);
+        AgentTaskSummary result = agentTaskService.create(projectScope, taskKey, title, type, description, null);
         usageEventRecorder.record(UsageEvent.Action.AGENT_TASK_CREATE, null, projectScope, taskKey, null);
         return result;
     }
@@ -46,7 +46,7 @@ public class AgentTaskMcpTools {
             @McpToolParam(description = "The task/ticket key", required = true) String taskKey,
             @McpToolParam(description = "Filter by subtask category", required = false) AgentTask.Type type,
             @McpToolParam(description = "Filter by status", required = false) AgentTask.Status status) {
-        return agentTaskService.list(projectScope, taskKey, type, status);
+        return agentTaskService.list(projectScope, taskKey, type, status, false);
     }
 
     @McpTool(name = "agent_task_update",

@@ -37,6 +37,6 @@ public class ProjectViewController {
 
     @GetMapping("/api/projects/{projectScope}/tasks/{taskKey}/agent-tasks")
     public List<AgentTaskSummary> agentTasks(@PathVariable String projectScope, @PathVariable String taskKey) {
-        return agentTaskService.list(projectScope, taskKey, null, null);
+        return agentTaskService.list(projectScope, taskKey, null, null, false);
     }
 }

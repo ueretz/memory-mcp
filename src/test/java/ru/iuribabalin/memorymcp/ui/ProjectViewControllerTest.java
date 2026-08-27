@@ -50,8 +50,8 @@ class ProjectViewControllerTest {
     @Test
     void listsAgentTasksForATask() throws Exception {
         AgentTaskSummary summary = new AgentTaskSummary(
-                1L, "Analyze", AgentTask.Type.ANALYSIS, AgentTask.Status.DONE, "desc", Instant.now());
-        when(agentTaskService.list("memory-mcp", "AT-1", null, null)).thenReturn(List.of(summary));
+                1L, "Analyze", AgentTask.Type.ANALYSIS, AgentTask.Status.DONE, "desc", Instant.now(), null);
+        when(agentTaskService.list("memory-mcp", "AT-1", null, null, false)).thenReturn(List.of(summary));
 
         mockMvc.perform(get("/api/projects/memory-mcp/tasks/AT-1/agent-tasks"))
                 .andExpect(status().isOk())
@@ -60,7 +60,7 @@ class ProjectViewControllerTest {
 
     @Test
     void returns404WhenTaskDoesNotExist() throws Exception {
-        when(agentTaskService.list("memory-mcp", "NO-SUCH", null, null))
+        when(agentTaskService.list("memory-mcp", "NO-SUCH", null, null, false))
                 .thenThrow(new TaskNotFoundException("memory-mcp", "NO-SUCH"));
 
         mockMvc.perform(get("/api/projects/memory-mcp/tasks/NO-SUCH/agent-tasks"))
