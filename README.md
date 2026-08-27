@@ -132,6 +132,10 @@ Java-слой (`ru.iuribabalin.memorymcp`):
 | `task_list` | `projectScope` | Список задач проекта |
 | `task_close` | `projectScope`, `taskKey` | Пометить задачу выполненной |
 | `location_scan` | `projectScope`, `rootPath` | Индексирует файлы/классы проекта как `LOCATION`-записи с автоматическими рёбрами для Java |
+| `agent_task_create` | `projectScope`, `taskKey`, `title`, `type`, `description?` | Создать подзадачу на доске задачи (`type`: `ANALYSIS`/`IMPLEMENTATION`/`TESTING`/`REVIEW`/`REPORTING`), статус `TODO` |
+| `agent_task_list` | `projectScope`, `taskKey`, `type?`, `status?` | Список подзадач задачи с опциональными фильтрами |
+| `agent_task_update` | `projectScope`, `taskKey`, `agentTaskId`, `status?`, `title?`, `description?` | Сдвинуть статус подзадачи и/или дополнить аналитику |
+| `agent_task_delete` | `projectScope`, `taskKey`, `agentTaskId` | Удалить ошибочную/дублирующую подзадачу |
 
 ### REST API дашборда
 
@@ -374,3 +378,9 @@ streamable HTTP, REST API, полный дашборд, регистрация �
       без прогона через Chromium, надёжный фолбэк, когда печать в PDF капризничает
 - [x] Поле `createdBy` — агент резолвит автора из `git config user.name`/`user.email` и передаёт
       его в `memory_save`, без вопросов пользователю
+- [x] Доска подзадач агента (`agent_tasks`) внутри MCP-задачи — Jira-подобный борд с 5 типами
+      подзадач (`ANALYSIS`/`IMPLEMENTATION`/`TESTING`/`REVIEW`/`REPORTING`) и 4 статусами
+      (`TODO`/`IN_PROGRESS`/`DONE`/`BLOCKED`), read-only Kanban на `/p/{project}/t/{task}`,
+      MCP-инструменты `agent_task_*`, и скилл `agent-task-board`, который автоматически ведёт
+      задачу через весь цикл и в конце собирает HTML-отчёт (`type: REPORT`) с боковым меню и
+      inline-SVG диаграммами
