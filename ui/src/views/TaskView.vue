@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, toRef } from 'vue'
 
-import { fetchEntries, fetchFolders, fetchTasks } from '@/api/client'
+import { fetchAgentTasks, fetchEntries, fetchFolders, fetchTasks } from '@/api/client'
+import AgentTaskBoard from '@/components/AgentTaskBoard.vue'
 import AppIcon from '@/components/AppIcon.vue'
 import EmptyState from '@/components/EmptyState.vue'
 import EntryCard from '@/components/EntryCard.vue'
@@ -26,6 +27,8 @@ const { data: entries, error, loading, reload } = useAsyncData(
 const { data: tasks } = useAsyncData(() => fetchTasks(project.value), [project])
 
 const { data: folders } = useAsyncData(() => fetchFolders(project.value, taskKey.value, null), [project, taskKey])
+
+const { data: agentTasks } = useAsyncData(() => fetchAgentTasks(project.value, taskKey.value), [project, taskKey])
 
 const task = computed(() => (tasks.value ?? []).find((item) => item.taskKey === taskKey.value) ?? null)
 </script>
@@ -62,6 +65,14 @@ const task = computed(() => (tasks.value ?? []).find((item) => item.taskKey === 
       <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
         <FolderCard v-for="folder in folders" :key="folder.name" :folder="folder" :project-scope="project" />
       </div>
+    </section>
+
+    <section class="mb-9">
+      <h2 class="mb-3 flex items-center gap-2 text-[13px] font-semibold tracking-wide text-content uppercase">
+        <AppIcon name="task" class="size-4 text-faint" />
+        Agent Tasks
+      </h2>
+      <AgentTaskBoard :agent-tasks="agentTasks ?? []" />
     </section>
 
     <ErrorState v-if="error" :message="error" @retry="reload" />
