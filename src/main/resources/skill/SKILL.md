@@ -201,3 +201,12 @@ specific classes, you can also save/update a single location directly via
 - `task_close(projectScope, taskKey)` - mark a task done.
 - `location_scan(projectScope, rootPath)` - index a project's files/classes as `LOCATION`
   entries (see "Code locations" above).
+- `agent_task_create(projectScope, taskKey, title, type, description?)` - create a subtask on a
+  task's agent task board (`type`: `ANALYSIS`/`IMPLEMENTATION`/`TESTING`/`REVIEW`/`REPORTING`).
+  Not idempotent - check `agent_task_list` first to avoid duplicates. See the `agent-task-board`
+  skill for how these get driven end to end.
+- `agent_task_list(projectScope, taskKey, type?, status?)` - list a task's subtasks, optionally
+  filtered by category or status.
+- `agent_task_update(projectScope, taskKey, agentTaskId, status?, title?, description?)` - move a
+  subtask's status (`TODO`/`IN_PROGRESS`/`DONE`/`BLOCKED`) and/or update its notes.
+- `agent_task_delete(projectScope, taskKey, agentTaskId)` - remove a stale/duplicate subtask.
