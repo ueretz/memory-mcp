@@ -11,6 +11,7 @@ import MarkdownBody from './MarkdownBody.vue'
 defineProps<{
   agentTask: AgentTaskSummary
   resolveLink?: (name: string) => string | null
+  dependsOnTitle?: string | null
 }>()
 
 const expanded = ref(false)
@@ -25,6 +26,10 @@ const expanded = ref(false)
       </span>
       <AppIcon name="chevron" class="size-3.5 shrink-0 text-faint transition" :class="{ 'rotate-90': expanded }" />
     </button>
+    <p v-if="dependsOnTitle" class="flex items-center gap-1 text-[11px] text-faint">
+      <AppIcon name="link" class="size-3" />
+      Depends on: {{ dependsOnTitle }}
+    </p>
     <MarkdownBody
       v-if="expanded && agentTask.description"
       :content="agentTask.description"

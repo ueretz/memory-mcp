@@ -28,6 +28,13 @@ const grouped = computed(() => {
   }
   return map
 })
+
+function dependencyTitle(agentTask: AgentTaskSummary): string | null {
+  if (!agentTask.dependsOnId) {
+    return null
+  }
+  return props.agentTasks.find((candidate) => candidate.id === agentTask.dependsOnId)?.title ?? `#${agentTask.dependsOnId}`
+}
 </script>
 
 <template>
@@ -52,6 +59,7 @@ const grouped = computed(() => {
           :key="agentTask.id"
           :agent-task="agentTask"
           :resolve-link="resolveLink"
+          :depends-on-title="dependencyTitle(agentTask)"
         />
       </div>
     </div>

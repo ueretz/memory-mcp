@@ -19,6 +19,7 @@ export interface AgentTaskSummary {
   status: AgentTaskStatus
   description: string | null
   updatedAt: string
+  dependsOnId: number | null
 }
 
 export interface ProjectSummary {
