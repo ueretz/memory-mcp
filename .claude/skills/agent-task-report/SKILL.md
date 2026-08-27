@@ -39,8 +39,12 @@ asked for as part of the application.
    or the filled version to disk. Replace each placeholder exactly once: `{{TASK_TITLE}}`,
    `{{GENERATED_AT}}`, `{{TASK_DESCRIPTION}}`, `{{ARCHITECTURE_CONTENT}}`,
    `{{INTERACTION_CONTENT}}`, `{{IMPLEMENTATION_CONTENT}}`, `{{TESTS_CONTENT}}`,
-   `{{REVIEW_CONTENT}}`, `{{RISKS_CONTENT}}`. The "Overview" section has no placeholder - it's
-   built client-side by the report's own `<script>` from the other sections.
+   `{{REVIEW_CONTENT}}`, `{{IMPACT_CONTENT}}`, `{{VERIFICATION_CONTENT}}`, `{{RISKS_CONTENT}}`.
+   Two sections have no placeholder at all - don't invent one for them: "Обзор" (built
+   client-side from the other sections' stats) and "Критичные ошибки" (built client-side by
+   scanning every other section for `.callout.sev-critical`/`.sev-high` and listing them with a
+   jump-link back to where they actually live - just tag findings with the right severity class
+   wherever they belong, in Код-ревью/Риски/etc., and this section fills itself).
 2. **`reportKind: "planning"`** (nothing has been executed yet):
    - `{{TASK_TITLE}}` = `"План: " + title` (prefix it clearly as a plan, not a result).
    - `{{ARCHITECTURE_CONTENT}}` / `{{INTERACTION_CONTENT}}` = the real architecture and diagrams -
@@ -57,6 +61,15 @@ asked for as part of the application.
    `<div class="callout sev-{critical|high|medium|low}"><span class="badge
    {critical|high|medium|low}">high</span> ...</div>` for flagged findings, `<ol
    class="plan-steps">` for step lists.
+   - `{{TESTS_CONTENT}}` should explicitly state test-case coverage (what's covered, what isn't),
+     not just pass/fail counts.
+   - `{{IMPACT_CONTENT}}` ("Влияние на прод/продукт") - what this change touches in production:
+     rollout risk, backward compatibility, data migrations, anything a deploy needs to account
+     for. For `reportKind: "planning"`, describe anticipated impact; for `"final"`, the real one.
+   - `{{VERIFICATION_CONTENT}}` ("На что обращать внимание при проверке") - a checklist for
+     whoever verifies this task manually: what to click through, what edge cases to try, what
+     would indicate something's wrong. For `reportKind: "planning"` this can be the planned test
+     plan; for `"final"` it should reflect what was actually verified and what's still unverified.
 5. **Diagrams - inline SVG/HTML only, never Mermaid/PlantUML/any JS diagram library** (the report
    is a `memory_save` tool-call argument generated token-by-token; a multi-MB library payload
    doesn't fit). Component/architecture diagrams -> `<div class="flow"><div class="flow-node">...
