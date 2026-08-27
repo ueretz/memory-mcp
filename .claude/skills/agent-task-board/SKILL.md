@@ -77,6 +77,6 @@ written down.
    message rows >= 40px apart vertically; set `width`/`height` attributes equal to the `viewBox`
    size. These are the exact same patterns and hard rules as `task-planner`'s "Diagram patterns" -
    reuse them, don't invent new CSS classes.
-4. Save: `memory_save(name: "<task-key>-completion-report", type: "REPORT", content: <filled
+4. Save: `memory_save(name: "<task-key>-completion-report", type: "REPORT", description: "<one-line summary of the task and outcome>", content: <filled
    HTML>, projectScope, taskKey, createdBy)`. Tell the user the dashboard link
    (`http://<host>:<port>/p/<projectScope>/t/<taskKey>/e/<name>/report`), never a file path.
