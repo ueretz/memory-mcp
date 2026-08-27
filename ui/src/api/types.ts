@@ -8,6 +8,19 @@ export type TaskStatus = 'ACTIVE' | 'DONE'
 
 export type TaskSource = 'MANUAL' | 'JIRA'
 
+export type AgentTaskType = 'ANALYSIS' | 'IMPLEMENTATION' | 'TESTING' | 'REVIEW' | 'REPORTING'
+
+export type AgentTaskStatus = 'TODO' | 'IN_PROGRESS' | 'DONE' | 'BLOCKED'
+
+export interface AgentTaskSummary {
+  id: number
+  title: string
+  type: AgentTaskType
+  status: AgentTaskStatus
+  description: string | null
+  updatedAt: string
+}
+
 export interface ProjectSummary {
   projectScope: string
   commonEntryCount: number

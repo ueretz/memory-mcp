@@ -1,4 +1,5 @@
 import type {
+  AgentTaskSummary,
   FolderSummary,
   GraphResponse,
   MemoryEntryDetail,
@@ -51,6 +52,10 @@ export function fetchProjects(): Promise<ProjectSummary[]> {
 
 export function fetchTasks(projectScope: string): Promise<TaskSummary[]> {
   return getJson(`/api/projects/${encodeURIComponent(projectScope)}/tasks`)
+}
+
+export function fetchAgentTasks(projectScope: string, taskKey: string): Promise<AgentTaskSummary[]> {
+  return getJson(`/api/projects/${encodeURIComponent(projectScope)}/tasks/${encodeURIComponent(taskKey)}/agent-tasks`)
 }
 
 export function fetchEntries(
