@@ -143,7 +143,7 @@ Java-слой (`ru.iuribabalin.memorymcp`):
 `GET /api/projects`, `GET /api/projects/{scope}/tasks`, `GET /api/memory`,
 `GET /api/memory/{name}`, `GET /api/memory/search?q=`, `GET /api/memory/graph`,
 `GET /api/memory/{name}/pdf`, `GET /api/memory/{name}/html`, `GET /api/memory/{name}/markdown`,
-`GET /api/setup`, `GET /api/setup/skill`, `GET /api/folders`, `GET /api/folders/{name}`,
+`GET /api/setup`, `GET /api/setup/skills/{id}`, `GET /api/folders`, `GET /api/folders/{name}`,
 `GET /api/stats/overview`. `ApiExceptionHandler` превращает отсутствие записи/задачи/папки в HTTP 404,
 экспорт markdown у `REPORT`-записи — в 400, а сбой рендера PDF — в 500 (вместо голого 500 без
 объяснения).
@@ -177,9 +177,10 @@ SPA на Vue 3 (`ui/`, history-роутинг через `vue-router`; `SpaForwa
   наведении, фильтр по типу (включая `LOCATION` — тот же граф классов, что строит `location_scan`,
   но визуально), клик по узлу ведёт на страницу записи;
 - `/setup` — страница подключения: команда `claude mcp add --transport http` с автоматически
-  подставленным URL текущего инстанса (`http://<host>:<port>/mcp`), плюс кнопка скачивания
-  `SKILL.md` с инструкцией положить его в `~/.claude/skills/memory-mcp/` (user scope — чтобы
-  работало во всех проектах).
+  подставленным URL текущего инстанса (`http://<host>:<port>/mcp`), плюс скачивание трёх
+  независимых скиллов (`memory-mcp`, `agent-task-board`, `agent-task-report` — каждый отвечает
+  за свою часть: работа с памятью, оркестрация доски подзадач, сборка отчётов) с инструкцией,
+  куда положить каждый (`~/.claude/skills/<id>/`, user scope — чтобы работало во всех проектах).
 
 Общая оболочка: сайдбар со списком проектов, хлебные крошки из параметров маршрута, командная
 палитра поиска по **Ctrl/⌘ + K** (живой поиск по всем записям с фильтром по типу и навигацией
@@ -289,7 +290,7 @@ java -jar build/libs/memory-mcp.jar
 ### Регистрация в Claude Code
 
 Проще всего — открыть дашборд и зайти на страницу **Setup** (`/setup`): там уже готовая
-команда с URL твоего инстанса и кнопка скачивания скилла. Вручную это выглядит так:
+команда с URL твоего инстанса и кнопки скачивания всех трёх скиллов. Вручную это выглядит так:
 
 ```bash
 claude mcp add --scope user --transport http memory-mcp http://localhost:8080/mcp
@@ -301,11 +302,17 @@ claude mcp list   # проверить, что memory-mcp подключён
 Docker-контейнер) настраивается один раз через `docker-compose.yml`, а Claude Code просто
 обращается по URL, пока контейнер поднят.
 
-Скилл `SKILL.md` (скачивается со страницы `/setup` или лежит в `src/main/resources/skill/`)
-нужно положить в `~/.claude/skills/memory-mcp/SKILL.md` — он учит агента: определять
-`projectScope` по git-репозиторию самостоятельно, всегда явно спрашивать про принадлежность к
-задаче, вести общий контекст продукта отдельно от задач, и запускать `location_scan` вместо
-grep по файловой системе.
+Три скилла (скачиваются со страницы `/setup` или лежат в `src/main/resources/skill/`), каждый —
+за свою часть:
+
+- **`memory-mcp`** (`~/.claude/skills/memory-mcp/SKILL.md`) — определять `projectScope` по
+  git-репозиторию самостоятельно, всегда явно спрашивать про принадлежность к задаче, вести общий
+  контекст продукта отдельно от задач, запускать `location_scan` вместо grep по файловой системе.
+- **`agent-task-board`** (`~/.claude/skills/agent-task-board/SKILL.md`) — авто-декомпозиция
+  нетривиальной задачи на доску подзадач (`agent_task_*`), с чекпоинтом-подтверждением плана
+  перед стартом реализации.
+- **`agent-task-report`** (`~/.claude/skills/agent-task-report/` — распаковать zip) — сборка и
+  сохранение HTML-отчёта в стиле дашборда; вызывается из `agent-task-board` или отдельно.
 
 ## Структура проекта
 
@@ -328,7 +335,10 @@ src/main/resources/
 ├── logback-spring.xml             — обычный цветной вывод в stdout
 ├── db/migration/                  — V1 (nodes/edges), V2 (tasks), V3 (LOCATION + file_path),
 │                                     V4 (REPORT + created_by)
-└── skill/SKILL.md                 — скилл для агента (также раздаётся через /api/setup/skill)
+└── skill/                         — три скилла, раздаются через /api/setup/skills/{id}
+    ├── SKILL.md                   — memory-mcp (одиночный файл)
+    ├── agent-task-board/SKILL.md  — оркестрация доски подзадач (одиночный файл)
+    └── agent-task-report/         — SKILL.md + assets/agent_task_report_template.html (zip)
 
 ui/                                — фронтенд-проект (Vue 3 + Vite + Tailwind), собирается в static/
 ├── index.html                     — точка входа Vite (тема применяется до первой отрисовки)
@@ -341,7 +351,8 @@ ui/                                — фронтенд-проект (Vue 3 + Vi
 ├── src/lib/                       — links.ts (маршруты записей), markdown.ts, format.ts
 └── src/styles/main.css            — дизайн-токены (светлая/тёмная) + стили markdown
 
-.claude/skills/memory-mcp/SKILL.md — зеркало skill/SKILL.md для догфудинга в этом репо
+.claude/skills/                    — зеркала src/main/resources/skill/ (memory-mcp, agent-task-board,
+                                      agent-task-report) для догфудинга в этом репо
 Dockerfile                         — многостадийная сборка: ui (node:24) → jar (25-jdk) → рантайм (25-jre)
 .dockerignore                      — исключает build/.gradle/.git/ui/node_modules из контекста сборки
 docker-compose.yml                 — Postgres (с healthcheck) + сервис app (дашборд + MCP)

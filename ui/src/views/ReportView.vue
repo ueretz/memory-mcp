@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, toRef, watch } from 'vue'
+import { computed, toRef } from 'vue'
 
 import { fetchEntry } from '@/api/client'
 import AppIcon from '@/components/AppIcon.vue'
@@ -16,18 +16,12 @@ const name = toRef(props, 'name')
 const { data: entry, error, loading, reload } = useAsyncData(() => fetchEntry(name.value), [name])
 
 const { isDark } = useTheme()
-// Independent of the dashboard's own theme - lets a report be previewed in either mode without
-// flipping the whole app. Starts matching the dashboard so the two don't fight on first paint.
-const reportDark = ref(isDark.value)
-watch(name, () => {
-  reportDark.value = isDark.value
-})
 
 /**
  * Reports follow the Artifacts convention of a `data-theme="dark"/"light"` attribute on the root
- * <html> overriding prefers-color-scheme. Stamping it here lets this viewer flip a report's
- * theme regardless of what it defaults to - has no visible effect on a report that never
- * implements that convention, same as toggling theme on a single-theme Artifact.
+ * <html> overriding prefers-color-scheme. Stamping it here from the dashboard's own theme means
+ * there's exactly one theme control in the whole interface - no separate toggle for reports. Has
+ * no visible effect on a report that never implements the convention.
  */
 function withTheme(html: string, dark: boolean): string {
   const theme = dark ? 'dark' : 'light'
@@ -36,7 +30,7 @@ function withTheme(html: string, dark: boolean): string {
     : html.replace(/<html/i, `<html data-theme="${theme}"`)
 }
 
-const themedContent = computed(() => (entry.value ? withTheme(entry.value.content, reportDark.value) : ''))
+const themedContent = computed(() => (entry.value ? withTheme(entry.value.content, isDark.value) : ''))
 </script>
 
 <template>
@@ -56,16 +50,6 @@ const themedContent = computed(() => (entry.value ? withTheme(entry.value.conten
       </template>
 
       <div class="flex-1" />
-
-      <button
-        v-if="entry"
-        type="button"
-        title="Preview this report in the other theme (download always renders light)"
-        class="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-border bg-panel px-2.5 py-1.5 text-[12.5px] text-content transition hover:border-accent/40 hover:text-accent"
-        @click="reportDark = !reportDark"
-      >
-        <AppIcon :name="reportDark ? 'sun' : 'moon'" class="size-3.5" />
-      </button>
 
       <a
         v-if="entry"
@@ -94,7 +78,7 @@ const themedContent = computed(() => (entry.value ? withTheme(entry.value.conten
       :srcdoc="themedContent"
       sandbox="allow-scripts"
       class="min-h-0 flex-1 border-0"
-      :class="reportDark ? 'bg-[#0d0d12]' : 'bg-white'"
+      :class="isDark ? 'bg-[#0d0d12]' : 'bg-white'"
       title="Report content"
     />
   </div>

@@ -6,57 +6,59 @@
 <title>{{TASK_TITLE}}</title>
 <style>
   :root {
+    /* Same token values as the memory-mcp dashboard's ui/src/styles/main.css, so a report
+       reads as part of the platform instead of a foreign document. */
     color-scheme: light dark;
-    --bg: #ffffff;
-    --bg-alt: #f4f5f7;
-    --fg: #1b1f24;
-    --fg-muted: #5b6472;
-    --border: #dfe3e8;
-    --accent: #3457d5;
+    --bg: #f6f6fa;
+    --bg-alt: #fbfbfe;
+    --fg: #17171f;
+    --fg-muted: #6b7080;
+    --border: #e5e5ee;
+    --accent: #6d4aff;
     --accent-fg: #ffffff;
-    --code-bg: #f0f1f4;
+    --code-bg: #fbfbfe;
     --sev-critical: #c0392b;
     --sev-high: #d9822b;
     --sev-medium: #b8960c;
     --sev-low: #3d8b40;
-    --diagram-canvas: #f6f7fb;
+    --diagram-canvas: #fbfbfe;
     --diagram-box: #ffffff;
-    --diagram-stroke: #3457d5;
-    --shadow: 0 1px 2px rgba(20, 24, 32, 0.06), 0 4px 10px rgba(20, 24, 32, 0.05);
+    --diagram-stroke: #6d4aff;
+    --shadow: 0 1px 2px rgb(20 20 40 / 0.05), 0 8px 24px -12px rgb(20 20 40 / 0.12);
   }
   @media (prefers-color-scheme: dark) {
     :root {
-      --bg: #14161a;
-      --bg-alt: #1c1f25;
-      --fg: #e6e9ef;
-      --fg-muted: #9aa4b2;
-      --border: #2c313a;
-      --accent: #8ea1ff;
-      --accent-fg: #0e1116;
-      --code-bg: #20242c;
-      --diagram-canvas: #181b22;
-      --diagram-box: #20242e;
-      --diagram-stroke: #8ea1ff;
-      --shadow: 0 1px 2px rgba(0, 0, 0, 0.35), 0 4px 14px rgba(0, 0, 0, 0.3);
+      --bg: #0d0d12;
+      --bg-alt: #1b1b25;
+      --fg: #e9e9f2;
+      --fg-muted: #9797ac;
+      --border: #262633;
+      --accent: #9b82ff;
+      --accent-fg: #12101f;
+      --code-bg: #1b1b25;
+      --diagram-canvas: #1b1b25;
+      --diagram-box: #15151c;
+      --diagram-stroke: #9b82ff;
+      --shadow: 0 1px 2px rgb(0 0 0 / 0.4), 0 12px 32px -16px rgb(0 0 0 / 0.7);
     }
   }
   :root[data-theme="dark"] {
-    --bg: #14161a; --bg-alt: #1c1f25; --fg: #e6e9ef; --fg-muted: #9aa4b2;
-    --border: #2c313a; --accent: #8ea1ff; --accent-fg: #0e1116; --code-bg: #20242c;
-    --diagram-canvas: #181b22; --diagram-box: #20242e; --diagram-stroke: #8ea1ff;
-    --shadow: 0 1px 2px rgba(0, 0, 0, 0.35), 0 4px 14px rgba(0, 0, 0, 0.3);
+    --bg: #0d0d12; --bg-alt: #1b1b25; --fg: #e9e9f2; --fg-muted: #9797ac;
+    --border: #262633; --accent: #9b82ff; --accent-fg: #12101f; --code-bg: #1b1b25;
+    --diagram-canvas: #1b1b25; --diagram-box: #15151c; --diagram-stroke: #9b82ff;
+    --shadow: 0 1px 2px rgb(0 0 0 / 0.4), 0 12px 32px -16px rgb(0 0 0 / 0.7);
   }
   :root[data-theme="light"] {
-    --bg: #ffffff; --bg-alt: #f4f5f7; --fg: #1b1f24; --fg-muted: #5b6472;
-    --border: #dfe3e8; --accent: #3457d5; --accent-fg: #ffffff; --code-bg: #f0f1f4;
-    --diagram-canvas: #f6f7fb; --diagram-box: #ffffff; --diagram-stroke: #3457d5;
-    --shadow: 0 1px 2px rgba(20, 24, 32, 0.06), 0 4px 10px rgba(20, 24, 32, 0.05);
+    --bg: #f6f6fa; --bg-alt: #fbfbfe; --fg: #17171f; --fg-muted: #6b7080;
+    --border: #e5e5ee; --accent: #6d4aff; --accent-fg: #ffffff; --code-bg: #fbfbfe;
+    --diagram-canvas: #fbfbfe; --diagram-box: #ffffff; --diagram-stroke: #6d4aff;
+    --shadow: 0 1px 2px rgb(20 20 40 / 0.05), 0 8px 24px -12px rgb(20 20 40 / 0.12);
   }
   * { box-sizing: border-box; }
   html { scroll-behavior: smooth; }
   body {
     margin: 0;
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    font-family: 'Inter var', 'Inter', ui-sans-serif, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
     background: var(--bg);
     color: var(--fg);
     line-height: 1.6;
@@ -69,22 +71,6 @@
   .header-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
   header h1 { margin: 0 0 4px; font-size: 1.4rem; }
   header .meta { color: var(--fg-muted); font-size: 0.85rem; }
-  .theme-toggle {
-    flex: none;
-    width: 38px;
-    height: 38px;
-    border-radius: 50%;
-    border: 1px solid var(--border);
-    background: var(--bg);
-    color: var(--fg);
-    font-size: 1.05rem;
-    cursor: pointer;
-    line-height: 1;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-  }
-  .theme-toggle:hover { border-color: var(--accent); }
   header details {
     margin-top: 12px;
     border: 1px solid var(--border);
@@ -146,7 +132,7 @@
   th, td { border: 1px solid var(--border); padding: 8px 10px; text-align: left; font-size: 0.9rem; vertical-align: top; }
   th { background: var(--bg-alt); }
 
-  code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  code, pre { font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace; }
   code { background: var(--code-bg); padding: 1px 5px; border-radius: 4px; font-size: 0.88em; }
   pre { background: var(--code-bg); padding: 12px; border-radius: 8px; overflow-x: auto; }
 
@@ -235,7 +221,7 @@
     overflow-wrap: break-word;
   }
   .flow-node strong { display: block; margin-bottom: 5px; font-size: 0.98rem; }
-  .flow-node .flow-node-detail { display: block; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.76rem; color: var(--fg-muted); margin-top: 3px; text-align: left; }
+  .flow-node .flow-node-detail { display: block; font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace; font-size: 0.76rem; color: var(--fg-muted); margin-top: 3px; text-align: left; }
   .flow-arrow { display: flex; flex-direction: column; align-items: center; justify-content: center; color: var(--diagram-stroke); font-size: 1.5rem; font-weight: 700; flex: none; line-height: 1; min-width: 32px; }
   .flow-arrow-label { font-size: 0.68rem; font-weight: 400; color: var(--fg-muted); white-space: nowrap; margin-top: 3px; }
   .flow-branch { display: flex; flex-direction: column; gap: 10px; flex: none; border-left: 2px dashed var(--diagram-stroke); padding-left: 16px; margin-left: 2px; }
@@ -246,9 +232,9 @@
      scrolls horizontally instead so text stays legible on narrow screens. */
   .diagram svg.sequence { display: block; margin: 0 auto; position: relative; }
   .diagram-arrow { stroke: var(--diagram-stroke); stroke-width: 2; fill: none; }
-  .diagram-label text { fill: var(--fg-muted); font-family: -apple-system, sans-serif; font-size: 13px; }
+  .diagram-label text { fill: var(--fg-muted); font-family: 'Inter var', 'Inter', ui-sans-serif, -apple-system, sans-serif; font-size: 13px; }
   .lifeline { stroke: var(--border); stroke-width: 1.5; stroke-dasharray: 4 3; }
-  .lifeline-actor text { fill: var(--fg); font-family: -apple-system, sans-serif; font-size: 13px; font-weight: 700; }
+  .lifeline-actor text { fill: var(--fg); font-family: 'Inter var', 'Inter', ui-sans-serif, -apple-system, sans-serif; font-size: 13px; font-weight: 700; }
   ol.diagram-notes { margin: 10px 0 0; padding-left: 20px; font-size: 0.85rem; color: var(--fg-muted); }
   ol.diagram-notes li { margin-bottom: 4px; }
   ol.diagram-notes li::marker { color: var(--diagram-stroke); font-weight: 700; }
@@ -277,7 +263,6 @@
         <h1>{{TASK_TITLE}}</h1>
         <div class="meta">Отчёт сгенерирован: {{GENERATED_AT}}</div>
       </div>
-      <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Переключить тему">🌙</button>
     </div>
     <details>
       <summary>Исходное описание задачи</summary>
@@ -333,36 +318,13 @@
   </div>
 
   <script>
-    (function () {
-      var root = document.documentElement;
-      var STORAGE_KEY = 'agent-task-board-report-theme';
-      var toggleBtn = document.getElementById('theme-toggle');
-
-      function systemPrefersDark() {
-        return window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
-      }
-      function effectiveTheme() {
-        var override = root.getAttribute('data-theme');
-        if (override === 'light' || override === 'dark') return override;
-        return systemPrefersDark() ? 'dark' : 'light';
-      }
-      function syncToggleIcon() {
-        var dark = effectiveTheme() === 'dark';
-        toggleBtn.textContent = dark ? '☀️' : '🌙';
-        toggleBtn.setAttribute('aria-label', dark ? 'Переключить на светлую тему' : 'Переключить на тёмную тему');
-      }
-      var saved = null;
-      try { saved = localStorage.getItem(STORAGE_KEY); } catch (e) { /* sandboxed iframe: storage may be blocked */ }
-      if (saved === 'light' || saved === 'dark') root.setAttribute('data-theme', saved);
-      syncToggleIcon();
-      toggleBtn.addEventListener('click', function () {
-        var next = effectiveTheme() === 'dark' ? 'light' : 'dark';
-        root.setAttribute('data-theme', next);
-        try { localStorage.setItem(STORAGE_KEY, next); } catch (e) { /* sandboxed iframe: storage may be blocked */ }
-        syncToggleIcon();
-      });
-    })();
-
+    /*
+      No theme toggle here by design - the dashboard has exactly one theme control for the whole
+      interface. Viewed inside the dashboard, ReportView.vue stamps data-theme onto <html> from
+      that single control (see the :root[data-theme=...] CSS rules above). Opened standalone
+      (Download HTML), there's no dashboard to inherit from, so it falls back to the OS/browser's
+      prefers-color-scheme - handled by CSS alone, no script needed.
+    */
     (function () {
       var navButtons = Array.prototype.slice.call(document.querySelectorAll('.nav-btn'));
       var panels = Array.prototype.slice.call(document.querySelectorAll('.section-panel'));

@@ -70,10 +70,18 @@ export interface GraphResponse {
   edges: GraphEdge[]
 }
 
+export interface SkillInfo {
+  id: string
+  title: string
+  description: string
+  installPath: string
+  downloadUrl: string
+}
+
 export interface SetupInfo {
   mcpAddCommand: string
   mcpServerUrl: string
-  skillInstallPath: string
+  skills: SkillInfo[]
 }
 
 export interface StatsTotals {

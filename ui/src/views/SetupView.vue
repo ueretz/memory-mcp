@@ -66,21 +66,27 @@ const { data: info, error, loading, reload } = useAsyncData(fetchSetupInfo)
           >
             3
           </span>
-          <h2 class="text-[14.5px] font-semibold tracking-tight text-content">Install the skill</h2>
+          <h2 class="text-[14.5px] font-semibold tracking-tight text-content">Install the skills</h2>
         </div>
-        <p class="mb-3 text-[13px] text-muted">
-          The skill teaches Claude when to save and search memory, how to detect the project
-          automatically, and to always ask before scoping work to a task. Download it and place it at:
+        <p class="mb-4 text-[13px] text-muted">
+          Three independent skills, each with one job - download each and unzip/place it at the
+          path shown (single-file skills download as a plain <code class="rounded-md border border-border bg-elevated px-1 py-0.5 font-mono text-[11px]">.md</code>,
+          skills with an asset folder download as a <code class="rounded-md border border-border bg-elevated px-1 py-0.5 font-mono text-[11px]">.zip</code>).
         </p>
-        <CodeBlock :code="info.skillInstallPath" />
-        <a
-          href="/api/setup/skill"
-          download="SKILL.md"
-          class="mt-3 inline-flex items-center gap-2 rounded-lg bg-accent px-3 py-2 text-[13px] font-medium text-accent-fg transition hover:bg-accent-hover"
-        >
-          <AppIcon name="download" class="size-4" />
-          Download SKILL.md
-        </a>
+        <ul class="space-y-3">
+          <li v-for="skill in info.skills" :key="skill.id" class="rounded-xl border border-border bg-elevated p-4">
+            <h3 class="font-mono text-[13px] font-semibold text-content">{{ skill.id }}</h3>
+            <p class="mt-1 mb-3 text-[12.5px] text-muted">{{ skill.description }}</p>
+            <CodeBlock :code="skill.installPath" />
+            <a
+              :href="skill.downloadUrl"
+              class="mt-3 inline-flex items-center gap-2 rounded-lg bg-accent px-3 py-2 text-[13px] font-medium text-accent-fg transition hover:bg-accent-hover"
+            >
+              <AppIcon name="download" class="size-4" />
+              Download {{ skill.title }}
+            </a>
+          </li>
+        </ul>
       </li>
     </ol>
   </div>
