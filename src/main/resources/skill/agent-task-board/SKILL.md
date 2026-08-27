@@ -89,3 +89,37 @@ for a single-line change.
 Before marking any subtask `DONE`, always fill `description` with the actual result - an empty
 `description` on a `DONE` subtask means the analytics this board exists to capture never got
 written down.
+
+## Multi-session mode - when several independent sessions share one board
+
+Everything above assumes one session drives the whole board, using `agent_task_update` freely -
+that's still the default and doesn't change. This section is for when you're told (or dispatched)
+to play a specific role on a board that other independent sessions are also working on
+concurrently - the claim primitive below exists specifically because unconditional
+`agent_task_update(status: "IN_PROGRESS")` is racy when more than one session might grab the same
+`TODO` subtask at once.
+
+1. **Map your role to a subtask type**: architect -> `ANALYSIS`, implementer -> `IMPLEMENTATION`,
+   tester -> `TESTING`, reviewer -> `REVIEW`, summarizer -> `REPORTING`.
+2. **Find what you can actually pick up**: `agent_task_list(type: <your type>, claimable: true)` -
+   this already excludes subtasks blocked by an unfinished dependency, so you don't have to
+   cross-reference `dependsOnId` yourself.
+3. **Claim it atomically**: `agent_task_claim(agentTaskId: <chosen>)`, not `agent_task_update`.
+   If it throws - someone else claimed it first, or its dependency just changed - that's expected
+   under concurrency, not an error to surface to the user. Just pick the next candidate from step
+   2's list (re-list if needed) and try again.
+4. **Do the work**, then `agent_task_update(status: "DONE" | "BLOCKED", description: ...)` - same
+   as solo mode from here; `agent_task_update` is still how you move something you already own.
+5. **Implementer, right after marking your own subtask `DONE`**: immediately
+   `agent_task_create(type: "REVIEW", dependsOnId: <your own subtask's id>, title: "Review: <your title>")`
+   so review work for that piece becomes claimable the moment it's ready - this is what lets a
+   reviewer session pick up "the second session's small task" without a central coordinator
+   noticing and creating the review subtask itself.
+6. **Summarizer**: poll `agent_task_list()` (no filters) until no `IMPLEMENTATION`/`TESTING`/
+   `REVIEW` subtask is left `TODO` or `IN_PROGRESS` - a `BLOCKED` one is fine, it gets surfaced in
+   the report rather than waited on forever. Then create+claim the `REPORTING` subtask and invoke
+   `agent-task-report` with `reportKind: "final"` as usual.
+7. The Phase 1 -> Phase 2 user-confirmation checkpoint still applies globally regardless of
+   session count: whichever session runs Phase 1 is the one that asks the user to confirm before
+   any `IMPLEMENTATION` subtask exists to be claimed at all - that single checkpoint is enough,
+   it doesn't need per-session coordination.

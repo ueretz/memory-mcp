@@ -132,10 +132,11 @@ Java-слой (`ru.iuribabalin.memorymcp`):
 | `task_list` | `projectScope` | Список задач проекта |
 | `task_close` | `projectScope`, `taskKey` | Пометить задачу выполненной |
 | `location_scan` | `projectScope`, `rootPath` | Индексирует файлы/классы проекта как `LOCATION`-записи с автоматическими рёбрами для Java |
-| `agent_task_create` | `projectScope`, `taskKey`, `title`, `type`, `description?` | Создать подзадачу на доске задачи (`type`: `ANALYSIS`/`IMPLEMENTATION`/`TESTING`/`REVIEW`/`REPORTING`), статус `TODO` |
-| `agent_task_list` | `projectScope`, `taskKey`, `type?`, `status?` | Список подзадач задачи с опциональными фильтрами |
+| `agent_task_create` | `projectScope`, `taskKey`, `title`, `type`, `description?`, `dependsOnId?` | Создать подзадачу на доске задачи (`type`: `ANALYSIS`/`IMPLEMENTATION`/`TESTING`/`REVIEW`/`REPORTING`), статус `TODO` |
+| `agent_task_list` | `projectScope`, `taskKey`, `type?`, `status?`, `claimable?` | Список подзадач задачи с опциональными фильтрами |
 | `agent_task_update` | `projectScope`, `taskKey`, `agentTaskId`, `status?`, `title?`, `description?` | Сдвинуть статус подзадачи и/или дополнить аналитику |
 | `agent_task_delete` | `projectScope`, `taskKey`, `agentTaskId` | Удалить ошибочную/дублирующую подзадачу |
+| `agent_task_claim` | `projectScope`, `taskKey`, `agentTaskId` | Атомарно захватить `TODO`-подзадачу (`TODO → IN_PROGRESS`) для безопасной работы нескольких независимых сессий на одной доске; падает, если уже захвачена или зависимость (`dependsOnId`) ещё не `DONE` |
 
 ### REST API дашборда
 
@@ -395,3 +396,9 @@ streamable HTTP, REST API, полный дашборд, регистрация �
       MCP-инструменты `agent_task_*`, и скилл `agent-task-board`, который автоматически ведёт
       задачу через весь цикл и в конце собирает HTML-отчёт (`type: REPORT`) с боковым меню и
       inline-SVG диаграммами
+- [x] Мультисессионное параллельное исполнение доски подзадач — атомарный захват `TODO` через
+      `agent_task_claim` (conditional UPDATE, без гонок между независимыми сессиями), опциональная
+      зависимость между подзадачами (`dependsOnId`, self-FK) и фильтр `agent_task_list(claimable:
+      true)`, раздел про мультисессионный режим в скилле `agent-task-board`, 2 новых раздела отчёта
+      (влияние на прод/продукт, на что обращать внимание при проверке) плюс авто-агрегация
+      критичных находок в `agent-task-report`

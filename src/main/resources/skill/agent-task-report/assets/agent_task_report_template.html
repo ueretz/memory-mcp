@@ -238,6 +238,15 @@
   ol.diagram-notes { margin: 10px 0 0; padding-left: 20px; font-size: 0.85rem; color: var(--fg-muted); }
   ol.diagram-notes li { margin-bottom: 4px; }
   ol.diagram-notes li::marker { color: var(--diagram-stroke); font-weight: 700; }
+  .critical-issue-link { cursor: pointer; margin: 0 0 14px; }
+  .critical-issue-link:hover .callout { border-color: var(--accent); }
+  .critical-issue-source {
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color: var(--fg-muted);
+    margin-bottom: 4px;
+  }
 
   @media (max-width: 560px) {
     .flow { flex-direction: column; align-items: stretch; }
@@ -278,6 +287,9 @@
       <button class="nav-btn" data-section="implementation">Реализация</button>
       <button class="nav-btn" data-section="tests">Тесты</button>
       <button class="nav-btn" data-section="review">Код-ревью</button>
+      <button class="nav-btn" data-section="critical-issues">Критичные ошибки</button>
+      <button class="nav-btn" data-section="impact">Влияние на прод/продукт</button>
+      <button class="nav-btn" data-section="verification">На что обращать внимание</button>
       <button class="nav-btn" data-section="risks">Риски и заметки</button>
     </nav>
     <main>
@@ -309,6 +321,18 @@
       <section id="review" class="section-panel">
         <h2>Код-ревью</h2>
         {{REVIEW_CONTENT}}
+      </section>
+      <section id="critical-issues" class="section-panel">
+        <h2>Критичные ошибки</h2>
+        <div id="critical-issues-list"></div>
+      </section>
+      <section id="impact" class="section-panel">
+        <h2>Влияние на прод/продукт</h2>
+        {{IMPACT_CONTENT}}
+      </section>
+      <section id="verification" class="section-panel">
+        <h2>На что обращать внимание при проверке</h2>
+        {{VERIFICATION_CONTENT}}
       </section>
       <section id="risks" class="section-panel">
         <h2>Риски и заметки</h2>
@@ -370,12 +394,37 @@
         return scope.querySelectorAll('.badge.' + level).length;
       }
 
+      function buildCriticalIssues() {
+        var container = document.getElementById('critical-issues-list');
+        var callouts = Array.prototype.slice.call(
+          document.querySelectorAll('.section-panel:not(#critical-issues) .callout.sev-critical, .section-panel:not(#critical-issues) .callout.sev-high')
+        );
+        if (!callouts.length) {
+          container.innerHTML = '<p class="overview-link-empty">Критичных находок нет.</p>';
+          return;
+        }
+        container.innerHTML = callouts.map(function (callout) {
+          var panel = callout.closest('.section-panel');
+          var sectionId = panel ? panel.id : '';
+          var navBtn = document.querySelector('.nav-btn[data-section="' + sectionId + '"]');
+          var sectionLabel = navBtn ? navBtn.textContent : sectionId;
+          return '<div class="critical-issue-link" data-section="' + sectionId + '">' +
+                   '<div class="critical-issue-source">' + sectionLabel + '</div>' +
+                   callout.outerHTML +
+                 '</div>';
+        }).join('');
+        Array.prototype.slice.call(container.querySelectorAll('.critical-issue-link')).forEach(function (link) {
+          link.addEventListener('click', function () { activateSection(link.dataset.section); });
+        });
+      }
+
       function buildOverview() {
         var levels = ['critical', 'high', 'medium', 'low'];
         var labels = { critical: 'Критично', high: 'Высоко', medium: 'Средне', low: 'Низко' };
+        var contentPanels = Array.prototype.slice.call(document.querySelectorAll('.section-panel:not(#critical-issues)'));
         var statGrid = document.getElementById('overview-stats');
         var html = levels.map(function (lvl) {
-          var n = countBadges(document, lvl);
+          var n = contentPanels.reduce(function (sum, panel) { return sum + countBadges(panel, lvl); }, 0);
           return '<div class="stat-tile ' + lvl + '"><div class="stat-value">' + n + '</div><div class="stat-label">' + labels[lvl] + '</div></div>';
         }).join('');
         var implementationSteps = document.querySelectorAll('#implementation .plan-steps > li').length;
@@ -407,6 +456,7 @@
         });
       }
 
+      buildCriticalIssues();
       buildOverview();
       markScrollableDiagrams();
       activateSection('overview');
