@@ -157,6 +157,10 @@
   /* Rendered markdown. Kept as plain CSS so entry content needs no wrapper markup. */
   .md-body {
     @apply text-[14.5px] leading-relaxed text-content;
+    /* overflow-wrap is inherited, so this alone covers code/td/p/li etc. below - without it, an
+       unbroken long token (a file path with a line range, a long URL) refuses to wrap and forces
+       its container wider, overflowing cards/panels instead of just wrapping to the next line. */
+    overflow-wrap: anywhere;
   }
 
   .md-body > * + * {

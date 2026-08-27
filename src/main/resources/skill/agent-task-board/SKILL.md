@@ -24,16 +24,22 @@ source file the user explicitly asked for as part of the application. Concretely
 - Both reports (Phase 1 planning, Phase 2 final) -> built and saved by the `agent-task-report`
   skill, which itself never touches a local file.
 
-## Keep subtask descriptions short - link out to memory entries for anything substantial
+## MANDATORY: subtask descriptions stay short - full detail always goes in a linked entry
 
-A subtask's `description` is a card on a Kanban board, not a document - keep it to a few lines
-(what was done/found, one level of detail). Whenever there's more to say than that - a detailed
-writeup, code samples, a multi-section analysis - **save it as its own memory entry and
-reference it with `[[entry-name]]`**, don't inline it:
+A subtask's `description` renders as a card on a Kanban board
+(`ui/src/components/AgentTaskCard.vue`), not a document viewer - inlining a full writeup breaks
+the UI (oversized cards, broken layout). This is not "prefer short" - it is a hard limit, the
+same tier of rule as the FORBIDDEN section above:
 
-- Substantial markdown detail (analysis notes, a longer design rationale, detailed findings) ->
-  `memory_save(type: "PROJECT", name: "<task-key>-<short-slug>", ..., projectScope, taskKey)`,
-  then in the subtask's `description`: a one-line summary plus `[[<task-key>-<short-slug>]]`.
+- **Never put more than ~3 short lines directly in a subtask's `description`.** No code blocks,
+  no multi-line lists of file:line references, no tables, no multi-paragraph analysis - none of
+  that goes inline, ever. If what you're about to write doesn't fit in 3 lines, stop and save it
+  as an entry instead.
+- Whenever there's more to say than that - findings, a design rationale, file:line references,
+  anything with real structure - **save it as its own memory entry first and reference it with
+  `[[entry-name]]`**, don't inline it:
+  - `memory_save(type: "PROJECT", name: "<task-key>-<short-slug>", ..., projectScope, taskKey)`,
+    then in the subtask's `description`: a one-line summary plus `[[<task-key>-<short-slug>]]`.
 - Always pass the same `projectScope`/`taskKey` as the subtask - the dashboard only resolves
   `[[links]]` inside a subtask's description against that task's own entries (it can't see
   project-common or other tasks' entries from a subtask card), and an entry saved without them

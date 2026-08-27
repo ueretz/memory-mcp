@@ -45,7 +45,7 @@ function dependencyTitle(agentTask: AgentTaskSummary): string | null {
     hint="The agent-task-board skill creates and drives these as it works through the task."
   />
   <div v-else class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-    <div v-for="column in COLUMNS" :key="column.status" class="flex flex-col gap-3">
+    <div v-for="column in COLUMNS" :key="column.status" class="flex min-w-0 flex-col gap-3">
       <h3 class="flex items-center gap-2 text-[12px] font-semibold tracking-wide text-muted uppercase">
         <span class="size-2 rounded-full" :class="column.dot" />
         {{ column.label }}

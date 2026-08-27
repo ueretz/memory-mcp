@@ -18,7 +18,7 @@ const expanded = ref(false)
 </script>
 
 <template>
-  <div class="flex flex-col gap-2 rounded-xl border border-border bg-panel p-3">
+  <div class="flex min-w-0 flex-col gap-2 rounded-xl border border-border bg-panel p-3">
     <button type="button" class="flex items-center justify-between gap-2 text-left" @click="expanded = !expanded">
       <span class="flex min-w-0 items-center gap-2">
         <AgentTaskTypeBadge :type="agentTask.type" />
