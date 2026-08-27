@@ -44,6 +44,9 @@ public class AgentTask {
     @Column(columnDefinition = "text")
     private String description;
 
+    @Column(name = "depends_on_id")
+    private Long dependsOnId;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 
@@ -92,6 +95,14 @@ public class AgentTask {
 
     public void setDescription(String description) {
         this.description = description;
+    }
+
+    public Long getDependsOnId() {
+        return dependsOnId;
+    }
+
+    public void setDependsOnId(Long dependsOnId) {
+        this.dependsOnId = dependsOnId;
     }
 
     public Instant getCreatedAt() {
