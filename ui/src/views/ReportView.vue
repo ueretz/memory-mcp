@@ -22,12 +22,20 @@ const { isDark } = useTheme()
  * <html> overriding prefers-color-scheme. Stamping it here from the dashboard's own theme means
  * there's exactly one theme control in the whole interface - no separate toggle for reports. Has
  * no visible effect on a report that never implements the convention.
+ *
+ * Scoped to the <html ...> tag's own attribute list, not a blind whole-document string search -
+ * a naive `/data-theme=/.test(html)` matches the report's own CSS (`:root[data-theme="dark"]`
+ * selectors are common in these templates), so a bare `.replace()` would silently rewrite the
+ * CSS selector instead of the tag, leaving <html> without the attribute and the page falling
+ * back to prefers-color-scheme regardless of the dashboard's theme.
  */
 function withTheme(html: string, dark: boolean): string {
   const theme = dark ? 'dark' : 'light'
-  return /data-theme=/.test(html)
-    ? html.replace(/data-theme="[^"]*"/, `data-theme="${theme}"`)
-    : html.replace(/<html/i, `<html data-theme="${theme}"`)
+  return html.replace(/<html([^>]*)>/i, (_fullMatch, attrs: string) =>
+    /data-theme="[^"]*"/.test(attrs)
+      ? `<html${attrs.replace(/data-theme="[^"]*"/, `data-theme="${theme}"`)}>`
+      : `<html${attrs} data-theme="${theme}">`,
+  )
 }
 
 const themedContent = computed(() => (entry.value ? withTheme(entry.value.content, isDark.value) : ''))
