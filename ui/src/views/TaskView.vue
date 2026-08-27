@@ -12,7 +12,7 @@ import PageHeader from '@/components/PageHeader.vue'
 import SkeletonRows from '@/components/SkeletonRows.vue'
 import StatusBadge from '@/components/StatusBadge.vue'
 import { useAsyncData } from '@/composables/useAsyncData'
-import { graphLocation } from '@/lib/links'
+import { entryHref, graphLocation } from '@/lib/links'
 
 const props = defineProps<{ project: string; task: string }>()
 
@@ -31,6 +31,16 @@ const { data: folders } = useAsyncData(() => fetchFolders(project.value, taskKey
 const { data: agentTasks } = useAsyncData(() => fetchAgentTasks(project.value, taskKey.value), [project, taskKey])
 
 const task = computed(() => (tasks.value ?? []).find((item) => item.taskKey === taskKey.value) ?? null)
+
+/**
+ * Resolves a [[wiki-link]] inside an agent task's description to this task's entries.
+ * Agent tasks aren't memory entries themselves (no graph edges), so unlike EntryView this
+ * matches by name against the task's already-loaded entry list rather than real linkedTo edges.
+ */
+function resolveAgentTaskLink(name: string): string | null {
+  const match = entries.value?.find((entry) => entry.name === name)
+  return match ? entryHref(match) : null
+}
 </script>
 
 <template>
@@ -72,7 +82,7 @@ const task = computed(() => (tasks.value ?? []).find((item) => item.taskKey === 
         <AppIcon name="task" class="size-4 text-faint" />
         Agent Tasks
       </h2>
-      <AgentTaskBoard :agent-tasks="agentTasks ?? []" />
+      <AgentTaskBoard :agent-tasks="agentTasks ?? []" :resolve-link="resolveAgentTaskLink" />
     </section>
 
     <ErrorState v-if="error" :message="error" @retry="reload" />

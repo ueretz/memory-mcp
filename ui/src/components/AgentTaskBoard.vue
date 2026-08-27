@@ -6,7 +6,10 @@ import type { AgentTaskStatus, AgentTaskSummary } from '@/api/types'
 import AgentTaskCard from './AgentTaskCard.vue'
 import EmptyState from './EmptyState.vue'
 
-const props = defineProps<{ agentTasks: AgentTaskSummary[] }>()
+const props = defineProps<{
+  agentTasks: AgentTaskSummary[]
+  resolveLink?: (name: string) => string | null
+}>()
 
 const COLUMNS: Array<{ status: AgentTaskStatus; label: string; dot: string }> = [
   { status: 'TODO', label: 'To Do', dot: 'bg-agent-todo' },
@@ -44,7 +47,12 @@ const grouped = computed(() => {
         </span>
       </h3>
       <div class="flex flex-col gap-2.5">
-        <AgentTaskCard v-for="agentTask in grouped.get(column.status)" :key="agentTask.id" :agent-task="agentTask" />
+        <AgentTaskCard
+          v-for="agentTask in grouped.get(column.status)"
+          :key="agentTask.id"
+          :agent-task="agentTask"
+          :resolve-link="resolveLink"
+        />
       </div>
     </div>
   </div>

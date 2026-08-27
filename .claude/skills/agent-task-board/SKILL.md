@@ -24,6 +24,31 @@ application. Concretely:
 - Both reports (the Phase 1 planning report and the Phase 2 final report, see below) ->
   `memory_save(type: "REPORT", ...)`, never an `.html` file on disk.
 
+## Keep subtask descriptions short - link out to memory entries for anything substantial
+
+A subtask's `description` is a card on a Kanban board, not a document - keep it to a few lines
+(what was done/found, one level of detail). Whenever there's more to say than that - a detailed
+writeup, code samples, a multi-section analysis, a standalone report - **save it as its own
+memory entry and reference it with `[[entry-name]]`**, don't inline it:
+
+- Substantial markdown detail (analysis notes, a longer design rationale, detailed findings) ->
+  `memory_save(type: "PROJECT", name: "<task-key>-<short-slug>", ..., projectScope, taskKey)`,
+  then in the subtask's `description`: a one-line summary plus `[[<task-key>-<short-slug>]]`.
+- Anything that's really a report (the two reports below, or a code-review writeup with
+  severity-tagged findings) -> `memory_save(type: "REPORT", ...)` the same way.
+- Always pass the same `projectScope`/`taskKey` as the subtask - the dashboard only resolves
+  `[[links]]` inside a subtask's description against that task's own entries (it can't see
+  project-common or other tasks' entries from a subtask card), and an entry saved without them
+  won't be reachable from the task page at all (see the main `memory-mcp` skill's warning about
+  this).
+- Check the entry doesn't already exist for a near-duplicate fact before creating a new one
+  (`memory_search`/`memory_list` with `taskKey` set) - the same duplicate-avoidance rule that
+  applies to `memory_save` everywhere else applies here too.
+
+This is exactly what the two reports already do (Phase 1/Phase 2, below) - this section extends
+the same pattern to any other subtask that accumulates more than a couple of lines worth of
+detail, not just the two dedicated REPORTING/ANALYSIS steps.
+
 ## When this runs
 
 Right after `task_start`, if the work the user described is more than a one-line fix or a pure

@@ -8,7 +8,10 @@ import AgentTaskTypeBadge from './AgentTaskTypeBadge.vue'
 import AppIcon from './AppIcon.vue'
 import MarkdownBody from './MarkdownBody.vue'
 
-defineProps<{ agentTask: AgentTaskSummary }>()
+defineProps<{
+  agentTask: AgentTaskSummary
+  resolveLink?: (name: string) => string | null
+}>()
 
 const expanded = ref(false)
 </script>
@@ -22,7 +25,11 @@ const expanded = ref(false)
       </span>
       <AppIcon name="chevron" class="size-3.5 shrink-0 text-faint transition" :class="{ 'rotate-90': expanded }" />
     </button>
-    <MarkdownBody v-if="expanded && agentTask.description" :content="agentTask.description" />
+    <MarkdownBody
+      v-if="expanded && agentTask.description"
+      :content="agentTask.description"
+      :resolve-link="resolveLink"
+    />
     <p v-else-if="agentTask.description" class="line-clamp-2 text-[12px] text-muted">{{ agentTask.description }}</p>
     <time class="text-[11px] text-faint" :datetime="agentTask.updatedAt">{{ relativeTime(agentTask.updatedAt) }}</time>
   </div>
