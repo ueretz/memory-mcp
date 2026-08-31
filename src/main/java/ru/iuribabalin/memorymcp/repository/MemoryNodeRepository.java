@@ -16,6 +16,8 @@ public interface MemoryNodeRepository extends JpaRepository<MemoryNode, Long> {
 
     long countByProjectScopeAndTaskIsNull(String projectScope);
 
+    long deleteByProjectScopeAndTaskIsNull(String projectScope);
+
     @Query(value = """
             select project_scope from memory_nodes where project_scope is not null
             union

@@ -13,4 +13,6 @@ public interface TaskRepository extends JpaRepository<Task, Long> {
     List<Task> findByProjectScopeOrderByUpdatedAtDesc(String projectScope);
 
     long countByProjectScope(String projectScope);
+
+    long deleteByProjectScope(String projectScope);
 }

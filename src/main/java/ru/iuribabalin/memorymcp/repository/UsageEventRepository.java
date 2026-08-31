@@ -32,4 +32,6 @@ public interface UsageEventRepository extends JpaRepository<UsageEvent, Long> {
     List<DailyCountRow> countByDay(@Param("since") Instant since,
                                     @Param("projectScope") String projectScope,
                                     @Param("taskKey") String taskKey);
+
+    long deleteByProjectScope(String projectScope);
 }

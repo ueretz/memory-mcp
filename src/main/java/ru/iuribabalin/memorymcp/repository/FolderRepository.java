@@ -12,6 +12,8 @@ public interface FolderRepository extends JpaRepository<Folder, Long> {
 
     Optional<Folder> findByName(String name);
 
+    long deleteByProjectScopeAndTaskIsNull(String projectScope);
+
     @Query(value = """
             select f.* from folders f
             where f.project_scope = :projectScope
