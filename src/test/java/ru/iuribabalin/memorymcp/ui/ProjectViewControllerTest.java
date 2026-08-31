@@ -18,7 +18,9 @@ import ru.iuribabalin.memorymcp.service.TaskService;
 import java.time.Instant;
 import java.util.List;
 
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -65,5 +67,29 @@ class ProjectViewControllerTest {
 
         mockMvc.perform(get("/api/projects/memory-mcp/tasks/NO-SUCH/agent-tasks"))
                 .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void deletesATask() throws Exception {
+        when(taskService.delete("memory-mcp", "AT-1")).thenReturn(true);
+
+        mockMvc.perform(delete("/api/projects/memory-mcp/tasks/AT-1"))
+                .andExpect(status().isNoContent());
+    }
+
+    @Test
+    void returns404WhenDeletingAMissingTask() throws Exception {
+        when(taskService.delete("memory-mcp", "NO-SUCH")).thenReturn(false);
+
+        mockMvc.perform(delete("/api/projects/memory-mcp/tasks/NO-SUCH"))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void deletesAProject() throws Exception {
+        mockMvc.perform(delete("/api/projects/memory-mcp"))
+                .andExpect(status().isNoContent());
+
+        verify(projectService).delete("memory-mcp");
     }
 }

@@ -15,6 +15,7 @@ import java.time.Instant;
 import java.util.List;
 
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -55,5 +56,21 @@ class FolderViewControllerTest {
         mockMvc.perform(get("/api/folders/docs"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.description").value("desc"));
+    }
+
+    @Test
+    void deletesAnExistingFolder() throws Exception {
+        when(folderService.delete("docs")).thenReturn(true);
+
+        mockMvc.perform(delete("/api/folders/docs"))
+                .andExpect(status().isNoContent());
+    }
+
+    @Test
+    void returns404WhenDeletingAMissingFolder() throws Exception {
+        when(folderService.delete("missing")).thenReturn(false);
+
+        mockMvc.perform(delete("/api/folders/missing"))
+                .andExpect(status().isNotFound());
     }
 }

@@ -1,5 +1,7 @@
 package ru.iuribabalin.memorymcp.ui;
 
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RestController;
@@ -8,6 +10,7 @@ import ru.iuribabalin.memorymcp.dto.ProjectSummary;
 import ru.iuribabalin.memorymcp.dto.TaskSummary;
 import ru.iuribabalin.memorymcp.service.AgentTaskService;
 import ru.iuribabalin.memorymcp.service.ProjectService;
+import ru.iuribabalin.memorymcp.service.TaskNotFoundException;
 import ru.iuribabalin.memorymcp.service.TaskService;
 
 import java.util.List;
@@ -38,5 +41,19 @@ public class ProjectViewController {
     @GetMapping("/api/projects/{projectScope}/tasks/{taskKey}/agent-tasks")
     public List<AgentTaskSummary> agentTasks(@PathVariable String projectScope, @PathVariable String taskKey) {
         return agentTaskService.list(projectScope, taskKey, null, null, false);
+    }
+
+    @DeleteMapping("/api/projects/{projectScope}/tasks/{taskKey}")
+    public ResponseEntity<Void> deleteTask(@PathVariable String projectScope, @PathVariable String taskKey) {
+        if (!taskService.delete(projectScope, taskKey)) {
+            throw new TaskNotFoundException(projectScope, taskKey);
+        }
+        return ResponseEntity.noContent().build();
+    }
+
+    @DeleteMapping("/api/projects/{projectScope}")
+    public ResponseEntity<Void> deleteProject(@PathVariable String projectScope) {
+        projectService.delete(projectScope);
+        return ResponseEntity.noContent().build();
     }
 }
