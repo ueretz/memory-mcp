@@ -74,6 +74,7 @@ export const router = createRouter({
       meta: { bare: true },
     },
     { path: '/setup', name: 'setup', component: () => import('@/views/SetupView.vue') },
+    { path: '/settings', name: 'settings', component: () => import('@/views/SettingsView.vue') },
     { path: '/stats', name: 'stats', component: () => import('@/views/StatsView.vue') },
     { path: '/:pathMatch(.*)*', name: 'not-found', component: () => import('@/views/NotFoundView.vue') },
   ],

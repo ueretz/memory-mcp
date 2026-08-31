@@ -80,6 +80,14 @@ const drawerClass = computed(() =>
         <AppIcon name="cog" class="size-4" />
         Setup
       </RouterLink>
+      <RouterLink
+        :to="{ name: 'settings' }"
+        class="flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-[13px] font-medium text-muted transition hover:bg-elevated hover:text-content"
+        active-class="!bg-accent-soft !text-accent"
+      >
+        <AppIcon name="cog" class="size-4" />
+        Settings
+      </RouterLink>
     </nav>
 
     <div class="mt-2 min-h-0 flex-1 overflow-y-auto px-3 pb-4">
