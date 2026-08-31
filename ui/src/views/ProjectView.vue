@@ -90,6 +90,13 @@ async function confirmDelete() {
           Delete
         </button>
         <RouterLink
+          :to="{ name: 'pipelines', params: { project } }"
+          class="inline-flex items-center gap-2 rounded-lg border border-border bg-panel px-3 py-2 text-[13px] font-medium text-content transition hover:border-accent/40 hover:text-accent"
+        >
+          <AppIcon name="task" class="size-4" />
+          Pipelines
+        </RouterLink>
+        <RouterLink
           :to="graphLocation(project)"
           class="inline-flex items-center gap-2 rounded-lg border border-border bg-panel px-3 py-2 text-[13px] font-medium text-content transition hover:border-accent/40 hover:text-accent"
         >

@@ -48,6 +48,18 @@ export const router = createRouter({
       props: true,
     },
     {
+      path: '/p/:project/pipelines/:slug',
+      name: 'pipeline',
+      component: () => import('@/views/PipelineView.vue'),
+      props: true,
+    },
+    {
+      path: '/p/:project/pipelines/:slug/runs/:runId',
+      name: 'pipeline-run',
+      component: () => import('@/views/PipelineRunView.vue'),
+      props: true,
+    },
+    {
       path: '/p/:project/f/:folder',
       name: 'folder',
       component: () => import('@/views/FolderView.vue'),
