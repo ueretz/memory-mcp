@@ -4,6 +4,7 @@ import { computed, onMounted, ref } from 'vue'
 import { fetchStats } from '@/api/client'
 import { useAsyncData } from '@/composables/useAsyncData'
 import { useTheme } from '@/composables/useTheme'
+import { dataVersion } from '@/lib/dataVersion'
 
 import AppIcon from './AppIcon.vue'
 import BreadcrumbBar from './BreadcrumbBar.vue'
@@ -19,7 +20,7 @@ onMounted(() => {
   }
 })
 
-const { data: pulse } = useAsyncData(() => fetchStats(null, null, 7))
+const { data: pulse } = useAsyncData(() => fetchStats(null, null, 7), [dataVersion])
 const eventCount = computed(() => pulse.value?.totals.totalEvents ?? null)
 </script>
 

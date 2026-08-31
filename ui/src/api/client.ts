@@ -1,3 +1,5 @@
+import { bumpDataVersion } from '@/lib/dataVersion'
+
 import type {
   AgentTaskSummary,
   FolderSummary,
@@ -58,6 +60,7 @@ async function deleteRequest(path: string): Promise<void> {
     const message = (body as { error?: string } | null)?.error ?? `HTTP ${response.status}`
     throw new ApiError(response.status, message)
   }
+  bumpDataVersion()
 }
 
 export function fetchProjects(): Promise<ProjectSummary[]> {

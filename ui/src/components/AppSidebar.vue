@@ -4,6 +4,7 @@ import { useRoute } from 'vue-router'
 
 import { fetchProjects } from '@/api/client'
 import { useAsyncData } from '@/composables/useAsyncData'
+import { dataVersion } from '@/lib/dataVersion'
 import { projectLocation } from '@/lib/links'
 
 import AppIcon from './AppIcon.vue'
@@ -12,7 +13,7 @@ const props = defineProps<{ open: boolean }>()
 const emit = defineEmits<{ close: [] }>()
 
 const route = useRoute()
-const { data: projects, loading } = useAsyncData(fetchProjects)
+const { data: projects, loading } = useAsyncData(fetchProjects, [dataVersion])
 
 const activeProject = computed(() => route.params.project as string | undefined)
 
