@@ -2,7 +2,7 @@
 import { computed, ref, toRef } from 'vue'
 import { useRouter } from 'vue-router'
 
-import { deleteProject, fetchEntries, fetchFolders, fetchStats, fetchTasks } from '@/api/client'
+import { deleteProject, fetchEntries, fetchFolders, fetchSettings, fetchStats, fetchTasks } from '@/api/client'
 import { MEMORY_TYPES, type MemoryType } from '@/api/types'
 import AppIcon from '@/components/AppIcon.vue'
 import ConfirmDialog from '@/components/ConfirmDialog.vue'
@@ -14,6 +14,7 @@ import PageHeader from '@/components/PageHeader.vue'
 import SkeletonRows from '@/components/SkeletonRows.vue'
 import TaskCard from '@/components/TaskCard.vue'
 import { useAsyncData } from '@/composables/useAsyncData'
+import { dataVersion } from '@/lib/dataVersion'
 import { graphLocation } from '@/lib/links'
 
 const props = defineProps<{ project: string }>()
@@ -34,8 +35,14 @@ const { data: stats, loading: statsLoading } = useAsyncData(() => fetchStats(pro
 
 const { data: folders } = useAsyncData(() => fetchFolders(project.value, null, null), [project])
 
+const { data: settings } = useAsyncData(fetchSettings, [dataVersion])
+
 const visibleEntries = computed(() =>
   (common.value ?? []).filter((entry) => !typeFilter.value || entry.type === typeFilter.value),
+)
+
+const pipelinesEnabled = computed(
+  () => settings.value?.some((s) => s.key === 'feature.pipelines.enabled' && s.value === 'true') ?? false,
 )
 
 const activeTasks = computed(() => (tasks.value ?? []).filter((task) => task.status === 'ACTIVE'))
@@ -90,6 +97,7 @@ async function confirmDelete() {
           Delete
         </button>
         <RouterLink
+          v-if="pipelinesEnabled"
           :to="{ name: 'pipelines', params: { project } }"
           class="inline-flex items-center gap-2 rounded-lg border border-border bg-panel px-3 py-2 text-[13px] font-medium text-content transition hover:border-accent/40 hover:text-accent"
         >

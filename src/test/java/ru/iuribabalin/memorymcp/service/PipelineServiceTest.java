@@ -84,4 +84,15 @@ class PipelineServiceTest {
         assertThat(deleted).isTrue();
         assertThatThrownBy(() -> pipelineService.get("config-diff-5")).isInstanceOf(PipelineNotFoundException.class);
     }
+
+    @Test
+    void rejectsAnMdFileStepWithNoUploadedAsset() {
+        PipelineUpsertRequest request = new PipelineUpsertRequest(
+                "config-diff-6", "Config diff", "Diffs configs against prod", "pipeline-svc-test-project",
+                List.of(),
+                List.of(new PipelineUpsertRequest.StepRequest("Missing file", PipelineStep.ContentType.MD_FILE, null, null, null)));
+
+        assertThatThrownBy(() -> pipelineService.create(request, "Tester"))
+                .isInstanceOf(PipelineInvalidParametersException.class);
+    }
 }

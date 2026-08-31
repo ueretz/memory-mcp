@@ -55,6 +55,7 @@ public class PipelineService {
 
     @Transactional
     public PipelineDetail create(PipelineUpsertRequest request, String createdBy) {
+        validateSteps(request.steps());
         if (pipelineRepository.findBySlug(request.slug()).isPresent()) {
             throw new PipelineSlugTakenException(request.slug());
         }
@@ -71,6 +72,7 @@ public class PipelineService {
 
     @Transactional
     public PipelineDetail update(String slug, PipelineUpsertRequest request) {
+        validateSteps(request.steps());
         Pipeline pipeline = resolve(slug);
         applyFields(pipeline, request, Instant.now());
         pipelineRepository.save(pipeline);
@@ -107,9 +109,7 @@ public class PipelineService {
                 .map(step -> new PipelineExecutionDetail.StepView(
                         step.getOrderIndex(),
                         step.getTitle(),
-                        step.getContentType() == PipelineStep.ContentType.MD_FILE
-                                ? pipelineAssetService.readAsText(step.getAssetId())
-                                : step.getPromptText(),
+                        resolveInstructionText(step),
                         step.getReferenceAssetId() != null ? pipelineAssetService.readAsText(step.getReferenceAssetId()) : null))
                 .toList();
         return new PipelineExecutionDetail(pipeline.getSlug(), pipeline.getName(), pipeline.getDescription(), parameters, steps);
@@ -137,6 +137,26 @@ public class PipelineService {
         if (!missing.isEmpty()) {
             throw new PipelineInvalidParametersException("Missing required parameters: " + String.join(", ", missing));
         }
+    }
+
+    private void validateSteps(List<PipelineUpsertRequest.StepRequest> steps) {
+        for (PipelineUpsertRequest.StepRequest step : steps) {
+            if (step.contentType() == PipelineStep.ContentType.MD_FILE && step.assetId() == null) {
+                throw new PipelineInvalidParametersException(
+                        "Step '" + step.title() + "' is type MD_FILE but has no uploaded file — upload a .md file before saving");
+            }
+        }
+    }
+
+    private String resolveInstructionText(PipelineStep step) {
+        if (step.getContentType() != PipelineStep.ContentType.MD_FILE) {
+            return step.getPromptText();
+        }
+        if (step.getAssetId() == null) {
+            throw new PipelineInvalidParametersException(
+                    "Step '" + step.getTitle() + "' is type MD_FILE but has no uploaded file");
+        }
+        return pipelineAssetService.readAsText(step.getAssetId());
     }
 
     private void applyFields(Pipeline pipeline, PipelineUpsertRequest request, Instant now) {
