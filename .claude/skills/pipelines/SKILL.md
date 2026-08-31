@@ -18,12 +18,14 @@ the only new part is checking state back into memory-mcp as you go.
    Otherwise call `pipeline_list(projectScope)` first and match by name.
    - If `pipeline_get`/`pipeline_list` errors because the feature flag is off, tell the user
      plainly (don't retry) - point them at Settings in the dashboard.
-2. **Collect parameters.** `pipeline_get` returns `parameters` (name/label/type/required/default).
+2. **Collect parameters.** `pipeline_get` returns `parameters` (name/label/type/required/defaultValue).
    If the user's message already supplied values for every required parameter, use those.
    Otherwise ask for the missing ones before starting - don't guess.
 3. **Start the run:** `pipeline_run_start(slug, parametersJson)` with parameters as a JSON object
-   string, e.g. `{"folder": "src/config"}`. This returns `runId` and the ordered step list
-   (`orderIndex`, `title`, `instructionText`, `referenceText`).
+   string, e.g. `{"folder": "src/config"}`. This returns `runId` and the ordered step list with
+   each step's `orderIndex`, `title`, `contentType`, and `status` (starts `PENDING`) — the step
+   content (`instructionText`/`referenceText`) isn't repeated here; match each step by
+   `orderIndex` against what `pipeline_get` already returned in step 1.
 4. **Print a checklist** in chat before starting, one line per step, all unchecked:
    ```
    - [ ] 1. Check config history
