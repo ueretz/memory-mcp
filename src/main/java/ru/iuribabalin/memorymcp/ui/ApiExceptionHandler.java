@@ -7,6 +7,7 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 import ru.iuribabalin.memorymcp.service.FolderNotFoundException;
 import ru.iuribabalin.memorymcp.service.MemoryNotFoundException;
 import ru.iuribabalin.memorymcp.service.PdfRenderException;
+import ru.iuribabalin.memorymcp.service.PipelineAssetNotFoundException;
 import ru.iuribabalin.memorymcp.service.TaskNotFoundException;
 import ru.iuribabalin.memorymcp.service.UnsupportedExportException;
 
@@ -37,6 +38,11 @@ public class ApiExceptionHandler {
 
     @ExceptionHandler(FolderNotFoundException.class)
     public ResponseEntity<Map<String, String>> handleFolderNotFound(FolderNotFoundException ex) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", ex.getMessage()));
+    }
+
+    @ExceptionHandler(PipelineAssetNotFoundException.class)
+    public ResponseEntity<Map<String, String>> handlePipelineAssetNotFound(PipelineAssetNotFoundException ex) {
         return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", ex.getMessage()));
     }
 }
