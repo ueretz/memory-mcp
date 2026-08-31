@@ -8,6 +8,8 @@ import ru.iuribabalin.memorymcp.service.FolderNotFoundException;
 import ru.iuribabalin.memorymcp.service.MemoryNotFoundException;
 import ru.iuribabalin.memorymcp.service.PdfRenderException;
 import ru.iuribabalin.memorymcp.service.PipelineAssetNotFoundException;
+import ru.iuribabalin.memorymcp.service.PipelineNotFoundException;
+import ru.iuribabalin.memorymcp.service.PipelineSlugTakenException;
 import ru.iuribabalin.memorymcp.service.TaskNotFoundException;
 import ru.iuribabalin.memorymcp.service.UnsupportedExportException;
 
@@ -44,5 +46,15 @@ public class ApiExceptionHandler {
     @ExceptionHandler(PipelineAssetNotFoundException.class)
     public ResponseEntity<Map<String, String>> handlePipelineAssetNotFound(PipelineAssetNotFoundException ex) {
         return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", ex.getMessage()));
+    }
+
+    @ExceptionHandler(PipelineNotFoundException.class)
+    public ResponseEntity<Map<String, String>> handlePipelineNotFound(PipelineNotFoundException ex) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", ex.getMessage()));
+    }
+
+    @ExceptionHandler(PipelineSlugTakenException.class)
+    public ResponseEntity<Map<String, String>> handlePipelineSlugTaken(PipelineSlugTakenException ex) {
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("error", ex.getMessage()));
     }
 }
