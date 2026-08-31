@@ -18,7 +18,8 @@ public class UsageEvent {
     public enum Action {
         SAVE, GET, LIST, SEARCH, GRAPH, RELATED, DELETE, TASK_START, TASK_CLOSE, FOLDER_CREATE,
         AGENT_TASK_CREATE, AGENT_TASK_UPDATE, AGENT_TASK_DELETE, AGENT_TASK_CLAIM,
-        FOLDER_DELETE, TASK_DELETE, PROJECT_DELETE
+        FOLDER_DELETE, TASK_DELETE, PROJECT_DELETE,
+        PIPELINE_RUN_START, PIPELINE_RUN_STEP_UPDATE, PIPELINE_RUN_COMPLETE
     }
 
     @Id
@@ -26,7 +27,7 @@ public class UsageEvent {
     private Long id;
 
     @Enumerated(EnumType.STRING)
-    @Column(nullable = false, length = 20)
+    @Column(nullable = false, length = 30)
     private Action action;
 
     @Column(name = "entry_name", length = 500)
