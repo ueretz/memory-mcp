@@ -1,21 +1,45 @@
 <script setup lang="ts">
-import { computed, toRef } from 'vue'
+import { computed, ref, toRef } from 'vue'
+import { useRouter } from 'vue-router'
 
-import { fetchEntry } from '@/api/client'
+import { deleteEntry, fetchEntry } from '@/api/client'
 import type { MemoryEntrySummary, MemoryType } from '@/api/types'
 import AppIcon from '@/components/AppIcon.vue'
+import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import ErrorState from '@/components/ErrorState.vue'
 import MarkdownBody from '@/components/MarkdownBody.vue'
 import SkeletonRows from '@/components/SkeletonRows.vue'
 import TypeBadge from '@/components/TypeBadge.vue'
 import { useAsyncData } from '@/composables/useAsyncData'
 import { absoluteDateTime, relativeTime } from '@/lib/format'
-import { entryHref, entryLocation, htmlHref, markdownHref, pdfHref, reportLocation } from '@/lib/links'
+import { entryHref, entryLocation, htmlHref, markdownHref, pdfHref, projectLocation, reportLocation, taskLocation } from '@/lib/links'
 
 const props = defineProps<{ project: string; name: string; task?: string }>()
 
 const name = toRef(props, 'name')
 const { data: entry, error, loading, reload } = useAsyncData(() => fetchEntry(name.value), [name])
+
+const router = useRouter()
+const showDeleteConfirm = ref(false)
+const deleting = ref(false)
+const deleteError = ref<string | null>(null)
+
+async function confirmDelete() {
+  if (!entry.value) {
+    return
+  }
+  deleting.value = true
+  deleteError.value = null
+  try {
+    await deleteEntry(entry.value.name)
+    await router.push(props.task ? taskLocation(props.project, props.task) : projectLocation(props.project))
+  } catch (cause) {
+    deleteError.value = cause instanceof Error ? cause.message : String(cause)
+  } finally {
+    deleting.value = false
+    showDeleteConfirm.value = false
+  }
+}
 
 /** Only entries this one actually links to can be resolved to a page. */
 const linkTargets = computed(() => {
@@ -144,7 +168,16 @@ const heroStyle = computed(() => {
               <AppIcon name="download" class="size-3.5" />
               Download .md
             </a>
+            <button
+              type="button"
+              class="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-[12.5px] font-medium text-content transition hover:border-red-500/50 hover:text-red-600"
+              @click="showDeleteConfirm = true"
+            >
+              <AppIcon name="trash" class="size-3.5" />
+              Delete
+            </button>
           </div>
+          <p v-if="deleteError" class="mt-2 text-[12.5px] text-red-600">{{ deleteError }}</p>
         </div>
       </div>
 
@@ -198,5 +231,14 @@ const heroStyle = computed(() => {
         </div>
       </section>
     </article>
+
+    <ConfirmDialog
+      :open="showDeleteConfirm"
+      title="Delete this entry?"
+      :message="`Delete &quot;${entry?.name}&quot;? This can't be undone.`"
+      :loading="deleting"
+      @confirm="confirmDelete"
+      @cancel="showDeleteConfirm = false"
+    />
   </div>
 </template>

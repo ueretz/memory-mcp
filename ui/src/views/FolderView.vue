@@ -1,8 +1,10 @@
 <script setup lang="ts">
-import { computed, toRef } from 'vue'
+import { computed, ref, toRef } from 'vue'
+import { useRouter } from 'vue-router'
 
-import { fetchEntries, fetchFolder, fetchFolders } from '@/api/client'
+import { deleteFolder, fetchEntries, fetchFolder, fetchFolders } from '@/api/client'
 import AppIcon from '@/components/AppIcon.vue'
+import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import EmptyState from '@/components/EmptyState.vue'
 import EntryCard from '@/components/EntryCard.vue'
 import ErrorState from '@/components/ErrorState.vue'
@@ -41,6 +43,31 @@ const backLink = computed(() => {
   }
   return folder.value.taskKey ? taskLocation(project.value, folder.value.taskKey) : projectLocation(project.value)
 })
+
+const router = useRouter()
+const showDeleteConfirm = ref(false)
+const deleting = ref(false)
+const deleteError = ref<string | null>(null)
+
+const deleteMessage = computed(() => {
+  const count = subfolders.value?.length ?? 0
+  const extra = count > 0 ? ` ${count} subfolder${count === 1 ? '' : 's'} will also be deleted.` : ''
+  return `Delete folder "${folderName.value}"?${extra} Entries inside are moved to the root, not deleted. This can't be undone.`
+})
+
+async function confirmDelete() {
+  deleting.value = true
+  deleteError.value = null
+  try {
+    await deleteFolder(folderName.value)
+    await router.push(backLink.value)
+  } catch (cause) {
+    deleteError.value = cause instanceof Error ? cause.message : String(cause)
+  } finally {
+    deleting.value = false
+    showDeleteConfirm.value = false
+  }
+}
 </script>
 
 <template>
@@ -49,6 +76,14 @@ const backLink = computed(() => {
     <template v-else>
       <PageHeader eyebrow="Folder" :title="folder?.name ?? folderName" :subtitle="folder?.description">
         <template #actions>
+          <button
+            type="button"
+            class="inline-flex items-center gap-2 rounded-lg border border-border bg-panel px-3 py-2 text-[13px] font-medium text-content transition hover:border-red-500/50 hover:text-red-600"
+            @click="showDeleteConfirm = true"
+          >
+            <AppIcon name="trash" class="size-4" />
+            Delete
+          </button>
           <RouterLink
             :to="backLink"
             class="inline-flex items-center gap-2 rounded-lg border border-border bg-panel px-3 py-2 text-[13px] font-medium text-content transition hover:border-accent/40 hover:text-accent"
@@ -86,5 +121,15 @@ const backLink = computed(() => {
         </div>
       </section>
     </template>
+
+    <ConfirmDialog
+      :open="showDeleteConfirm"
+      title="Delete this folder?"
+      :message="deleteMessage"
+      :loading="deleting"
+      @confirm="confirmDelete"
+      @cancel="showDeleteConfirm = false"
+    />
+    <p v-if="deleteError" class="mt-3 text-[12.5px] text-red-600">{{ deleteError }}</p>
   </div>
 </template>
