@@ -9,6 +9,8 @@ import ru.iuribabalin.memorymcp.service.MemoryNotFoundException;
 import ru.iuribabalin.memorymcp.service.PdfRenderException;
 import ru.iuribabalin.memorymcp.service.PipelineAssetNotFoundException;
 import ru.iuribabalin.memorymcp.service.PipelineNotFoundException;
+import ru.iuribabalin.memorymcp.service.PipelineRunNotFoundException;
+import ru.iuribabalin.memorymcp.service.PipelineRunStepNotFoundException;
 import ru.iuribabalin.memorymcp.service.PipelineSlugTakenException;
 import ru.iuribabalin.memorymcp.service.TaskNotFoundException;
 import ru.iuribabalin.memorymcp.service.UnsupportedExportException;
@@ -56,5 +58,15 @@ public class ApiExceptionHandler {
     @ExceptionHandler(PipelineSlugTakenException.class)
     public ResponseEntity<Map<String, String>> handlePipelineSlugTaken(PipelineSlugTakenException ex) {
         return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("error", ex.getMessage()));
+    }
+
+    @ExceptionHandler(PipelineRunNotFoundException.class)
+    public ResponseEntity<Map<String, String>> handlePipelineRunNotFound(PipelineRunNotFoundException ex) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", ex.getMessage()));
+    }
+
+    @ExceptionHandler(PipelineRunStepNotFoundException.class)
+    public ResponseEntity<Map<String, String>> handlePipelineRunStepNotFound(PipelineRunStepNotFoundException ex) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", ex.getMessage()));
     }
 }
