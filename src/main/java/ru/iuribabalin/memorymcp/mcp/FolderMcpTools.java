@@ -9,6 +9,7 @@ import ru.iuribabalin.memorymcp.service.FolderService;
 import ru.iuribabalin.memorymcp.service.UsageEventRecorder;
 
 import java.util.List;
+import java.util.Map;
 
 @Component
 public class FolderMcpTools {
@@ -46,5 +47,15 @@ public class FolderMcpTools {
             @McpToolParam(description = "Task key filter; omit to list the project's common-space folders", required = false) String taskKey,
             @McpToolParam(description = "Parent folder name; omit to list top-level folders", required = false) String parentFolder) {
         return folderService.listChildren(projectScope, taskKey, parentFolder);
+    }
+
+    @McpTool(name = "folder_delete",
+            description = "Delete a folder. Subfolders are deleted too; entries directly inside " +
+                    "(or in a deleted subfolder) are moved to the root of their scope, not deleted.")
+    public Map<String, Object> folderDelete(
+            @McpToolParam(description = "The folder's name", required = true) String name) {
+        boolean deleted = folderService.delete(name);
+        usageEventRecorder.record(UsageEvent.Action.FOLDER_DELETE, name, null, null, null);
+        return Map.of("deleted", deleted, "name", name);
     }
 }

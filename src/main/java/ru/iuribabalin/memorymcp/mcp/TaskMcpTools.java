@@ -56,4 +56,16 @@ public class TaskMcpTools {
         usageEventRecorder.record(UsageEvent.Action.TASK_CLOSE, null, projectScope, taskKey, null);
         return Map.of("closed", closed, "taskKey", taskKey);
     }
+
+    @McpTool(name = "task_delete",
+            description = "Permanently delete a task and everything scoped to it (its entries, folders, and " +
+                    "agent-task board) - not the same as task_close, which only marks it done. Use only when the " +
+                    "user explicitly wants the task's data gone, not just finished.")
+    public Map<String, Object> taskDelete(
+            @McpToolParam(description = "Project identifier", required = true) String projectScope,
+            @McpToolParam(description = "The task/ticket key", required = true) String taskKey) {
+        boolean deleted = taskService.delete(projectScope, taskKey);
+        usageEventRecorder.record(UsageEvent.Action.TASK_DELETE, null, projectScope, taskKey, null);
+        return Map.of("deleted", deleted, "taskKey", taskKey);
+    }
 }
