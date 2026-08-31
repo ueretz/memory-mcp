@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { computed, ref, toRef } from 'vue'
+import { useRouter } from 'vue-router'
 
-import { fetchEntries, fetchFolders, fetchStats, fetchTasks } from '@/api/client'
+import { deleteProject, fetchEntries, fetchFolders, fetchStats, fetchTasks } from '@/api/client'
 import { MEMORY_TYPES, type MemoryType } from '@/api/types'
 import AppIcon from '@/components/AppIcon.vue'
+import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import EmptyState from '@/components/EmptyState.vue'
 import EntryCard from '@/components/EntryCard.vue'
 import ErrorState from '@/components/ErrorState.vue'
@@ -38,6 +40,37 @@ const visibleEntries = computed(() =>
 
 const activeTasks = computed(() => (tasks.value ?? []).filter((task) => task.status === 'ACTIVE'))
 const doneTasks = computed(() => (tasks.value ?? []).filter((task) => task.status === 'DONE'))
+
+const router = useRouter()
+const showDeleteConfirm = ref(false)
+const deleting = ref(false)
+const deleteError = ref<string | null>(null)
+
+const deleteMessage = computed(() => {
+  const parts: string[] = []
+  if (tasks.value?.length) {
+    parts.push(`${tasks.value.length} ${tasks.value.length === 1 ? 'task' : 'tasks'}`)
+  }
+  if (common.value?.length) {
+    parts.push(`${common.value.length} common ${common.value.length === 1 ? 'entry' : 'entries'}`)
+  }
+  const impact = parts.length ? ` This permanently deletes ${parts.join(', ')} (and everything under them).` : ''
+  return `Delete project "${project.value}"?${impact} This can't be undone.`
+})
+
+async function confirmDelete() {
+  deleting.value = true
+  deleteError.value = null
+  try {
+    await deleteProject(project.value)
+    await router.push({ name: 'projects' })
+  } catch (cause) {
+    deleteError.value = cause instanceof Error ? cause.message : String(cause)
+  } finally {
+    deleting.value = false
+    showDeleteConfirm.value = false
+  }
+}
 </script>
 
 <template>
@@ -48,6 +81,14 @@ const doneTasks = computed(() => (tasks.value ?? []).filter((task) => task.statu
       subtitle="Common memory lives here; task-scoped notes are grouped below."
     >
       <template #actions>
+        <button
+          type="button"
+          class="inline-flex items-center gap-2 rounded-lg border border-border bg-panel px-3 py-2 text-[13px] font-medium text-content transition hover:border-red-500/50 hover:text-red-600"
+          @click="showDeleteConfirm = true"
+        >
+          <AppIcon name="trash" class="size-4" />
+          Delete
+        </button>
         <RouterLink
           :to="graphLocation(project)"
           class="inline-flex items-center gap-2 rounded-lg border border-border bg-panel px-3 py-2 text-[13px] font-medium text-content transition hover:border-accent/40 hover:text-accent"
@@ -190,5 +231,15 @@ const doneTasks = computed(() => (tasks.value ?? []).filter((task) => task.statu
         </details>
       </div>
     </section>
+
+    <ConfirmDialog
+      :open="showDeleteConfirm"
+      title="Delete this project?"
+      :message="deleteMessage"
+      :loading="deleting"
+      @confirm="confirmDelete"
+      @cancel="showDeleteConfirm = false"
+    />
+    <p v-if="deleteError" class="mt-3 text-[12.5px] text-red-600">{{ deleteError }}</p>
   </div>
 </template>

@@ -1,9 +1,11 @@
 <script setup lang="ts">
-import { computed, toRef } from 'vue'
+import { computed, ref, toRef } from 'vue'
+import { useRouter } from 'vue-router'
 
-import { fetchAgentTasks, fetchEntries, fetchFolders, fetchTasks } from '@/api/client'
+import { deleteTask, fetchAgentTasks, fetchEntries, fetchFolders, fetchTasks } from '@/api/client'
 import AgentTaskBoard from '@/components/AgentTaskBoard.vue'
 import AppIcon from '@/components/AppIcon.vue'
+import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import EmptyState from '@/components/EmptyState.vue'
 import EntryCard from '@/components/EntryCard.vue'
 import ErrorState from '@/components/ErrorState.vue'
@@ -12,7 +14,7 @@ import PageHeader from '@/components/PageHeader.vue'
 import SkeletonRows from '@/components/SkeletonRows.vue'
 import StatusBadge from '@/components/StatusBadge.vue'
 import { useAsyncData } from '@/composables/useAsyncData'
-import { entryHref, graphLocation } from '@/lib/links'
+import { entryHref, graphLocation, projectLocation } from '@/lib/links'
 
 const props = defineProps<{ project: string; task: string }>()
 
@@ -41,6 +43,40 @@ function resolveAgentTaskLink(name: string): string | null {
   const match = entries.value?.find((entry) => entry.name === name)
   return match ? entryHref(match) : null
 }
+
+const router = useRouter()
+const showDeleteConfirm = ref(false)
+const deleting = ref(false)
+const deleteError = ref<string | null>(null)
+
+const deleteMessage = computed(() => {
+  const parts: string[] = []
+  if (entries.value?.length) {
+    parts.push(`${entries.value.length} ${entries.value.length === 1 ? 'entry' : 'entries'}`)
+  }
+  if (folders.value?.length) {
+    parts.push(`${folders.value.length} ${folders.value.length === 1 ? 'folder' : 'folders'}`)
+  }
+  if (agentTasks.value?.length) {
+    parts.push(`${agentTasks.value.length} agent subtask${agentTasks.value.length === 1 ? '' : 's'}`)
+  }
+  const impact = parts.length ? ` This permanently deletes ${parts.join(', ')}.` : ''
+  return `Delete task "${taskKey.value}"?${impact} This can't be undone.`
+})
+
+async function confirmDelete() {
+  deleting.value = true
+  deleteError.value = null
+  try {
+    await deleteTask(project.value, taskKey.value)
+    await router.push(projectLocation(project.value))
+  } catch (cause) {
+    deleteError.value = cause instanceof Error ? cause.message : String(cause)
+  } finally {
+    deleting.value = false
+    showDeleteConfirm.value = false
+  }
+}
 </script>
 
 <template>
@@ -54,6 +90,14 @@ function resolveAgentTaskLink(name: string): string | null {
         <StatusBadge v-if="task" :status="task.status" />
       </template>
       <template #actions>
+        <button
+          type="button"
+          class="inline-flex items-center gap-2 rounded-lg border border-border bg-panel px-3 py-2 text-[13px] font-medium text-content transition hover:border-red-500/50 hover:text-red-600"
+          @click="showDeleteConfirm = true"
+        >
+          <AppIcon name="trash" class="size-4" />
+          Delete
+        </button>
         <RouterLink
           :to="graphLocation(project, taskKey)"
           class="inline-flex items-center gap-2 rounded-lg border border-border bg-panel px-3 py-2 text-[13px] font-medium text-content transition hover:border-accent/40 hover:text-accent"
@@ -96,5 +140,15 @@ function resolveAgentTaskLink(name: string): string | null {
     <div v-else class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
       <EntryCard v-for="entry in entries" :key="entry.name" :entry="entry" />
     </div>
+
+    <ConfirmDialog
+      :open="showDeleteConfirm"
+      title="Delete this task?"
+      :message="deleteMessage"
+      :loading="deleting"
+      @confirm="confirmDelete"
+      @cancel="showDeleteConfirm = false"
+    />
+    <p v-if="deleteError" class="mt-3 text-[12.5px] text-red-600">{{ deleteError }}</p>
   </div>
 </template>
