@@ -137,17 +137,22 @@ Java-слой (`ru.iuribabalin.memorymcp`):
 | `agent_task_update` | `projectScope`, `taskKey`, `agentTaskId`, `status?`, `title?`, `description?` | Сдвинуть статус подзадачи и/или дополнить аналитику |
 | `agent_task_delete` | `projectScope`, `taskKey`, `agentTaskId` | Удалить ошибочную/дублирующую подзадачу |
 | `agent_task_claim` | `projectScope`, `taskKey`, `agentTaskId` | Атомарно захватить `TODO`-подзадачу (`TODO → IN_PROGRESS`) для безопасной работы нескольких независимых сессий на одной доске; падает, если уже захвачена или зависимость (`dependsOnId`) ещё не `DONE` |
+| `folder_delete` | `name` | Удалить папку (подпапки — каскадно, записи внутри — не удаляются, а расфайливаются в корень своего scope) |
+| `task_delete` | `projectScope`, `taskKey` | Безвозвратно удалить задачу целиком — записи/папки/доску подзадач (в отличие от `task_close`, который просто помечает done) |
+| `project_delete` | `projectScope` | Безвозвратно удалить весь проект — все задачи, common-записи, common-папки |
 
 ### REST API дашборда
 
-Без авторизации (рассчитано на localhost-only персональное использование):
-`GET /api/projects`, `GET /api/projects/{scope}/tasks`, `GET /api/memory`,
-`GET /api/memory/{name}`, `GET /api/memory/search?q=`, `GET /api/memory/graph`,
-`GET /api/memory/{name}/pdf`, `GET /api/memory/{name}/html`, `GET /api/memory/{name}/markdown`,
-`GET /api/setup`, `GET /api/setup/skills/{id}`, `GET /api/folders`, `GET /api/folders/{name}`,
-`GET /api/stats/overview`. `ApiExceptionHandler` превращает отсутствие записи/задачи/папки в HTTP 404,
-экспорт markdown у `REPORT`-записи — в 400, а сбой рендера PDF — в 500 (вместо голого 500 без
-объяснения).
+Без авторизации (рассчитано на localhost-only персональное использование). Только чтение, кроме
+`DELETE` — единственное осознанное исключение из "дашборд не пишет": `GET /api/projects`,
+`GET /api/projects/{scope}/tasks`, `GET /api/memory`, `GET /api/memory/{name}`,
+`GET /api/memory/search?q=`, `GET /api/memory/graph`, `GET /api/memory/{name}/pdf`,
+`GET /api/memory/{name}/html`, `GET /api/memory/{name}/markdown`, `GET /api/setup`,
+`GET /api/setup/skills/{id}`, `GET /api/folders`, `GET /api/folders/{name}`,
+`GET /api/stats/overview`, `DELETE /api/memory/{name}`, `DELETE /api/folders/{name}`,
+`DELETE /api/projects/{scope}/tasks/{taskKey}`, `DELETE /api/projects/{scope}`.
+`ApiExceptionHandler` превращает отсутствие записи/задачи/папки в HTTP 404, экспорт markdown у
+`REPORT`-записи — в 400, а сбой рендера PDF — в 500 (вместо голого 500 без объяснения).
 
 ### Веб-дашборд
 
