@@ -57,6 +57,16 @@ public class TaskService {
                 .orElse(false);
     }
 
+    @Transactional
+    public boolean delete(String projectScope, String taskKey) {
+        return taskRepository.findByProjectScopeAndTaskKey(projectScope, taskKey)
+                .map(task -> {
+                    taskRepository.delete(task);
+                    return true;
+                })
+                .orElse(false);
+    }
+
     Task resolve(String projectScope, String taskKey) {
         return taskRepository.findByProjectScopeAndTaskKey(projectScope, taskKey)
                 .orElseThrow(() -> new TaskNotFoundException(projectScope, taskKey));

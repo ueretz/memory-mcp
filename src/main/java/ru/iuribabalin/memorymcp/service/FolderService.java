@@ -60,6 +60,16 @@ public class FolderService {
                 .orElseThrow(() -> new FolderNotFoundException(name));
     }
 
+    @Transactional
+    public boolean delete(String name) {
+        return folderRepository.findByName(name)
+                .map(folder -> {
+                    folderRepository.delete(folder);
+                    return true;
+                })
+                .orElse(false);
+    }
+
     private Folder resolveParent(String parentFolder, String projectScope, String taskKey) {
         if (parentFolder == null) {
             return null;

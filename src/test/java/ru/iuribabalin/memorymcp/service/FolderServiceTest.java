@@ -57,4 +57,23 @@ class FolderServiceTest {
         assertThat(updated.description()).isEqualTo("updated desc");
         assertThat(updated.projectScope()).isEqualTo("folder-svc-test-update-project");
     }
+
+    @Test
+    void deleteRemovesTheFolder() {
+        folderService.create("folder-svc-test-delete-project", null, "folder-svc-test-delete-target", "desc", null, "Tester");
+
+        boolean deleted = folderService.delete("folder-svc-test-delete-target");
+
+        assertThat(deleted).isTrue();
+        assertThat(folderService.listChildren("folder-svc-test-delete-project", null, null))
+                .extracting(FolderSummary::name)
+                .doesNotContain("folder-svc-test-delete-target");
+    }
+
+    @Test
+    void deleteReturnsFalseWhenFolderDoesNotExist() {
+        boolean deleted = folderService.delete("folder-svc-test-delete-nonexistent");
+
+        assertThat(deleted).isFalse();
+    }
 }
