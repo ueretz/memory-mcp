@@ -125,3 +125,125 @@ export interface FolderSummary {
   createdBy: string | null
   updatedAt: string
 }
+
+export interface SettingSummary {
+  key: string
+  value: string
+  updatedAt: string
+}
+
+export type PipelineParameterType = 'STRING' | 'NUMBER' | 'BOOLEAN'
+export type PipelineStepContentType = 'PROMPT' | 'MD_FILE'
+export type PipelineRunStatus = 'RUNNING' | 'DONE' | 'FAILED' | 'ABORTED'
+export type PipelineRunStepStatus = 'PENDING' | 'RUNNING' | 'DONE' | 'FAILED' | 'SKIPPED'
+
+export interface PipelineAssetSummary {
+  id: number
+  filename: string
+  contentType: string
+  sizeBytes: number
+  createdAt: string
+}
+
+export interface PipelineParameterView {
+  id: number
+  name: string
+  label: string
+  type: PipelineParameterType
+  required: boolean
+  defaultValue: string | null
+  orderIndex: number
+}
+
+export interface PipelineStepView {
+  id: number
+  orderIndex: number
+  title: string
+  contentType: PipelineStepContentType
+  promptText: string | null
+  assetId: number | null
+  referenceAssetId: number | null
+}
+
+export interface PipelineSummary {
+  id: number
+  slug: string
+  name: string
+  description: string | null
+  projectScope: string | null
+  parameterCount: number
+  stepCount: number
+  createdBy: string | null
+  updatedAt: string
+}
+
+export interface PipelineDetail {
+  id: number
+  slug: string
+  name: string
+  description: string | null
+  projectScope: string | null
+  parameters: PipelineParameterView[]
+  steps: PipelineStepView[]
+  createdBy: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+export interface PipelineUpsertParameter {
+  name: string
+  label: string
+  type: PipelineParameterType
+  required: boolean
+  defaultValue: string | null
+}
+
+export interface PipelineUpsertStep {
+  title: string
+  contentType: PipelineStepContentType
+  promptText: string | null
+  assetId: number | null
+  referenceAssetId: number | null
+}
+
+export interface PipelineUpsertRequest {
+  slug: string
+  name: string
+  description: string | null
+  projectScope: string | null
+  parameters: PipelineUpsertParameter[]
+  steps: PipelineUpsertStep[]
+}
+
+export interface PipelineRunSummary {
+  id: number
+  pipelineId: number
+  pipelineSlug: string
+  status: PipelineRunStatus
+  startedAt: string
+  finishedAt: string | null
+  startedBy: string | null
+}
+
+export interface PipelineRunStepView {
+  id: number
+  orderIndex: number
+  title: string
+  contentType: PipelineStepContentType
+  status: PipelineRunStepStatus
+  note: string | null
+  startedAt: string | null
+  finishedAt: string | null
+}
+
+export interface PipelineRunDetail {
+  id: number
+  pipelineId: number
+  pipelineSlug: string
+  status: PipelineRunStatus
+  parametersJson: string | null
+  startedAt: string
+  finishedAt: string | null
+  startedBy: string | null
+  steps: PipelineRunStepView[]
+}

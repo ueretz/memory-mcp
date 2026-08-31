@@ -7,8 +7,15 @@ import type {
   MemoryEntryDetail,
   MemoryEntrySummary,
   MemoryType,
+  PipelineAssetSummary,
+  PipelineDetail,
+  PipelineRunDetail,
+  PipelineRunSummary,
+  PipelineSummary,
+  PipelineUpsertRequest,
   ProjectSummary,
   SetupInfo,
+  SettingSummary,
   StatsOverview,
   TaskSummary,
 } from './types'
@@ -61,6 +68,46 @@ async function deleteRequest(path: string): Promise<void> {
     throw new ApiError(response.status, message)
   }
   bumpDataVersion()
+}
+
+async function postJson<T>(path: string, body: unknown): Promise<T> {
+  let response: Response
+  try {
+    response = await fetch(path, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify(body),
+    })
+  } catch {
+    throw new ApiError(0, 'Cannot reach the memory-mcp server')
+  }
+  if (!response.ok) {
+    const errorBody = await response.json().catch(() => null)
+    const message = (errorBody as { error?: string } | null)?.error ?? `HTTP ${response.status}`
+    throw new ApiError(response.status, message)
+  }
+  bumpDataVersion()
+  return response.json() as Promise<T>
+}
+
+async function putJson<T>(path: string, body: unknown): Promise<T> {
+  let response: Response
+  try {
+    response = await fetch(path, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify(body),
+    })
+  } catch {
+    throw new ApiError(0, 'Cannot reach the memory-mcp server')
+  }
+  if (!response.ok) {
+    const errorBody = await response.json().catch(() => null)
+    const message = (errorBody as { error?: string } | null)?.error ?? `HTTP ${response.status}`
+    throw new ApiError(response.status, message)
+  }
+  bumpDataVersion()
+  return response.json() as Promise<T>
 }
 
 export function fetchProjects(): Promise<ProjectSummary[]> {
@@ -165,4 +212,57 @@ export function deleteTask(projectScope: string, taskKey: string): Promise<void>
 
 export function deleteProject(projectScope: string): Promise<void> {
   return deleteRequest(`/api/projects/${encodeURIComponent(projectScope)}`)
+}
+
+export function fetchSettings(): Promise<SettingSummary[]> {
+  return getJson('/api/settings')
+}
+
+export function updateSetting(key: string, value: string): Promise<SettingSummary> {
+  return putJson(`/api/settings/${encodeURIComponent(key)}`, { value })
+}
+
+export function fetchPipelines(projectScope: string): Promise<PipelineSummary[]> {
+  return getJson('/api/pipelines', { projectScope })
+}
+
+export function fetchPipeline(slug: string): Promise<PipelineDetail> {
+  return getJson(`/api/pipelines/${encodeURIComponent(slug)}`)
+}
+
+export function createPipeline(request: PipelineUpsertRequest): Promise<PipelineDetail> {
+  return postJson('/api/pipelines', request)
+}
+
+export function updatePipeline(slug: string, request: PipelineUpsertRequest): Promise<PipelineDetail> {
+  return putJson(`/api/pipelines/${encodeURIComponent(slug)}`, request)
+}
+
+export function deletePipeline(slug: string): Promise<void> {
+  return deleteRequest(`/api/pipelines/${encodeURIComponent(slug)}`)
+}
+
+export async function uploadPipelineAsset(file: File): Promise<PipelineAssetSummary> {
+  const formData = new FormData()
+  formData.append('file', file)
+  let response: Response
+  try {
+    response = await fetch('/api/pipeline-assets', { method: 'POST', body: formData })
+  } catch {
+    throw new ApiError(0, 'Cannot reach the memory-mcp server')
+  }
+  if (!response.ok) {
+    const body = await response.json().catch(() => null)
+    const message = (body as { error?: string } | null)?.error ?? `HTTP ${response.status}`
+    throw new ApiError(response.status, message)
+  }
+  return response.json() as Promise<PipelineAssetSummary>
+}
+
+export function fetchPipelineRuns(slug: string): Promise<PipelineRunSummary[]> {
+  return getJson(`/api/pipelines/${encodeURIComponent(slug)}/runs`)
+}
+
+export function fetchPipelineRun(id: number): Promise<PipelineRunDetail> {
+  return getJson(`/api/pipeline-runs/${id}`)
 }
