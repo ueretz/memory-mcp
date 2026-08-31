@@ -30,6 +30,24 @@ export const router = createRouter({
       props: true,
     },
     {
+      path: '/p/:project/pipelines',
+      name: 'pipelines',
+      component: () => import('@/views/PipelinesView.vue'),
+      props: true,
+    },
+    {
+      path: '/p/:project/pipelines/new',
+      name: 'pipeline-new',
+      component: () => import('@/views/PipelineBuilderView.vue'),
+      props: true,
+    },
+    {
+      path: '/p/:project/pipelines/:slug/edit',
+      name: 'pipeline-edit',
+      component: () => import('@/views/PipelineBuilderView.vue'),
+      props: true,
+    },
+    {
       path: '/p/:project/f/:folder',
       name: 'folder',
       component: () => import('@/views/FolderView.vue'),
