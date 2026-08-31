@@ -46,6 +46,20 @@ async function getJson<T>(path: string, params?: Record<string, string | number 
   return response.json() as Promise<T>
 }
 
+async function deleteRequest(path: string): Promise<void> {
+  let response: Response
+  try {
+    response = await fetch(path, { method: 'DELETE' })
+  } catch {
+    throw new ApiError(0, 'Cannot reach the memory-mcp server')
+  }
+  if (!response.ok) {
+    const body = await response.json().catch(() => null)
+    const message = (body as { error?: string } | null)?.error ?? `HTTP ${response.status}`
+    throw new ApiError(response.status, message)
+  }
+}
+
 export function fetchProjects(): Promise<ProjectSummary[]> {
   return getJson('/api/projects')
 }
@@ -132,4 +146,20 @@ export function fetchFolders(
 
 export function fetchFolder(name: string): Promise<FolderSummary> {
   return getJson(`/api/folders/${encodeURIComponent(name)}`)
+}
+
+export function deleteEntry(name: string): Promise<void> {
+  return deleteRequest(`/api/memory/${encodeURIComponent(name)}`)
+}
+
+export function deleteFolder(name: string): Promise<void> {
+  return deleteRequest(`/api/folders/${encodeURIComponent(name)}`)
+}
+
+export function deleteTask(projectScope: string, taskKey: string): Promise<void> {
+  return deleteRequest(`/api/projects/${encodeURIComponent(projectScope)}/tasks/${encodeURIComponent(taskKey)}`)
+}
+
+export function deleteProject(projectScope: string): Promise<void> {
+  return deleteRequest(`/api/projects/${encodeURIComponent(projectScope)}`)
 }
