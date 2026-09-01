@@ -77,17 +77,21 @@ public class PipelineMcpTools {
                     "it, then DONE or FAILED when you finish, or SKIPPED if the user told you to skip it. Include a " +
                     "short note describing what you did or why it failed. If pipeline_get showed this step has more " +
                     "than one route, pass 'outcome' matching one of its route keys when reporting DONE so the run " +
-                    "advances down the right branch. Check the returned currentStepOrderIndex for what to do next - " +
-                    "null means every path from here has ended, call pipeline_run_complete. On FAILED, stop and ask " +
-                    "the user how to proceed before calling this again - do not silently continue to the next step.")
+                    "advances down the right branch. If pipeline_get showed this step has 'outputs', pass " +
+                    "'outputsJson' as a JSON object of those names to their values, e.g. {\"summary\": \"...\"} - " +
+                    "later steps that wire this step's output into their prompt need it. Check the returned " +
+                    "currentStepOrderIndex for what to do next - null means every path from here has ended, call " +
+                    "pipeline_run_complete. On FAILED, stop and ask the user how to proceed before calling this " +
+                    "again - do not silently continue to the next step.")
     public PipelineRunDetail pipelineRunStepUpdate(
             @McpToolParam(description = "The run id, from pipeline_run_start", required = true) Long runId,
             @McpToolParam(description = "0-based index of the step in the run's step list", required = true) Integer orderIndex,
             @McpToolParam(description = "New status: RUNNING, DONE, FAILED, or SKIPPED", required = true) PipelineRunStep.Status status,
             @McpToolParam(description = "Short summary of what happened for this step", required = false) String note,
-            @McpToolParam(description = "This step's outcome - only needed when pipeline_get showed the step has more than one route; must exactly match one of that step's outcome keys", required = false) String outcome) {
+            @McpToolParam(description = "This step's outcome - only needed when pipeline_get showed the step has more than one route; must exactly match one of that step's outcome keys", required = false) String outcome,
+            @McpToolParam(description = "JSON object of this step's output values keyed by name, e.g. {\"summary\": \"...\"} - only needed for names pipeline_get listed under this step's 'outputs'", required = false) String outputsJson) {
         requireEnabled();
-        PipelineRunDetail run = pipelineRunService.updateStep(runId, orderIndex, status, note, outcome, null);
+        PipelineRunDetail run = pipelineRunService.updateStep(runId, orderIndex, status, note, outcome, outputsJson);
         usageEventRecorder.record(UsageEvent.Action.PIPELINE_RUN_STEP_UPDATE, String.valueOf(runId), null, null, null);
         return run;
     }
