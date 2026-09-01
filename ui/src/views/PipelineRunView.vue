@@ -15,7 +15,7 @@ const slug = toRef(props, 'slug')
 const runId = toRef(props, 'runId')
 
 const { data: run, error, loading } = useAsyncData(() => fetchPipelineRun(Number(runId.value)), [runId])
-const { data: pipeline, loading: pipelineLoading } = useAsyncData(() => fetchPipeline(slug.value), [slug])
+const { data: pipeline, error: pipelineError, loading: pipelineLoading } = useAsyncData(() => fetchPipeline(slug.value), [slug])
 
 const title = computed(() => (run.value ? `Запуск #${run.value.id} — ${run.value.pipelineSlug}` : `Запуск #${runId.value}`))
 
@@ -72,7 +72,7 @@ const flowEdges = computed(() => {
   <div>
     <PageHeader eyebrow="Pipeline run" :title="title" />
 
-    <ErrorState v-if="error" :message="error" />
+    <ErrorState v-if="error || pipelineError" :message="(error || pipelineError)!" />
     <SkeletonRows v-else-if="loading || pipelineLoading" :rows="3" />
 
     <div v-else-if="run && pipeline" class="h-[420px] overflow-hidden rounded-xl border border-border bg-elevated">
