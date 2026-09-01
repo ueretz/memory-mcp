@@ -42,7 +42,7 @@ non-Postgres asset storage). The other three are separate future specs.
    stays only as the stable identifier `pipeline_run_step_update(runId, orderIndex, ...)` already
    addresses steps by, so the MCP tool signature doesn't need to change shape.
 
-## 1. Data model - migration `V13__add_pipeline_step_routes.sql`
+## 1. Data model - migration `V14__add_pipeline_step_routes.sql`
 
 ```sql
 ALTER TABLE pipeline_steps
