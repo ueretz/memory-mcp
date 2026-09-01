@@ -7,8 +7,11 @@ import { useRouter } from 'vue-router'
 
 import { createPipeline, fetchPipeline, updatePipeline, uploadPipelineAsset } from '@/api/client'
 import type {
+  PipelineConditionOperator,
   PipelineParameterType,
   PipelineStepContentType,
+  PipelineUpsertDataLink,
+  PipelineUpsertOutput,
   PipelineUpsertParameter,
   PipelineUpsertRoute,
   PipelineUpsertStep,
@@ -68,6 +71,8 @@ async function loadForEdit() {
     routes: s.routes.map((r) => ({ outcomeKey: r.outcomeKey, targetStepIndex: r.targetStepOrderIndex })),
     outputs: s.outputs.map((o) => ({ name: o.name })),
     dataLinksOut: s.dataLinksOut.map((l) => ({ token: l.token, sourceOutputName: l.sourceOutputName, targetStepIndex: l.targetStepOrderIndex })),
+    conditionOperator: s.conditionOperator,
+    conditionValue: s.conditionValue,
   }))
   applyLegacyAutoLayoutIfNeeded()
 }
@@ -92,20 +97,33 @@ function removeParameter(index: number) {
   parameters.value.splice(index, 1)
 }
 
-function addStep() {
+function addStep(kind: PipelineStepContentType) {
   const offset = steps.value.length * 220
-  steps.value.push({
+  const base = {
     title: '',
-    contentType: 'PROMPT' as PipelineStepContentType,
+    contentType: kind,
     promptText: '',
     assetId: null,
     referenceAssetId: null,
     positionX: offset,
     positionY: 200,
-    routes: [],
-    outputs: [],
-    dataLinksOut: [],
-  })
+    routes: [] as PipelineUpsertRoute[],
+    outputs: [] as PipelineUpsertOutput[],
+    dataLinksOut: [] as PipelineUpsertDataLink[],
+    conditionOperator: null as PipelineConditionOperator | null,
+    conditionValue: null as string | null,
+  }
+  if (kind === 'CONDITION') {
+    base.routes = [
+      { outcomeKey: 'true', targetStepIndex: null },
+      { outcomeKey: 'false', targetStepIndex: null },
+    ]
+    base.conditionOperator = 'EQUALS'
+    base.conditionValue = ''
+  } else if (kind === 'VARIABLE') {
+    base.outputs = [{ name: 'value' }]
+  }
+  steps.value.push(base)
 }
 
 function removeStep(index: number) {
@@ -185,15 +203,19 @@ const flowNodes = computed(() => [
     id: String(index),
     type: 'pipelineStep',
     position: { x: step.positionX, y: step.positionY },
-    class: selectedStepIndex.value === index ? 'pipeline-node pipeline-node-selected' : 'pipeline-node',
-    data: { label: step.title || `Шаг ${index + 1}`, outputs: step.outputs },
+    class: [
+      'pipeline-node',
+      step.contentType === 'CONDITION' ? 'pipeline-node-condition' : '',
+      selectedStepIndex.value === index ? 'pipeline-node-selected' : '',
+    ].filter(Boolean).join(' '),
+    data: { label: step.title || `Шаг ${index + 1}`, outputs: step.outputs, contentType: step.contentType },
   })),
   {
     id: END_NODE_ID,
     type: 'pipelineStep',
     position: endPosition.value,
     class: 'pipeline-node pipeline-node-end',
-    data: { label: 'Конец рана', outputs: [] },
+    data: { label: 'Конец рана', outputs: [], contentType: 'PROMPT' },
   },
 ])
 
@@ -263,6 +285,11 @@ function onEdgeClick({ edge }: EdgeMouseEvent) {
 }
 
 function onConnect(connection: { source: string; target: string; sourceHandle?: string | null; targetHandle?: string | null }) {
+  // NOTE: per the backend's graph-validation rule, once ANY step has an explicit route, every
+  // step's execution edges come only from its own explicit routes. So wiring a data link into a
+  // CONDITION step from a source step that has no route of its own will pass here but fail
+  // validation on save (ancestor-reachability check). We don't auto-create that connecting route -
+  // out of scope for this task; the backend's error message is expected to guide the author.
   const sourceIndex = Number(connection.source)
   if (connection.sourceHandle && connection.sourceHandle.startsWith('output-')) {
     if (connection.target === END_NODE_ID) {
@@ -381,7 +408,11 @@ async function save() {
       <section class="rounded-2xl border border-border bg-panel p-5">
         <div class="mb-3 flex items-center justify-between">
           <h2 class="text-[13px] font-semibold tracking-wide text-content uppercase">Шаги</h2>
-          <button type="button" class="text-[12.5px] font-medium text-accent" @click="addStep">+ Шаг</button>
+          <div class="flex gap-2">
+            <button type="button" class="text-[12.5px] font-medium text-accent" @click="addStep('PROMPT')">+ Prompt</button>
+            <button type="button" class="text-[12.5px] font-medium text-accent" @click="addStep('CONDITION')">+ Condition</button>
+            <button type="button" class="text-[12.5px] font-medium text-accent" @click="addStep('VARIABLE')">+ Variable</button>
+          </div>
         </div>
         <p class="mb-3 text-[12px] text-faint">
           Перетащите узел, чтобы разместить его; потяните от одного узла к другому, чтобы создать маршрут.
@@ -417,22 +448,55 @@ async function save() {
                 placeholder="Название шага"
                 class="mb-2 w-full rounded-lg border border-border bg-panel px-2 py-1.5 text-[12.5px] text-content"
               />
-              <div class="mb-2 flex gap-3 text-[12.5px] text-muted">
-                <label class="flex items-center gap-1"><input v-model="selectedStep.contentType" type="radio" value="PROMPT" /> Prompt</label>
-                <label class="flex items-center gap-1"><input v-model="selectedStep.contentType" type="radio" value="MD_FILE" /> .md файл</label>
+              <template v-if="selectedStep.contentType === 'PROMPT' || selectedStep.contentType === 'MD_FILE'">
+                <div class="mb-2 flex gap-3 text-[12.5px] text-muted">
+                  <label class="flex items-center gap-1"><input v-model="selectedStep.contentType" type="radio" value="PROMPT" /> Prompt</label>
+                  <label class="flex items-center gap-1"><input v-model="selectedStep.contentType" type="radio" value="MD_FILE" /> .md файл</label>
+                </div>
+                <textarea
+                  v-if="selectedStep.contentType === 'PROMPT'"
+                  v-model="selectedStep.promptText"
+                  rows="4"
+                  placeholder="Инструкция для Claude — можно {{paramName}}"
+                  class="w-full rounded-lg border border-border bg-panel px-2 py-1.5 text-[12.5px] text-content"
+                />
+                <div v-else class="text-[12.5px] text-muted">
+                  <input type="file" accept=".md" @change="onMdFileChosen(selectedStepIndex, $event)" />
+                  <span v-if="selectedStep.assetId" class="ml-2">Загружен: asset #{{ selectedStep.assetId }}</span>
+                </div>
+              </template>
+              <div v-else-if="selectedStep.contentType === 'CONDITION'" class="mb-2">
+                <label class="mb-1 block text-[12.5px] font-medium text-muted">Оператор сравнения</label>
+                <select v-model="selectedStep.conditionOperator" class="mb-2 w-full rounded-lg border border-border bg-panel px-2 py-1.5 text-[12.5px] text-content">
+                  <option value="EQUALS">равно</option>
+                  <option value="GREATER_THAN">больше</option>
+                  <option value="LESS_THAN">меньше</option>
+                  <option value="GREATER_OR_EQUAL">больше или равно</option>
+                  <option value="LESS_OR_EQUAL">меньше или равно</option>
+                </select>
+                <label class="mb-1 block text-[12.5px] font-medium text-muted">Значение для сравнения</label>
+                <input
+                  v-model="selectedStep.conditionValue"
+                  class="w-full rounded-lg border border-border bg-panel px-2 py-1.5 text-[12.5px] text-content"
+                  placeholder="напр. 10"
+                />
+                <p class="mt-2 text-[11.5px] text-faint">
+                  Сравнивается со значением, подключённым через входящую связь (data-link) от другого шага.
+                  Ветка "true"/"false" выбирается автоматически, без участия Claude.
+                </p>
               </div>
-              <textarea
-                v-if="selectedStep.contentType === 'PROMPT'"
-                v-model="selectedStep.promptText"
-                rows="4"
-                placeholder="Инструкция для Claude — можно {{paramName}}"
-                class="w-full rounded-lg border border-border bg-panel px-2 py-1.5 text-[12.5px] text-content"
-              />
-              <div v-else class="text-[12.5px] text-muted">
-                <input type="file" accept=".md" @change="onMdFileChosen(selectedStepIndex, $event)" />
-                <span v-if="selectedStep.assetId" class="ml-2">Загружен: asset #{{ selectedStep.assetId }}</span>
+              <div v-else-if="selectedStep.contentType === 'VARIABLE'" class="mb-2">
+                <label class="mb-1 block text-[12.5px] font-medium text-muted">Значение</label>
+                <input
+                  v-model="selectedStep.promptText"
+                  class="w-full rounded-lg border border-border bg-panel px-2 py-1.5 text-[12.5px] text-content"
+                  placeholder="напр. hello"
+                />
+                <p class="mt-2 text-[11.5px] text-faint">
+                  Это значение публикуется в единственный output шага автоматически при старте рана, без участия Claude.
+                </p>
               </div>
-              <div class="mt-3 text-[12.5px] text-muted">
+              <div v-if="selectedStep.contentType === 'PROMPT' || selectedStep.contentType === 'MD_FILE'" class="mt-3 text-[12.5px] text-muted">
                 <label class="mb-1 block">Ссылочный файл (необязательно):</label>
                 <input type="file" @change="onReferenceFileChosen(selectedStepIndex, $event)" />
                 <span v-if="selectedStep.referenceAssetId" class="ml-2">Загружен: asset #{{ selectedStep.referenceAssetId }}</span>
@@ -440,7 +504,9 @@ async function save() {
               <div class="mt-3 text-[12.5px] text-muted">
                 <div class="mb-1 flex items-center justify-between">
                   <label class="font-medium">Выходы (пины)</label>
-                  <button type="button" class="text-accent" @click="addOutput(selectedStepIndex)">+ Выход</button>
+                  <button
+                    v-if="!(selectedStep.contentType === 'VARIABLE' && selectedStep.outputs.length >= 1)"
+                    type="button" class="text-accent" @click="addOutput(selectedStepIndex)">+ Выход</button>
                 </div>
                 <div v-for="(output, outputIndex) in selectedStep.outputs" :key="outputIndex" class="mb-1 flex items-center gap-2">
                   <input
@@ -448,7 +514,9 @@ async function save() {
                     placeholder="имя, напр. summary"
                     class="flex-1 rounded-lg border border-border bg-panel px-2 py-1 text-[12px] text-content"
                   />
-                  <button type="button" class="text-faint hover:text-red-600" @click="removeOutput(selectedStepIndex, outputIndex)">
+                  <button
+                    v-if="selectedStep.contentType !== 'VARIABLE'"
+                    type="button" class="text-faint hover:text-red-600" @click="removeOutput(selectedStepIndex, outputIndex)">
                     <AppIcon name="trash" class="size-4" />
                   </button>
                 </div>
@@ -469,10 +537,14 @@ async function save() {
               </div>
               <label class="mb-1 block text-[12.5px] font-medium text-muted">Ключ outcome</label>
               <input
+                v-if="steps[selectedEdge!.stepIndex].contentType !== 'CONDITION'"
                 v-model="selectedRoute.outcomeKey"
                 placeholder="пусто = маршрут по умолчанию"
                 class="w-full rounded-lg border border-border bg-panel px-2 py-1.5 text-[12.5px] text-content"
               />
+              <p v-else class="w-full rounded-lg border border-border bg-elevated px-2 py-1.5 text-[12.5px] text-content">
+                {{ selectedRoute.outcomeKey }}
+              </p>
               <p class="mt-2 text-[11.5px] text-faint">
                 Claude должен вернуть это значение как outcome в pipeline_run_step_update, чтобы run пошёл по этой
                 связи. Пустое значение — маршрут по умолчанию для этого шага (используется, если outcome не
