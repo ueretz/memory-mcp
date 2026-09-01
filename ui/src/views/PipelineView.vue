@@ -107,7 +107,9 @@ const flowEdges = computed(() => {
       step.routes.map((route) => ({
         id: `${step.orderIndex}-${route.outcomeKey ?? 'default'}-${route.targetStepOrderIndex ?? END_NODE_ID}`,
         source: String(step.orderIndex),
+        sourceHandle: 'route',
         target: route.targetStepOrderIndex === null ? END_NODE_ID : String(route.targetStepOrderIndex),
+        targetHandle: 'data-in',
         label: route.outcomeKey ?? '(по умолчанию)' as string | undefined,
       })),
     ),
