@@ -65,6 +65,8 @@ async function loadForEdit() {
     positionX: s.positionX,
     positionY: s.positionY,
     routes: s.routes.map((r) => ({ outcomeKey: r.outcomeKey, targetStepIndex: r.targetStepOrderIndex })),
+    outputs: s.outputs.map((o) => ({ name: o.name })),
+    dataLinksOut: s.dataLinksOut.map((l) => ({ token: l.token, sourceOutputName: l.sourceOutputName, targetStepIndex: l.targetStepOrderIndex })),
   }))
   applyLegacyAutoLayoutIfNeeded()
 }
@@ -100,6 +102,8 @@ function addStep() {
     positionX: offset,
     positionY: 200,
     routes: [],
+    outputs: [],
+    dataLinksOut: [],
   })
 }
 
@@ -118,6 +122,40 @@ function removeStep(index: number) {
   })
   selectedStepIndex.value = null
   selectedEdge.value = null
+}
+
+function addOutput(stepIndex: number) {
+  steps.value[stepIndex].outputs.push({ name: '' })
+}
+
+function removeOutput(stepIndex: number, outputIndex: number) {
+  const removedName = steps.value[stepIndex].outputs[outputIndex].name
+  steps.value[stepIndex].outputs.splice(outputIndex, 1)
+  // A data link wiring the removed output would silently point at nothing - drop it rather than
+  // leave a dangling {{data:...}} token with no declared pin behind it.
+  steps.value[stepIndex].dataLinksOut = steps.value[stepIndex].dataLinksOut.filter(
+    (link) => link.sourceOutputName !== removedName,
+  )
+}
+
+// Kept as a script-side helper rather than inlining the template literal in the template's
+// mustache interpolation: Vue's template tokenizer finds an interpolation's closing "}}" via a
+// plain text scan, not JS-aware parsing, so a literal "}}" inside an inline template-literal
+// expression (as in `{{data:${x}}}`) closes the interpolation early and breaks the compile.
+function dataToken(token: string): string {
+  return `{{data:${token}}}`
+}
+
+function wiredInputsFor(stepIndex: number): { token: string; sourceStepTitle: string; sourceOutputName: string }[] {
+  const result: { token: string; sourceStepTitle: string; sourceOutputName: string }[] = []
+  steps.value.forEach((step, sourceIndex) => {
+    step.dataLinksOut.forEach((link) => {
+      if (link.targetStepIndex === stepIndex) {
+        result.push({ token: link.token, sourceStepTitle: step.title || `Шаг ${sourceIndex + 1}`, sourceOutputName: link.sourceOutputName })
+      }
+    })
+  })
+  return result
 }
 
 async function onMdFileChosen(index: number, event: Event) {
@@ -358,6 +396,28 @@ async function save() {
                 <label class="mb-1 block">Ссылочный файл (необязательно):</label>
                 <input type="file" @change="onReferenceFileChosen(selectedStepIndex, $event)" />
                 <span v-if="selectedStep.referenceAssetId" class="ml-2">Загружен: asset #{{ selectedStep.referenceAssetId }}</span>
+              </div>
+              <div class="mt-3 text-[12.5px] text-muted">
+                <div class="mb-1 flex items-center justify-between">
+                  <label class="font-medium">Выходы (пины)</label>
+                  <button type="button" class="text-accent" @click="addOutput(selectedStepIndex)">+ Выход</button>
+                </div>
+                <div v-for="(output, outputIndex) in selectedStep.outputs" :key="outputIndex" class="mb-1 flex items-center gap-2">
+                  <input
+                    v-model="output.name"
+                    placeholder="имя, напр. summary"
+                    class="flex-1 rounded-lg border border-border bg-panel px-2 py-1 text-[12px] text-content"
+                  />
+                  <button type="button" class="text-faint hover:text-red-600" @click="removeOutput(selectedStepIndex, outputIndex)">
+                    <AppIcon name="trash" class="size-4" />
+                  </button>
+                </div>
+              </div>
+              <div v-if="wiredInputsFor(selectedStepIndex).length" class="mt-3 text-[11.5px] text-faint">
+                <p class="mb-1 font-medium text-muted">Подключённые входы:</p>
+                <p v-for="input in wiredInputsFor(selectedStepIndex)" :key="input.token">
+                  {{ dataToken(input.token) }} → {{ input.sourceStepTitle }} . {{ input.sourceOutputName }}
+                </p>
               </div>
             </template>
             <template v-else-if="selectedRoute">
