@@ -192,6 +192,13 @@ public class PipelineService {
                 throw new PipelineInvalidGraphException(
                         "Step '" + steps.get(i).title() + "' has more than one default route");
             }
+            Set<String> seenOutcomeKeys = new HashSet<>();
+            for (PipelineUpsertRequest.StepRequest.RouteRequest route : routes) {
+                if (route.outcomeKey() != null && !seenOutcomeKeys.add(route.outcomeKey())) {
+                    throw new PipelineInvalidGraphException(
+                            "Step '" + steps.get(i).title() + "' has more than one route with outcome key '" + route.outcomeKey() + "'");
+                }
+            }
             for (PipelineUpsertRequest.StepRequest.RouteRequest route : routes) {
                 outDegree[i]++;
                 if (route.targetStepIndex() != null) {

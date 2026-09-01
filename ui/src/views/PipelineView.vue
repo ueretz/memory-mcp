@@ -42,15 +42,30 @@ async function confirmDelete() {
 }
 
 const END_NODE_ID = 'end'
+const STEP_SPACING = 220
+
+// Pipelines created before the canvas builder (or saved without dragging any node) have every
+// step at (0,0) - same convention as PipelineBuilderView's applyLegacyAutoLayoutIfNeeded. Spread
+// them out left-to-right instead of stacking every node on top of the others.
+const stepPositions = computed(() => {
+  const steps = pipeline.value?.steps ?? []
+  const allAtOrigin = steps.length > 0 && steps.every((s) => s.positionX === 0 && s.positionY === 0)
+  const positions = new Map<number, { x: number; y: number }>()
+  steps.forEach((step, index) => {
+    positions.set(step.orderIndex, allAtOrigin ? { x: index * STEP_SPACING, y: 0 } : { x: step.positionX, y: step.positionY })
+  })
+  return positions
+})
 
 const flowNodes = computed(() => {
   if (!pipeline.value) return []
   const steps = pipeline.value.steps
-  const maxX = steps.length > 0 ? Math.max(...steps.map((s) => s.positionX)) : 0
+  const positions = stepPositions.value
+  const maxX = steps.length > 0 ? Math.max(...steps.map((s) => positions.get(s.orderIndex)!.x)) : 0
   return [
     ...steps.map((step) => ({
       id: String(step.orderIndex),
-      position: { x: step.positionX, y: step.positionY },
+      position: positions.get(step.orderIndex)!,
       label: `${step.orderIndex + 1}. ${step.title}`,
       class: 'pipeline-node',
     })),
@@ -58,14 +73,33 @@ const flowNodes = computed(() => {
   ]
 })
 
+// A route-less pipeline (linear/legacy - the backward-compatible default) has an empty `routes`
+// array on every step. The backend treats that as an implicit orderIndex -> orderIndex+1 chain
+// (see PipelineRunService.resolveNextOrderIndex's allRoutes.isEmpty() branch); mirror that here so
+// the graph isn't drawn as disconnected nodes. Only one or the other - never mix implicit chaining
+// with real routes.
 const flowEdges = computed(() => {
   if (!pipeline.value) return []
-  return pipeline.value.steps.flatMap((step) =>
+  const steps = pipeline.value.steps
+  const hasAnyRoutes = steps.some((step) => step.routes.length > 0)
+  if (!hasAnyRoutes) {
+    return steps.map((step, index) => {
+      const nextStep = steps[index + 1]
+      const target = nextStep ? String(nextStep.orderIndex) : END_NODE_ID
+      return {
+        id: `${step.orderIndex}-implicit-${target}`,
+        source: String(step.orderIndex),
+        target,
+        label: undefined as string | undefined,
+      }
+    })
+  }
+  return steps.flatMap((step) =>
     step.routes.map((route) => ({
       id: `${step.orderIndex}-${route.outcomeKey ?? 'default'}-${route.targetStepOrderIndex ?? END_NODE_ID}`,
       source: String(step.orderIndex),
       target: route.targetStepOrderIndex === null ? END_NODE_ID : String(route.targetStepOrderIndex),
-      label: route.outcomeKey ?? '(по умолчанию)',
+      label: route.outcomeKey ?? '(по умолчанию)' as string | undefined,
     })),
   )
 })

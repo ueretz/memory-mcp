@@ -196,4 +196,48 @@ class PipelineRunServiceTest {
 
         assertThat(updated.currentStepOrderIndex()).isNull();
     }
+
+    @Test
+    void skippedOnALegacyPipelineStillAdvancesViaOrderIndexPlusOne() {
+        createSamplePipeline("run-test-14");
+        PipelineRunDetail run = pipelineRunService.start("run-test-14", "{\"folder\":\"src\"}", "Tester");
+
+        PipelineRunDetail updated = pipelineRunService.updateStep(run.id(), 0, PipelineRunStep.Status.SKIPPED, "skip it", null);
+
+        assertThat(updated.steps().get(0).status()).isEqualTo(PipelineRunStep.Status.SKIPPED);
+        assertThat(updated.currentStepOrderIndex()).isEqualTo(1);
+    }
+
+    @Test
+    void skippedOnABranchingStepWithADefaultRouteFollowsIt() {
+        String slug = "run-test-15";
+        pipelineService.create(new PipelineUpsertRequest(
+                slug, "Branching with default", "desc", "pipeline-run-svc-test-project",
+                List.of(),
+                List.of(
+                        new PipelineUpsertRequest.StepRequest("Check", PipelineStep.ContentType.PROMPT, "check",
+                                null, null, 0, 0, List.of(
+                                        new PipelineUpsertRequest.StepRequest.RouteRequest("pass", 1),
+                                        new PipelineUpsertRequest.StepRequest.RouteRequest(null, 2))),
+                        new PipelineUpsertRequest.StepRequest("Deploy", PipelineStep.ContentType.PROMPT, "deploy",
+                                null, null, 0, 0, List.of()),
+                        new PipelineUpsertRequest.StepRequest("Fallback", PipelineStep.ContentType.PROMPT, "fallback",
+                                null, null, 0, 0, List.of()))
+        ), "Tester");
+        PipelineRunDetail run = pipelineRunService.start(slug, "{}", "Tester");
+
+        PipelineRunDetail updated = pipelineRunService.updateStep(run.id(), 0, PipelineRunStep.Status.SKIPPED, "skip it", null);
+
+        assertThat(updated.currentStepOrderIndex()).isEqualTo(2);
+    }
+
+    @Test
+    void skippedOnABranchingStepWithOnlyNamedRoutesEndsThatPathInsteadOfThrowing() {
+        createBranchingPipeline("run-test-16");
+        PipelineRunDetail run = pipelineRunService.start("run-test-16", "{}", "Tester");
+
+        PipelineRunDetail updated = pipelineRunService.updateStep(run.id(), 0, PipelineRunStep.Status.SKIPPED, "skip it", null);
+
+        assertThat(updated.currentStepOrderIndex()).isNull();
+    }
 }

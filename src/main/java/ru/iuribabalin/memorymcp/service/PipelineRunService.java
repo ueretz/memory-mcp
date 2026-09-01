@@ -87,8 +87,9 @@ public class PipelineRunService {
         runStep.setNote(note);
         pipelineRunStepRepository.save(runStep);
 
-        if (status == PipelineRunStep.Status.DONE && runStep.getPipelineStepId() != null) {
-            run.setCurrentStepOrderIndex(resolveNextOrderIndex(run.getPipelineId(), runStep.getPipelineStepId(), orderIndex, outcome));
+        if ((status == PipelineRunStep.Status.DONE || status == PipelineRunStep.Status.SKIPPED)
+                && runStep.getPipelineStepId() != null) {
+            run.setCurrentStepOrderIndex(resolveNextOrderIndexForStatus(run.getPipelineId(), runStep.getPipelineStepId(), orderIndex, outcome, status));
             pipelineRunRepository.save(run);
         }
         return toDetail(run, pipelineSlugOf(run));
@@ -145,6 +146,26 @@ public class PipelineRunService {
                 .mapToInt(PipelineStep::getOrderIndex)
                 .min()
                 .orElseThrow(() -> new IllegalStateException("Pipeline has no starting step"));
+    }
+
+    /**
+     * SKIPPED reuses DONE's route-resolution logic, but a skipped step was never actually
+     * completed, so there is no genuine outcome to route on - we pass {@code null} and can only
+     * follow a default route (or the legacy orderIndex+1 fallback) if one exists. Unlike DONE, an
+     * unresolvable outcome must not surface as an error to the caller: the user explicitly asked
+     * to skip this step, so "no way to know where to go" just ends that path here instead of
+     * throwing PipelineRunInvalidOutcomeException back through the MCP tool.
+     */
+    private Integer resolveNextOrderIndexForStatus(Long pipelineId, Long finishedStepId, int finishedOrderIndex,
+                                                    String outcome, PipelineRunStep.Status status) {
+        if (status == PipelineRunStep.Status.SKIPPED) {
+            try {
+                return resolveNextOrderIndex(pipelineId, finishedStepId, finishedOrderIndex, null);
+            } catch (PipelineRunInvalidOutcomeException ex) {
+                return null;
+            }
+        }
+        return resolveNextOrderIndex(pipelineId, finishedStepId, finishedOrderIndex, outcome);
     }
 
     /**

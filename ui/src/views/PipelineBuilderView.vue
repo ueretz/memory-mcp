@@ -220,6 +220,19 @@ const selectedRoute = computed(() =>
   selectedEdge.value ? steps.value[selectedEdge.value.stepIndex].routes[selectedEdge.value.routeIndex] : null,
 )
 
+// A text <input v-model="route.outcomeKey"> that the user types into and clears yields "" rather
+// than null. The backend's default-route matching checks outcomeKey() == null specifically, so an
+// empty string would silently break the "empty = default route" fallback the UI advertises.
+function normalizedSteps(): PipelineUpsertStep[] {
+  return steps.value.map((step) => ({
+    ...step,
+    routes: step.routes.map((route) => ({
+      ...route,
+      outcomeKey: route.outcomeKey && route.outcomeKey.trim() !== '' ? route.outcomeKey : null,
+    })),
+  }))
+}
+
 async function save() {
   saving.value = true
   saveError.value = null
@@ -230,7 +243,7 @@ async function save() {
       description: description.value || null,
       projectScope: project.value,
       parameters: parameters.value,
-      steps: steps.value,
+      steps: normalizedSteps(),
     }
     const result = isEditing.value ? await updatePipeline(editingSlug.value!, request) : await createPipeline(request)
     await router.push({ name: 'pipeline', params: { project: project.value, slug: result.slug } })

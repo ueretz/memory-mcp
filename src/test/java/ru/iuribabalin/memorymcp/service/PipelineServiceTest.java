@@ -189,6 +189,23 @@ class PipelineServiceTest {
     }
 
     @Test
+    void rejectsTwoRoutesWithTheSameNonNullOutcomeKeyOnTheSameStep() {
+        PipelineUpsertRequest request = new PipelineUpsertRequest(
+                "branch-7", "Duplicate outcome key", "desc", "pipeline-svc-test-project",
+                List.of(),
+                List.of(
+                        new PipelineUpsertRequest.StepRequest("A", PipelineStep.ContentType.PROMPT, "a",
+                                null, null, 0, 0, List.of(
+                                        new PipelineUpsertRequest.StepRequest.RouteRequest("pass", 1),
+                                        new PipelineUpsertRequest.StepRequest.RouteRequest("pass", null))),
+                        new PipelineUpsertRequest.StepRequest("B", PipelineStep.ContentType.PROMPT, "b",
+                                null, null, 0, 0, List.of())));
+
+        assertThatThrownBy(() -> pipelineService.create(request, "Tester"))
+                .isInstanceOf(PipelineInvalidGraphException.class);
+    }
+
+    @Test
     void allowsAnUnwiredIsolatedStepAsAWarningOnlyNotAHardError() {
         PipelineUpsertRequest request = new PipelineUpsertRequest(
                 "branch-5", "Isolated draft step", "desc", "pipeline-svc-test-project",
