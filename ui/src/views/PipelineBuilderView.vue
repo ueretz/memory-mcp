@@ -105,10 +105,16 @@ function addStep() {
 
 function removeStep(index: number) {
   steps.value.splice(index, 1)
-  // Routes referencing this step by index are now stale (indices shifted) - drop anything
-  // pointing at or past the removed step so a save can't silently rewire to the wrong node.
+  // Routes referencing this step by index are now stale (indices shifted) - drop anything that
+  // pointed at the removed step, and shift down everything that pointed past it, so a save can't
+  // silently rewire to the wrong node.
   steps.value.forEach((step) => {
-    step.routes = step.routes.filter((r) => r.targetStepIndex === null || r.targetStepIndex < steps.value.length)
+    step.routes = step.routes
+      .filter((r) => r.targetStepIndex !== index)
+      .map((r) => ({
+        ...r,
+        targetStepIndex: r.targetStepIndex !== null && r.targetStepIndex > index ? r.targetStepIndex - 1 : r.targetStepIndex,
+      }))
   })
   selectedStepIndex.value = null
   selectedEdge.value = null
