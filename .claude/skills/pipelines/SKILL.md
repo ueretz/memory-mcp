@@ -36,7 +36,10 @@ the only new part is checking state back into memory-mcp as you go.
 5. **Work through steps following `currentStepOrderIndex`, not a fixed sequence.** After each
    response (`pipeline_run_start` or `pipeline_run_step_update`), the step to work on is whichever
    one has `orderIndex == currentStepOrderIndex` — for a non-branching pipeline this is always the
-   next one in order, so nothing changes there. For each step:
+   next one in order, so nothing changes there. Some `orderIndex` values in the step list will
+   never appear as `currentStepOrderIndex` at all - Condition and Variable steps execute
+   automatically server-side and are skipped transparently; you only ever need to act on the step
+   `currentStepOrderIndex` actually points to. For each step:
    - Use `resolvedInstructionText` from the run response (not `instructionText` from `pipeline_get`)
      as this step's actual instructions - the server has already substituted any `{{data:...}}`
      tokens with values earlier steps reported, alongside your own `{{paramName}}` substitution.
