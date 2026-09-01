@@ -78,6 +78,7 @@ public class PipelineService {
         validateSteps(request.steps());
         validateGraph(request.steps());
         validateDataLinks(request.steps());
+        validateStepKinds(request.steps());
         if (pipelineRepository.findBySlug(request.slug()).isPresent()) {
             throw new PipelineSlugTakenException(request.slug());
         }
@@ -97,6 +98,7 @@ public class PipelineService {
         validateSteps(request.steps());
         validateGraph(request.steps());
         validateDataLinks(request.steps());
+        validateStepKinds(request.steps());
         Pipeline pipeline = resolve(slug);
         applyFields(pipeline, request, Instant.now());
         pipelineRepository.save(pipeline);
@@ -343,6 +345,62 @@ public class PipelineService {
         }
     }
 
+    private void validateStepKinds(List<PipelineUpsertRequest.StepRequest> steps) {
+        int n = steps.size();
+        int[] incomingDataLinkCount = new int[n];
+        for (PipelineUpsertRequest.StepRequest step : steps) {
+            for (PipelineUpsertRequest.StepRequest.DataLinkRequest link : step.dataLinksOut()) {
+                if (link.targetStepIndex() != null) {
+                    incomingDataLinkCount[link.targetStepIndex()]++;
+                }
+            }
+        }
+        for (int i = 0; i < n; i++) {
+            PipelineUpsertRequest.StepRequest step = steps.get(i);
+            if (step.contentType() == PipelineStep.ContentType.CONDITION) {
+                validateConditionStep(step, incomingDataLinkCount[i]);
+            } else if (step.contentType() == PipelineStep.ContentType.VARIABLE) {
+                validateVariableStep(step);
+            }
+        }
+    }
+
+    private void validateConditionStep(PipelineUpsertRequest.StepRequest step, int incomingDataLinkCount) {
+        if (step.conditionOperator() == null || step.conditionValue() == null || step.conditionValue().isBlank()) {
+            throw new PipelineInvalidParametersException(
+                    "Step '" + step.title() + "' is type CONDITION but is missing a comparison operator/value");
+        }
+        if (incomingDataLinkCount != 1) {
+            throw new PipelineInvalidGraphException(
+                    "Step '" + step.title() + "' is type CONDITION and must have exactly one incoming data link (has "
+                            + incomingDataLinkCount + ")");
+        }
+        Set<String> outcomeKeys = step.routes().stream()
+                .map(PipelineUpsertRequest.StepRequest.RouteRequest::outcomeKey)
+                .collect(Collectors.toSet());
+        if (step.routes().size() != 2 || !outcomeKeys.equals(Set.of("true", "false"))) {
+            throw new PipelineInvalidGraphException(
+                    "Step '" + step.title() + "' is type CONDITION and must have exactly two routes with outcome keys 'true' and 'false'");
+        }
+    }
+
+    private void validateVariableStep(PipelineUpsertRequest.StepRequest step) {
+        if (step.promptText() == null || step.promptText().isBlank()) {
+            throw new PipelineInvalidParametersException(
+                    "Step '" + step.title() + "' is type VARIABLE but has no value");
+        }
+        if (step.outputs().size() != 1) {
+            throw new PipelineInvalidGraphException(
+                    "Step '" + step.title() + "' is type VARIABLE and must declare exactly one output (has "
+                            + step.outputs().size() + ")");
+        }
+        boolean hasNamedRoute = step.routes().stream().anyMatch(r -> r.outcomeKey() != null);
+        if (step.routes().size() > 1 || hasNamedRoute) {
+            throw new PipelineInvalidGraphException(
+                    "Step '" + step.title() + "' is type VARIABLE and can have at most one route, with no outcome key");
+        }
+    }
+
     private String resolveInstructionText(PipelineStep step) {
         if (step.getContentType() != PipelineStep.ContentType.MD_FILE) {
             return step.getPromptText();
@@ -399,6 +457,8 @@ public class PipelineService {
             step.setPromptText(stepRequest.promptText());
             step.setAssetId(stepRequest.assetId());
             step.setReferenceAssetId(stepRequest.referenceAssetId());
+            step.setConditionOperator(stepRequest.conditionOperator());
+            step.setConditionValue(stepRequest.conditionValue());
             step.setPositionX(stepRequest.positionX());
             step.setPositionY(stepRequest.positionY());
             savedSteps.add(pipelineStepRepository.save(step));
@@ -477,7 +537,8 @@ public class PipelineService {
                                     .map(link -> new PipelineDetail.PipelineStepView.DataLinkView(
                                             link.getId(), link.getToken(), outputsById.get(link.getSourceOutputId()).getName(),
                                             orderIndexById.get(link.getTargetStepId()), titleById.get(link.getTargetStepId())))
-                                    .toList());
+                                    .toList(),
+                            s.getConditionOperator(), s.getConditionValue());
                 })
                 .toList();
         return new PipelineDetail(pipeline.getId(), pipeline.getSlug(), pipeline.getName(), pipeline.getDescription(),

@@ -27,7 +27,8 @@ public record PipelineDetail(
             Long id, int orderIndex, String title, PipelineStep.ContentType contentType,
             String promptText, Long assetId, Long referenceAssetId,
             double positionX, double positionY, List<RouteView> routes,
-            List<OutputView> outputs, List<DataLinkView> dataLinksOut) {
+            List<OutputView> outputs, List<DataLinkView> dataLinksOut,
+            PipelineStep.ConditionOperator conditionOperator, String conditionValue) {
 
         public record RouteView(String outcomeKey, Integer targetStepOrderIndex) {
         }

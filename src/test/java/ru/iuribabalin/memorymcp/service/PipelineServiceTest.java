@@ -27,8 +27,8 @@ class PipelineServiceTest {
                 slug, "Config diff", "Diffs configs against prod", "pipeline-svc-test-project",
                 List.of(new PipelineUpsertRequest.ParameterRequest("folder", "Folder to check", PipelineParameter.Type.STRING, true, null)),
                 List.of(
-                        new PipelineUpsertRequest.StepRequest("Check history", PipelineStep.ContentType.PROMPT, "Diff {{folder}} against prod", null, null, 0, 0, List.of(), List.of(), List.of()),
-                        new PipelineUpsertRequest.StepRequest("Save report", PipelineStep.ContentType.PROMPT, "Save the report to memory", null, null, 0, 0, List.of(), List.of(), List.of())));
+                        new PipelineUpsertRequest.StepRequest("Check history", PipelineStep.ContentType.PROMPT, "Diff {{folder}} against prod", null, null, 0, 0, List.of(), List.of(), List.of(), null, null),
+                        new PipelineUpsertRequest.StepRequest("Save report", PipelineStep.ContentType.PROMPT, "Save the report to memory", null, null, 0, 0, List.of(), List.of(), List.of(), null, null)));
     }
 
     @Test
@@ -57,7 +57,7 @@ class PipelineServiceTest {
         PipelineUpsertRequest updated = new PipelineUpsertRequest(
                 "config-diff-3", "Config diff v2", "desc", "pipeline-svc-test-project",
                 List.of(),
-                List.of(new PipelineUpsertRequest.StepRequest("Only step", PipelineStep.ContentType.PROMPT, "do it", null, null, 0, 0, List.of(), List.of(), List.of())));
+                List.of(new PipelineUpsertRequest.StepRequest("Only step", PipelineStep.ContentType.PROMPT, "do it", null, null, 0, 0, List.of(), List.of(), List.of(), null, null)));
 
         PipelineDetail detail = pipelineService.update("config-diff-3", updated);
 
@@ -90,7 +90,7 @@ class PipelineServiceTest {
         PipelineUpsertRequest request = new PipelineUpsertRequest(
                 "config-diff-6", "Config diff", "Diffs configs against prod", "pipeline-svc-test-project",
                 List.of(),
-                List.of(new PipelineUpsertRequest.StepRequest("Missing file", PipelineStep.ContentType.MD_FILE, null, null, null, 0, 0, List.of(), List.of(), List.of())));
+                List.of(new PipelineUpsertRequest.StepRequest("Missing file", PipelineStep.ContentType.MD_FILE, null, null, null, 0, 0, List.of(), List.of(), List.of(), null, null)));
 
         assertThatThrownBy(() -> pipelineService.create(request, "Tester"))
                 .isInstanceOf(PipelineInvalidParametersException.class);
@@ -106,9 +106,9 @@ class PipelineServiceTest {
                                 null, null, 10.0, 20.0,
                                 List.of(new PipelineUpsertRequest.StepRequest.RouteRequest("pass", 1),
                                         new PipelineUpsertRequest.StepRequest.RouteRequest("fail", null)),
-                                List.of(), List.of()),
+                                List.of(), List.of(), null, null),
                         new PipelineUpsertRequest.StepRequest("Deploy", PipelineStep.ContentType.PROMPT, "deploy it",
-                                null, null, 230.0, 20.0, List.of(), List.of(), List.of())));
+                                null, null, 230.0, 20.0, List.of(), List.of(), List.of(), null, null)));
 
         PipelineDetail detail = pipelineService.create(request, "Tester");
 
@@ -132,11 +132,11 @@ class PipelineServiceTest {
                 List.of(),
                 List.of(
                         new PipelineUpsertRequest.StepRequest("A", PipelineStep.ContentType.PROMPT, "a",
-                                null, null, 0, 0, List.of(new PipelineUpsertRequest.StepRequest.RouteRequest(null, 1)), List.of(), List.of()),
+                                null, null, 0, 0, List.of(new PipelineUpsertRequest.StepRequest.RouteRequest(null, 1)), List.of(), List.of(), null, null),
                         new PipelineUpsertRequest.StepRequest("B", PipelineStep.ContentType.PROMPT, "b",
-                                null, null, 0, 0, List.of(new PipelineUpsertRequest.StepRequest.RouteRequest(null, 2)), List.of(), List.of()),
+                                null, null, 0, 0, List.of(new PipelineUpsertRequest.StepRequest.RouteRequest(null, 2)), List.of(), List.of(), null, null),
                         new PipelineUpsertRequest.StepRequest("C", PipelineStep.ContentType.PROMPT, "c",
-                                null, null, 0, 0, List.of(new PipelineUpsertRequest.StepRequest.RouteRequest(null, 1)), List.of(), List.of())));
+                                null, null, 0, 0, List.of(new PipelineUpsertRequest.StepRequest.RouteRequest(null, 1)), List.of(), List.of(), null, null)));
 
         assertThatThrownBy(() -> pipelineService.create(request, "Tester"))
                 .isInstanceOf(PipelineInvalidGraphException.class);
@@ -149,9 +149,9 @@ class PipelineServiceTest {
                 List.of(),
                 List.of(
                         new PipelineUpsertRequest.StepRequest("A", PipelineStep.ContentType.PROMPT, "a",
-                                null, null, 0, 0, List.of(new PipelineUpsertRequest.StepRequest.RouteRequest(null, 5)), List.of(), List.of()),
+                                null, null, 0, 0, List.of(new PipelineUpsertRequest.StepRequest.RouteRequest(null, 5)), List.of(), List.of(), null, null),
                         new PipelineUpsertRequest.StepRequest("B", PipelineStep.ContentType.PROMPT, "b",
-                                null, null, 0, 0, List.of(), List.of(), List.of())));
+                                null, null, 0, 0, List.of(), List.of(), List.of(), null, null)));
 
         assertThatThrownBy(() -> pipelineService.create(request, "Tester"))
                 .isInstanceOf(PipelineInvalidGraphException.class);
@@ -164,9 +164,9 @@ class PipelineServiceTest {
                 List.of(),
                 List.of(
                         new PipelineUpsertRequest.StepRequest("A", PipelineStep.ContentType.PROMPT, "a",
-                                null, null, 0, 0, List.of(new PipelineUpsertRequest.StepRequest.RouteRequest(null, null)), List.of(), List.of()),
+                                null, null, 0, 0, List.of(new PipelineUpsertRequest.StepRequest.RouteRequest(null, null)), List.of(), List.of(), null, null),
                         new PipelineUpsertRequest.StepRequest("B", PipelineStep.ContentType.PROMPT, "b",
-                                null, null, 0, 0, List.of(new PipelineUpsertRequest.StepRequest.RouteRequest(null, null)), List.of(), List.of())));
+                                null, null, 0, 0, List.of(new PipelineUpsertRequest.StepRequest.RouteRequest(null, null)), List.of(), List.of(), null, null)));
 
         assertThatThrownBy(() -> pipelineService.create(request, "Tester"))
                 .isInstanceOf(PipelineInvalidGraphException.class);
@@ -182,9 +182,9 @@ class PipelineServiceTest {
                                 null, null, 0, 0, List.of(
                                         new PipelineUpsertRequest.StepRequest.RouteRequest(null, 1),
                                         new PipelineUpsertRequest.StepRequest.RouteRequest(null, null)),
-                                List.of(), List.of()),
+                                List.of(), List.of(), null, null),
                         new PipelineUpsertRequest.StepRequest("B", PipelineStep.ContentType.PROMPT, "b",
-                                null, null, 0, 0, List.of(), List.of(), List.of())));
+                                null, null, 0, 0, List.of(), List.of(), List.of(), null, null)));
 
         assertThatThrownBy(() -> pipelineService.create(request, "Tester"))
                 .isInstanceOf(PipelineInvalidGraphException.class);
@@ -200,9 +200,9 @@ class PipelineServiceTest {
                                 null, null, 0, 0, List.of(
                                         new PipelineUpsertRequest.StepRequest.RouteRequest("pass", 1),
                                         new PipelineUpsertRequest.StepRequest.RouteRequest("pass", null)),
-                                List.of(), List.of()),
+                                List.of(), List.of(), null, null),
                         new PipelineUpsertRequest.StepRequest("B", PipelineStep.ContentType.PROMPT, "b",
-                                null, null, 0, 0, List.of(), List.of(), List.of())));
+                                null, null, 0, 0, List.of(), List.of(), List.of(), null, null)));
 
         assertThatThrownBy(() -> pipelineService.create(request, "Tester"))
                 .isInstanceOf(PipelineInvalidGraphException.class);
@@ -215,9 +215,9 @@ class PipelineServiceTest {
                 List.of(),
                 List.of(
                         new PipelineUpsertRequest.StepRequest("A", PipelineStep.ContentType.PROMPT, "a",
-                                null, null, 0, 0, List.of(new PipelineUpsertRequest.StepRequest.RouteRequest(null, null)), List.of(), List.of()),
+                                null, null, 0, 0, List.of(new PipelineUpsertRequest.StepRequest.RouteRequest(null, null)), List.of(), List.of(), null, null),
                         new PipelineUpsertRequest.StepRequest("Not wired yet", PipelineStep.ContentType.PROMPT, "b",
-                                null, null, 300, 300, List.of(), List.of(), List.of())));
+                                null, null, 300, 300, List.of(), List.of(), List.of(), null, null)));
 
         PipelineDetail detail = pipelineService.create(request, "Tester");
 
@@ -242,9 +242,9 @@ class PipelineServiceTest {
                         new PipelineUpsertRequest.StepRequest("Summarize", PipelineStep.ContentType.PROMPT, "summarize it",
                                 null, null, 0, 0, List.of(),
                                 List.of(new PipelineUpsertRequest.StepRequest.OutputRequest("summary")),
-                                List.of(new PipelineUpsertRequest.StepRequest.DataLinkRequest("tok-1", "summary", 1))),
+                                List.of(new PipelineUpsertRequest.StepRequest.DataLinkRequest("tok-1", "summary", 1)), null, null),
                         new PipelineUpsertRequest.StepRequest("Report", PipelineStep.ContentType.PROMPT, "use {{data:tok-1}}",
-                                null, null, 0, 0, List.of(), List.of(), List.of())));
+                                null, null, 0, 0, List.of(), List.of(), List.of(), null, null)));
 
         PipelineDetail detail = pipelineService.create(request, "Tester");
 
@@ -268,7 +268,7 @@ class PipelineServiceTest {
                         List.of(new PipelineUpsertRequest.StepRequest.OutputRequest("zeta"),
                                 new PipelineUpsertRequest.StepRequest.OutputRequest("alpha"),
                                 new PipelineUpsertRequest.StepRequest.OutputRequest("mu")),
-                        List.of())));
+                        List.of(), null, null)));
 
         PipelineDetail detail = pipelineService.create(request, "Tester");
 
@@ -285,7 +285,7 @@ class PipelineServiceTest {
                         null, null, 0, 0, List.of(),
                         List.of(new PipelineUpsertRequest.StepRequest.OutputRequest("summary"),
                                 new PipelineUpsertRequest.StepRequest.OutputRequest("summary")),
-                        List.of())));
+                        List.of(), null, null)));
 
         assertThatThrownBy(() -> pipelineService.create(request, "Tester"))
                 .isInstanceOf(PipelineInvalidGraphException.class);
@@ -300,11 +300,11 @@ class PipelineServiceTest {
                 List.of(),
                 List.of(
                         new PipelineUpsertRequest.StepRequest("A", PipelineStep.ContentType.PROMPT, "a",
-                                null, null, 0, 0, List.of(), List.of(), List.of()),
+                                null, null, 0, 0, List.of(), List.of(), List.of(), null, null),
                         new PipelineUpsertRequest.StepRequest("B", PipelineStep.ContentType.PROMPT, "b",
                                 null, null, 0, 0, List.of(),
                                 List.of(new PipelineUpsertRequest.StepRequest.OutputRequest("x")),
-                                List.of(new PipelineUpsertRequest.StepRequest.DataLinkRequest("tok-2", "x", 0)))));
+                                List.of(new PipelineUpsertRequest.StepRequest.DataLinkRequest("tok-2", "x", 0)), null, null)));
 
         assertThatThrownBy(() -> pipelineService.create(request, "Tester"))
                 .isInstanceOf(PipelineInvalidGraphException.class);
@@ -318,7 +318,7 @@ class PipelineServiceTest {
                 List.of(new PipelineUpsertRequest.StepRequest("A", PipelineStep.ContentType.PROMPT, "a",
                         null, null, 0, 0, List.of(),
                         List.of(new PipelineUpsertRequest.StepRequest.OutputRequest("x")),
-                        List.of(new PipelineUpsertRequest.StepRequest.DataLinkRequest("tok-3", "x", 0)))));
+                        List.of(new PipelineUpsertRequest.StepRequest.DataLinkRequest("tok-3", "x", 0)), null, null)));
 
         assertThatThrownBy(() -> pipelineService.create(request, "Tester"))
                 .isInstanceOf(PipelineInvalidGraphException.class);
@@ -332,9 +332,9 @@ class PipelineServiceTest {
                 List.of(
                         new PipelineUpsertRequest.StepRequest("A", PipelineStep.ContentType.PROMPT, "a",
                                 null, null, 0, 0, List.of(), List.of(),
-                                List.of(new PipelineUpsertRequest.StepRequest.DataLinkRequest("tok-4", "never-declared", 1))),
+                                List.of(new PipelineUpsertRequest.StepRequest.DataLinkRequest("tok-4", "never-declared", 1)), null, null),
                         new PipelineUpsertRequest.StepRequest("B", PipelineStep.ContentType.PROMPT, "b",
-                                null, null, 0, 0, List.of(), List.of(), List.of())));
+                                null, null, 0, 0, List.of(), List.of(), List.of(), null, null)));
 
         assertThatThrownBy(() -> pipelineService.create(request, "Tester"))
                 .isInstanceOf(PipelineInvalidGraphException.class);
@@ -348,11 +348,154 @@ class PipelineServiceTest {
                 List.of(new PipelineUpsertRequest.StepRequest("A", PipelineStep.ContentType.PROMPT, "a",
                         null, null, 0, 0, List.of(),
                         List.of(new PipelineUpsertRequest.StepRequest.OutputRequest("summary")),
-                        List.of())));
+                        List.of(), null, null)));
         pipelineService.create(request, "Tester");
 
         var execution = pipelineService.getForExecution("data-link-6");
 
         assertThat(execution.steps().get(0).outputs()).containsExactly("summary");
+    }
+
+    @Test
+    void savesAndReadsBackAConditionStepWithItsIncomingLinkAndBranches() {
+        PipelineUpsertRequest request = new PipelineUpsertRequest(
+                "cond-1", "Condition pipeline", "desc", "pipeline-svc-test-project",
+                List.of(),
+                List.of(
+                        new PipelineUpsertRequest.StepRequest("Score", PipelineStep.ContentType.PROMPT, "score it",
+                                null, null, 0, 0,
+                                List.of(new PipelineUpsertRequest.StepRequest.RouteRequest(null, 1)),
+                                List.of(new PipelineUpsertRequest.StepRequest.OutputRequest("score")),
+                                List.of(new PipelineUpsertRequest.StepRequest.DataLinkRequest("tok-1", "score", 1)),
+                                null, null),
+                        new PipelineUpsertRequest.StepRequest("Check score", PipelineStep.ContentType.CONDITION, null,
+                                null, null, 0, 0,
+                                List.of(new PipelineUpsertRequest.StepRequest.RouteRequest("true", 2),
+                                        new PipelineUpsertRequest.StepRequest.RouteRequest("false", null)),
+                                List.of(), List.of(),
+                                PipelineStep.ConditionOperator.GREATER_THAN, "10"),
+                        new PipelineUpsertRequest.StepRequest("Deploy", PipelineStep.ContentType.PROMPT, "deploy it",
+                                null, null, 0, 0, List.of(), List.of(), List.of(), null, null)));
+
+        PipelineDetail detail = pipelineService.create(request, "Tester");
+
+        PipelineDetail.PipelineStepView condition = detail.steps().get(1);
+        assertThat(condition.contentType()).isEqualTo(PipelineStep.ContentType.CONDITION);
+        assertThat(condition.conditionOperator()).isEqualTo(PipelineStep.ConditionOperator.GREATER_THAN);
+        assertThat(condition.conditionValue()).isEqualTo("10");
+        assertThat(condition.routes()).extracting(PipelineDetail.PipelineStepView.RouteView::outcomeKey)
+                .containsExactlyInAnyOrder("true", "false");
+    }
+
+    @Test
+    void rejectsAConditionStepMissingOperatorOrValue() {
+        PipelineUpsertRequest request = new PipelineUpsertRequest(
+                "cond-2", "Missing operator", "desc", "pipeline-svc-test-project",
+                List.of(),
+                List.of(
+                        new PipelineUpsertRequest.StepRequest("A", PipelineStep.ContentType.PROMPT, "a",
+                                null, null, 0, 0,
+                                List.of(new PipelineUpsertRequest.StepRequest.RouteRequest(null, 1)),
+                                List.of(new PipelineUpsertRequest.StepRequest.OutputRequest("x")),
+                                List.of(new PipelineUpsertRequest.StepRequest.DataLinkRequest("tok-2", "x", 1)),
+                                null, null),
+                        new PipelineUpsertRequest.StepRequest("B", PipelineStep.ContentType.CONDITION, null,
+                                null, null, 0, 0,
+                                List.of(new PipelineUpsertRequest.StepRequest.RouteRequest("true", null),
+                                        new PipelineUpsertRequest.StepRequest.RouteRequest("false", null)),
+                                List.of(), List.of(), null, null)));
+
+        assertThatThrownBy(() -> pipelineService.create(request, "Tester"))
+                .isInstanceOf(PipelineInvalidParametersException.class);
+    }
+
+    @Test
+    void rejectsAConditionStepWithoutExactlyTwoTrueFalseRoutes() {
+        PipelineUpsertRequest request = new PipelineUpsertRequest(
+                "cond-3", "Wrong routes", "desc", "pipeline-svc-test-project",
+                List.of(),
+                List.of(
+                        new PipelineUpsertRequest.StepRequest("A", PipelineStep.ContentType.PROMPT, "a",
+                                null, null, 0, 0,
+                                List.of(new PipelineUpsertRequest.StepRequest.RouteRequest(null, 1)),
+                                List.of(new PipelineUpsertRequest.StepRequest.OutputRequest("x")),
+                                List.of(new PipelineUpsertRequest.StepRequest.DataLinkRequest("tok-3", "x", 1)),
+                                null, null),
+                        new PipelineUpsertRequest.StepRequest("B", PipelineStep.ContentType.CONDITION, null,
+                                null, null, 0, 0,
+                                List.of(new PipelineUpsertRequest.StepRequest.RouteRequest("true", null)),
+                                List.of(), List.of(),
+                                PipelineStep.ConditionOperator.EQUALS, "yes")));
+
+        assertThatThrownBy(() -> pipelineService.create(request, "Tester"))
+                .isInstanceOf(PipelineInvalidGraphException.class);
+    }
+
+    @Test
+    void rejectsAConditionStepWithoutExactlyOneIncomingDataLink() {
+        PipelineUpsertRequest request = new PipelineUpsertRequest(
+                "cond-4", "No incoming link", "desc", "pipeline-svc-test-project",
+                List.of(),
+                List.of(
+                        new PipelineUpsertRequest.StepRequest("A", PipelineStep.ContentType.CONDITION, null,
+                                null, null, 0, 0,
+                                List.of(new PipelineUpsertRequest.StepRequest.RouteRequest("true", null),
+                                        new PipelineUpsertRequest.StepRequest.RouteRequest("false", null)),
+                                List.of(), List.of(),
+                                PipelineStep.ConditionOperator.EQUALS, "yes")));
+
+        assertThatThrownBy(() -> pipelineService.create(request, "Tester"))
+                .isInstanceOf(PipelineInvalidGraphException.class);
+    }
+
+    @Test
+    void savesAndReadsBackAVariableStepWithItsSingleOutput() {
+        PipelineUpsertRequest request = new PipelineUpsertRequest(
+                "var-1", "Variable pipeline", "desc", "pipeline-svc-test-project",
+                List.of(),
+                List.of(
+                        new PipelineUpsertRequest.StepRequest("Greeting", PipelineStep.ContentType.VARIABLE, "hello",
+                                null, null, 0, 0, List.of(),
+                                List.of(new PipelineUpsertRequest.StepRequest.OutputRequest("greeting")),
+                                List.of(), null, null),
+                        new PipelineUpsertRequest.StepRequest("Use it", PipelineStep.ContentType.PROMPT, "say it",
+                                null, null, 0, 0, List.of(), List.of(), List.of(), null, null)));
+
+        PipelineDetail detail = pipelineService.create(request, "Tester");
+
+        PipelineDetail.PipelineStepView variable = detail.steps().get(0);
+        assertThat(variable.contentType()).isEqualTo(PipelineStep.ContentType.VARIABLE);
+        assertThat(variable.promptText()).isEqualTo("hello");
+        assertThat(variable.outputs()).extracting(PipelineDetail.PipelineStepView.OutputView::name).containsExactly("greeting");
+    }
+
+    @Test
+    void rejectsAVariableStepWithoutExactlyOneOutput() {
+        PipelineUpsertRequest request = new PipelineUpsertRequest(
+                "var-2", "No output", "desc", "pipeline-svc-test-project",
+                List.of(),
+                List.of(new PipelineUpsertRequest.StepRequest("A", PipelineStep.ContentType.VARIABLE, "hello",
+                        null, null, 0, 0, List.of(), List.of(), List.of(), null, null)));
+
+        assertThatThrownBy(() -> pipelineService.create(request, "Tester"))
+                .isInstanceOf(PipelineInvalidGraphException.class);
+    }
+
+    @Test
+    void rejectsAVariableStepWithANamedRoute() {
+        PipelineUpsertRequest request = new PipelineUpsertRequest(
+                "var-3", "Named route on variable", "desc", "pipeline-svc-test-project",
+                List.of(),
+                List.of(
+                        new PipelineUpsertRequest.StepRequest("A", PipelineStep.ContentType.VARIABLE, "hello",
+                                null, null, 0, 0,
+                                List.of(new PipelineUpsertRequest.StepRequest.RouteRequest("go", 1)),
+                                List.of(new PipelineUpsertRequest.StepRequest.OutputRequest("greeting")),
+                                List.of(), null, null),
+                        new PipelineUpsertRequest.StepRequest("B", PipelineStep.ContentType.PROMPT, "b",
+                                null, null, 0, 0, List.of(), List.of(), List.of(), null, null)));
+
+        assertThatThrownBy(() -> pipelineService.create(request, "Tester"))
+                .isInstanceOf(PipelineInvalidGraphException.class);
     }
 }
