@@ -9,6 +9,7 @@ defineProps<
   NodeProps<{
     label: string
     outputs: { name: string }[]
+    contentType: string
   }>
 >()
 </script>
