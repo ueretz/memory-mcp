@@ -78,12 +78,13 @@ class PipelineMcpToolsTest {
     @Test
     void runStepUpdateDelegatesAndRecordsUsage() {
         when(settingsService.isEnabled(SettingsService.PIPELINES_ENABLED)).thenReturn(true);
-        PipelineRunDetail runDetail = new PipelineRunDetail(1L, 1L, "config-diff", PipelineRun.Status.RUNNING, "{}", Instant.now(), null, null, 0, List.of());
-        when(pipelineRunService.updateStep(1L, 0, PipelineRunStep.Status.DONE, "ok", null)).thenReturn(runDetail);
+        PipelineRunDetail runDetail = new PipelineRunDetail(1L, 1L, "config-diff", PipelineRun.Status.RUNNING, "{}", Instant.now(), null, null, 1, List.of());
+        when(pipelineRunService.updateStep(1L, 0, PipelineRunStep.Status.DONE, "ok", "success")).thenReturn(runDetail);
 
-        PipelineRunDetail result = pipelineMcpTools.pipelineRunStepUpdate(1L, 0, PipelineRunStep.Status.DONE, "ok");
+        PipelineRunDetail result = pipelineMcpTools.pipelineRunStepUpdate(1L, 0, PipelineRunStep.Status.DONE, "ok", "success");
 
         assertThat(result).isEqualTo(runDetail);
+        assertThat(result.currentStepOrderIndex()).isEqualTo(1);
         verify(usageEventRecorder).record(ru.iuribabalin.memorymcp.entity.UsageEvent.Action.PIPELINE_RUN_STEP_UPDATE, "1", null, null, null);
     }
 }
