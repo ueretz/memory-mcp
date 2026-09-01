@@ -90,17 +90,36 @@ const flowEdges = computed(() => {
   if (!pipeline.value) return []
   const steps = pipeline.value.steps
   const hasAnyRoutes = steps.some((step) => step.routes.length > 0)
+  // Data-link edges are drawn unconditionally regardless of whether the pipeline is route-less
+  // (implicit chain) or has real routes - computed once here so both branches below can never
+  // drift apart on this again.
+  const dataLinkEdges = steps.flatMap((step) =>
+    step.dataLinksOut.map((link) => ({
+      id: `data-${link.token}`,
+      source: String(step.orderIndex),
+      sourceHandle: `output-${link.sourceOutputName}`,
+      target: String(link.targetStepOrderIndex),
+      targetHandle: 'data-in',
+      class: 'pipeline-data-edge',
+      style: { strokeDasharray: '4 4', stroke: '#10b981' },
+    })),
+  )
   if (!hasAnyRoutes) {
-    return steps.map((step, index) => {
-      const nextStep = steps[index + 1]
-      const target = nextStep ? String(nextStep.orderIndex) : END_NODE_ID
-      return {
-        id: `${step.orderIndex}-implicit-${target}`,
-        source: String(step.orderIndex),
-        target,
-        label: undefined as string | undefined,
-      }
-    })
+    return [
+      ...steps.map((step, index) => {
+        const nextStep = steps[index + 1]
+        const target = nextStep ? String(nextStep.orderIndex) : END_NODE_ID
+        return {
+          id: `${step.orderIndex}-implicit-${target}`,
+          source: String(step.orderIndex),
+          sourceHandle: 'route',
+          target,
+          targetHandle: 'data-in',
+          label: undefined as string | undefined,
+        }
+      }),
+      ...dataLinkEdges,
+    ]
   }
   return [
     ...steps.flatMap((step) =>
@@ -113,17 +132,7 @@ const flowEdges = computed(() => {
         label: route.outcomeKey ?? '(по умолчанию)' as string | undefined,
       })),
     ),
-    ...steps.flatMap((step) =>
-      step.dataLinksOut.map((link) => ({
-        id: `data-${link.token}`,
-        source: String(step.orderIndex),
-        sourceHandle: `output-${link.sourceOutputName}`,
-        target: String(link.targetStepOrderIndex),
-        targetHandle: 'data-in',
-        class: 'pipeline-data-edge',
-        style: { strokeDasharray: '4 4', stroke: '#10b981' },
-      })),
-    ),
+    ...dataLinkEdges,
   ]
 })
 
