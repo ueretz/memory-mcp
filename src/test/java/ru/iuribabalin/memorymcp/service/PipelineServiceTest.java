@@ -123,6 +123,9 @@ class PipelineServiceTest {
 
     @Test
     void rejectsAPipelineWithACycle() {
+        // Single root (step 0) so the root-count check passes; steps 1 and 2 route to each
+        // other, forming a 2-cycle reachable from the root. This must be caught by the
+        // topological-sort (Kahn's algorithm) branch in validateGraph, not the root-count check.
         PipelineUpsertRequest request = new PipelineUpsertRequest(
                 "branch-2", "Cyclic", "desc", "pipeline-svc-test-project",
                 List.of(),
@@ -130,7 +133,24 @@ class PipelineServiceTest {
                         new PipelineUpsertRequest.StepRequest("A", PipelineStep.ContentType.PROMPT, "a",
                                 null, null, 0, 0, List.of(new PipelineUpsertRequest.StepRequest.RouteRequest(null, 1))),
                         new PipelineUpsertRequest.StepRequest("B", PipelineStep.ContentType.PROMPT, "b",
-                                null, null, 0, 0, List.of(new PipelineUpsertRequest.StepRequest.RouteRequest(null, 0)))));
+                                null, null, 0, 0, List.of(new PipelineUpsertRequest.StepRequest.RouteRequest(null, 2))),
+                        new PipelineUpsertRequest.StepRequest("C", PipelineStep.ContentType.PROMPT, "c",
+                                null, null, 0, 0, List.of(new PipelineUpsertRequest.StepRequest.RouteRequest(null, 1)))));
+
+        assertThatThrownBy(() -> pipelineService.create(request, "Tester"))
+                .isInstanceOf(PipelineInvalidGraphException.class);
+    }
+
+    @Test
+    void rejectsARouteWithAnOutOfRangeTargetStepIndex() {
+        PipelineUpsertRequest request = new PipelineUpsertRequest(
+                "branch-7", "Out of range target", "desc", "pipeline-svc-test-project",
+                List.of(),
+                List.of(
+                        new PipelineUpsertRequest.StepRequest("A", PipelineStep.ContentType.PROMPT, "a",
+                                null, null, 0, 0, List.of(new PipelineUpsertRequest.StepRequest.RouteRequest(null, 5))),
+                        new PipelineUpsertRequest.StepRequest("B", PipelineStep.ContentType.PROMPT, "b",
+                                null, null, 0, 0, List.of())));
 
         assertThatThrownBy(() -> pipelineService.create(request, "Tester"))
                 .isInstanceOf(PipelineInvalidGraphException.class);

@@ -196,6 +196,11 @@ public class PipelineService {
                 outDegree[i]++;
                 if (route.targetStepIndex() != null) {
                     int target = route.targetStepIndex();
+                    if (target < 0 || target >= n) {
+                        throw new PipelineInvalidGraphException(
+                                "Step '" + steps.get(i).title() + "' routes to step index " + target
+                                        + ", but the pipeline only has " + n + " steps");
+                    }
                     inDegree[target]++;
                     adjacency.get(i).add(target);
                 }
