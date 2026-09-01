@@ -8,13 +8,19 @@ import ru.iuribabalin.memorymcp.entity.Pipeline;
 import ru.iuribabalin.memorymcp.entity.PipelineRun;
 import ru.iuribabalin.memorymcp.entity.PipelineRunStep;
 import ru.iuribabalin.memorymcp.entity.PipelineStep;
+import ru.iuribabalin.memorymcp.entity.PipelineStepRoute;
 import ru.iuribabalin.memorymcp.repository.PipelineRepository;
 import ru.iuribabalin.memorymcp.repository.PipelineRunRepository;
 import ru.iuribabalin.memorymcp.repository.PipelineRunStepRepository;
 import ru.iuribabalin.memorymcp.repository.PipelineStepRepository;
+import ru.iuribabalin.memorymcp.repository.PipelineStepRouteRepository;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Objects;
+import java.util.Optional;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 @Service
 public class PipelineRunService {
@@ -23,15 +29,18 @@ public class PipelineRunService {
     private final PipelineRunStepRepository pipelineRunStepRepository;
     private final PipelineRepository pipelineRepository;
     private final PipelineStepRepository pipelineStepRepository;
+    private final PipelineStepRouteRepository pipelineStepRouteRepository;
 
     public PipelineRunService(PipelineRunRepository pipelineRunRepository,
                                PipelineRunStepRepository pipelineRunStepRepository,
                                PipelineRepository pipelineRepository,
-                               PipelineStepRepository pipelineStepRepository) {
+                               PipelineStepRepository pipelineStepRepository,
+                               PipelineStepRouteRepository pipelineStepRouteRepository) {
         this.pipelineRunRepository = pipelineRunRepository;
         this.pipelineRunStepRepository = pipelineRunStepRepository;
         this.pipelineRepository = pipelineRepository;
         this.pipelineStepRepository = pipelineStepRepository;
+        this.pipelineStepRouteRepository = pipelineStepRouteRepository;
     }
 
     @Transactional
@@ -46,6 +55,7 @@ public class PipelineRunService {
         run.setParametersJson(parametersJson);
         run.setStartedAt(now);
         run.setStartedBy(startedBy);
+        run.setCurrentStepOrderIndex(resolveRootOrderIndex(steps));
         run = pipelineRunRepository.save(run);
         for (PipelineStep step : steps) {
             PipelineRunStep runStep = new PipelineRunStep();
@@ -61,7 +71,7 @@ public class PipelineRunService {
     }
 
     @Transactional
-    public PipelineRunDetail updateStep(Long runId, int orderIndex, PipelineRunStep.Status status, String note) {
+    public PipelineRunDetail updateStep(Long runId, int orderIndex, PipelineRunStep.Status status, String note, String outcome) {
         PipelineRun run = resolve(runId);
         PipelineRunStep runStep = pipelineRunStepRepository.findByRunIdAndOrderIndex(runId, orderIndex)
                 .orElseThrow(() -> new PipelineRunStepNotFoundException(runId, orderIndex));
@@ -76,6 +86,11 @@ public class PipelineRunService {
         runStep.setStatus(status);
         runStep.setNote(note);
         pipelineRunStepRepository.save(runStep);
+
+        if (status == PipelineRunStep.Status.DONE && runStep.getPipelineStepId() != null) {
+            run.setCurrentStepOrderIndex(resolveNextOrderIndex(run.getPipelineId(), runStep.getPipelineStepId(), orderIndex, outcome));
+            pipelineRunRepository.save(run);
+        }
         return toDetail(run, pipelineSlugOf(run));
     }
 
@@ -112,6 +127,73 @@ public class PipelineRunService {
         return pipelineRepository.findById(run.getPipelineId()).map(Pipeline::getSlug).orElse(null);
     }
 
+    private Integer resolveRootOrderIndex(List<PipelineStep> steps) {
+        if (steps.isEmpty()) {
+            return null;
+        }
+        List<PipelineStepRoute> allRoutes = pipelineStepRouteRepository.findByStepIdIn(
+                steps.stream().map(PipelineStep::getId).toList());
+        if (allRoutes.isEmpty()) {
+            return steps.stream().mapToInt(PipelineStep::getOrderIndex).min().orElseThrow();
+        }
+        Set<Long> targeted = allRoutes.stream().map(PipelineStepRoute::getTargetStepId)
+                .filter(Objects::nonNull).collect(Collectors.toSet());
+        Set<Long> withOutgoing = allRoutes.stream().map(PipelineStepRoute::getStepId).collect(Collectors.toSet());
+        return steps.stream()
+                .filter(s -> !targeted.contains(s.getId()))
+                .filter(s -> withOutgoing.contains(s.getId()))
+                .mapToInt(PipelineStep::getOrderIndex)
+                .min()
+                .orElseThrow(() -> new IllegalStateException("Pipeline has no starting step"));
+    }
+
+    /**
+     * A step with no routes falls back to legacy orderIndex+1 chaining only when the WHOLE
+     * pipeline has no routes anywhere (a pipeline never touched by branching). Inside a pipeline
+     * that does use branching, a step with no explicit routes is a dead end (end of that path) -
+     * never an implicit chain to whatever step happens to sit at orderIndex+1.
+     */
+    private Integer resolveNextOrderIndex(Long pipelineId, Long finishedStepId, int finishedOrderIndex, String outcome) {
+        List<PipelineStep> allSteps = pipelineStepRepository.findByPipelineIdOrderByOrderIndexAsc(pipelineId);
+        List<PipelineStepRoute> allRoutes = pipelineStepRouteRepository.findByStepIdIn(
+                allSteps.stream().map(PipelineStep::getId).toList());
+        if (allRoutes.isEmpty()) {
+            return allSteps.stream()
+                    .map(PipelineStep::getOrderIndex)
+                    .filter(i -> i == finishedOrderIndex + 1)
+                    .findFirst()
+                    .orElse(null);
+        }
+        List<PipelineStepRoute> stepRoutes = allRoutes.stream()
+                .filter(r -> r.getStepId().equals(finishedStepId))
+                .toList();
+        if (stepRoutes.isEmpty()) {
+            return null;
+        }
+        Optional<PipelineStepRoute> matched = stepRoutes.stream()
+                .filter(r -> r.getOutcomeKey() != null && r.getOutcomeKey().equals(outcome))
+                .findFirst();
+        if (matched.isEmpty()) {
+            matched = stepRoutes.stream().filter(r -> r.getOutcomeKey() == null).findFirst();
+        }
+        if (matched.isEmpty()) {
+            List<String> validOutcomes = stepRoutes.stream()
+                    .map(PipelineStepRoute::getOutcomeKey)
+                    .filter(Objects::nonNull)
+                    .toList();
+            throw new PipelineRunInvalidOutcomeException(outcome, validOutcomes);
+        }
+        Long targetStepId = matched.get().getTargetStepId();
+        if (targetStepId == null) {
+            return null;
+        }
+        return allSteps.stream()
+                .filter(s -> s.getId().equals(targetStepId))
+                .map(PipelineStep::getOrderIndex)
+                .findFirst()
+                .orElse(null);
+    }
+
     private PipelineRunSummary toSummary(PipelineRun run, String pipelineSlug) {
         return new PipelineRunSummary(run.getId(), run.getPipelineId(), pipelineSlug, run.getStatus(),
                 run.getStartedAt(), run.getFinishedAt(), run.getStartedBy());
@@ -124,6 +206,7 @@ public class PipelineRunService {
                         s.getContentType(), s.getStatus(), s.getNote(), s.getStartedAt(), s.getFinishedAt()))
                 .toList();
         return new PipelineRunDetail(run.getId(), run.getPipelineId(), pipelineSlug, run.getStatus(),
-                run.getParametersJson(), run.getStartedAt(), run.getFinishedAt(), run.getStartedBy(), steps);
+                run.getParametersJson(), run.getStartedAt(), run.getFinishedAt(), run.getStartedBy(),
+                run.getCurrentStepOrderIndex(), steps);
     }
 }

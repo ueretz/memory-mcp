@@ -40,6 +40,9 @@ public class PipelineRun {
     @Column(name = "started_by", length = 300)
     private String startedBy;
 
+    @Column(name = "current_step_order_index")
+    private Integer currentStepOrderIndex;
+
     public Long getId() {
         return id;
     }
@@ -90,5 +93,13 @@ public class PipelineRun {
 
     public void setStartedBy(String startedBy) {
         this.startedBy = startedBy;
+    }
+
+    public Integer getCurrentStepOrderIndex() {
+        return currentStepOrderIndex;
+    }
+
+    public void setCurrentStepOrderIndex(Integer currentStepOrderIndex) {
+        this.currentStepOrderIndex = currentStepOrderIndex;
     }
 }

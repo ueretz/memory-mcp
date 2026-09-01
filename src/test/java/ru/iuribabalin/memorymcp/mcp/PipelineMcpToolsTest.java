@@ -65,7 +65,7 @@ class PipelineMcpToolsTest {
     @Test
     void runStartValidatesParametersAndRecordsUsage() {
         when(settingsService.isEnabled(SettingsService.PIPELINES_ENABLED)).thenReturn(true);
-        PipelineRunDetail runDetail = new PipelineRunDetail(1L, 1L, "config-diff", PipelineRun.Status.RUNNING, "{}", Instant.now(), null, null, List.of());
+        PipelineRunDetail runDetail = new PipelineRunDetail(1L, 1L, "config-diff", PipelineRun.Status.RUNNING, "{}", Instant.now(), null, null, 0, List.of());
         when(pipelineRunService.start("config-diff", "{}", null)).thenReturn(runDetail);
 
         PipelineRunDetail result = pipelineMcpTools.pipelineRunStart("config-diff", "{}");
@@ -78,8 +78,8 @@ class PipelineMcpToolsTest {
     @Test
     void runStepUpdateDelegatesAndRecordsUsage() {
         when(settingsService.isEnabled(SettingsService.PIPELINES_ENABLED)).thenReturn(true);
-        PipelineRunDetail runDetail = new PipelineRunDetail(1L, 1L, "config-diff", PipelineRun.Status.RUNNING, "{}", Instant.now(), null, null, List.of());
-        when(pipelineRunService.updateStep(1L, 0, PipelineRunStep.Status.DONE, "ok")).thenReturn(runDetail);
+        PipelineRunDetail runDetail = new PipelineRunDetail(1L, 1L, "config-diff", PipelineRun.Status.RUNNING, "{}", Instant.now(), null, null, 0, List.of());
+        when(pipelineRunService.updateStep(1L, 0, PipelineRunStep.Status.DONE, "ok", null)).thenReturn(runDetail);
 
         PipelineRunDetail result = pipelineMcpTools.pipelineRunStepUpdate(1L, 0, PipelineRunStep.Status.DONE, "ok");
 

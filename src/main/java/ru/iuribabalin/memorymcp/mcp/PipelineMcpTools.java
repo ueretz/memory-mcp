@@ -80,7 +80,7 @@ public class PipelineMcpTools {
             @McpToolParam(description = "New status: RUNNING, DONE, FAILED, or SKIPPED", required = true) PipelineRunStep.Status status,
             @McpToolParam(description = "Short summary of what happened for this step", required = false) String note) {
         requireEnabled();
-        PipelineRunDetail run = pipelineRunService.updateStep(runId, orderIndex, status, note);
+        PipelineRunDetail run = pipelineRunService.updateStep(runId, orderIndex, status, note, null);
         usageEventRecorder.record(UsageEvent.Action.PIPELINE_RUN_STEP_UPDATE, String.valueOf(runId), null, null, null);
         return run;
     }
