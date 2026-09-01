@@ -124,6 +124,28 @@ class PipelineRunServiceTest {
     }
 
     @Test
+    void startResolvesTheTrueRootEvenWhenItIsNotTheLowestOrderIndex() {
+        String slug = "run-test-13";
+        pipelineService.create(new PipelineUpsertRequest(
+                slug, "Branching, root not at zero", "desc", "pipeline-run-svc-test-project",
+                List.of(),
+                List.of(
+                        new PipelineUpsertRequest.StepRequest("Rollback", PipelineStep.ContentType.PROMPT, "rollback",
+                                null, null, 0, 0, List.of()),
+                        new PipelineUpsertRequest.StepRequest("Check", PipelineStep.ContentType.PROMPT, "check",
+                                null, null, 0, 0, List.of(
+                                        new PipelineUpsertRequest.StepRequest.RouteRequest("pass", 2),
+                                        new PipelineUpsertRequest.StepRequest.RouteRequest("fail", 0))),
+                        new PipelineUpsertRequest.StepRequest("Deploy", PipelineStep.ContentType.PROMPT, "deploy",
+                                null, null, 0, 0, List.of()))
+        ), "Tester");
+
+        PipelineRunDetail run = pipelineRunService.start(slug, "{}", "Tester");
+
+        assertThat(run.currentStepOrderIndex()).isEqualTo(1);
+    }
+
+    @Test
     void doneWithAMatchingOutcomeAdvancesToTheRoutedStep() {
         createBranchingPipeline("run-test-8");
         PipelineRunDetail run = pipelineRunService.start("run-test-8", "{}", "Tester");
