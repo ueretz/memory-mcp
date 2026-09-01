@@ -459,7 +459,8 @@ public class PipelineService {
                 .collect(Collectors.toMap(PipelineStep::getId, PipelineStep::getTitle));
         List<PipelineDetail.PipelineStepView> steps = pipelineSteps.stream()
                 .map(s -> {
-                    Map<Long, PipelineStepOutput> outputsById = pipelineStepOutputRepository.findByStepId(s.getId()).stream()
+                    List<PipelineStepOutput> stepOutputs = pipelineStepOutputRepository.findByStepId(s.getId());
+                    Map<Long, PipelineStepOutput> outputsById = stepOutputs.stream()
                             .collect(Collectors.toMap(PipelineStepOutput::getId, o -> o));
                     return new PipelineDetail.PipelineStepView(
                             s.getId(), s.getOrderIndex(), s.getTitle(), s.getContentType(), s.getPromptText(),
@@ -469,7 +470,7 @@ public class PipelineService {
                                             r.getOutcomeKey(),
                                             r.getTargetStepId() != null ? orderIndexById.get(r.getTargetStepId()) : null))
                                     .toList(),
-                            outputsById.values().stream()
+                            stepOutputs.stream()
                                     .map(o -> new PipelineDetail.PipelineStepView.OutputView(o.getId(), o.getName()))
                                     .toList(),
                             pipelineDataLinkRepository.findBySourceStepIdIn(List.of(s.getId())).stream()

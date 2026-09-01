@@ -259,6 +259,24 @@ class PipelineServiceTest {
     }
 
     @Test
+    void readsBackMultipleOutputsInDeclarationOrder() {
+        PipelineUpsertRequest request = new PipelineUpsertRequest(
+                "data-link-7", "Multiple outputs", "desc", "pipeline-svc-test-project",
+                List.of(),
+                List.of(new PipelineUpsertRequest.StepRequest("A", PipelineStep.ContentType.PROMPT, "a",
+                        null, null, 0, 0, List.of(),
+                        List.of(new PipelineUpsertRequest.StepRequest.OutputRequest("zeta"),
+                                new PipelineUpsertRequest.StepRequest.OutputRequest("alpha"),
+                                new PipelineUpsertRequest.StepRequest.OutputRequest("mu")),
+                        List.of())));
+
+        PipelineDetail detail = pipelineService.create(request, "Tester");
+
+        assertThat(detail.steps().get(0).outputs()).extracting(PipelineDetail.PipelineStepView.OutputView::name)
+                .containsExactly("zeta", "alpha", "mu");
+    }
+
+    @Test
     void rejectsADuplicateOutputNameOnTheSameStep() {
         PipelineUpsertRequest request = new PipelineUpsertRequest(
                 "data-link-2", "Dup output", "desc", "pipeline-svc-test-project",
