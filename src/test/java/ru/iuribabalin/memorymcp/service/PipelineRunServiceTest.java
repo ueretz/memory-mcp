@@ -31,8 +31,8 @@ class PipelineRunServiceTest {
                 slug, "Config diff", "desc", "pipeline-run-svc-test-project",
                 List.of(new PipelineUpsertRequest.ParameterRequest("folder", "Folder", PipelineParameter.Type.STRING, true, null)),
                 List.of(
-                        new PipelineUpsertRequest.StepRequest("Check history", PipelineStep.ContentType.PROMPT, "Diff {{folder}}", null, null, 0, 0, List.of()),
-                        new PipelineUpsertRequest.StepRequest("Save report", PipelineStep.ContentType.PROMPT, "Save it", null, null, 0, 0, List.of()))
+                        new PipelineUpsertRequest.StepRequest("Check history", PipelineStep.ContentType.PROMPT, "Diff {{folder}}", null, null, 0, 0, List.of(), List.of(), List.of()),
+                        new PipelineUpsertRequest.StepRequest("Save report", PipelineStep.ContentType.PROMPT, "Save it", null, null, 0, 0, List.of(), List.of(), List.of()))
         ), "Tester");
     }
 
@@ -106,11 +106,12 @@ class PipelineRunServiceTest {
                         new PipelineUpsertRequest.StepRequest("Check", PipelineStep.ContentType.PROMPT, "check",
                                 null, null, 0, 0, List.of(
                                         new PipelineUpsertRequest.StepRequest.RouteRequest("pass", 1),
-                                        new PipelineUpsertRequest.StepRequest.RouteRequest("fail", 2))),
+                                        new PipelineUpsertRequest.StepRequest.RouteRequest("fail", 2)),
+                                List.of(), List.of()),
                         new PipelineUpsertRequest.StepRequest("Deploy", PipelineStep.ContentType.PROMPT, "deploy",
-                                null, null, 0, 0, List.of()),
+                                null, null, 0, 0, List.of(), List.of(), List.of()),
                         new PipelineUpsertRequest.StepRequest("Rollback", PipelineStep.ContentType.PROMPT, "rollback",
-                                null, null, 0, 0, List.of()))
+                                null, null, 0, 0, List.of(), List.of(), List.of()))
         ), "Tester");
     }
 
@@ -131,13 +132,14 @@ class PipelineRunServiceTest {
                 List.of(),
                 List.of(
                         new PipelineUpsertRequest.StepRequest("Rollback", PipelineStep.ContentType.PROMPT, "rollback",
-                                null, null, 0, 0, List.of()),
+                                null, null, 0, 0, List.of(), List.of(), List.of()),
                         new PipelineUpsertRequest.StepRequest("Check", PipelineStep.ContentType.PROMPT, "check",
                                 null, null, 0, 0, List.of(
                                         new PipelineUpsertRequest.StepRequest.RouteRequest("pass", 2),
-                                        new PipelineUpsertRequest.StepRequest.RouteRequest("fail", 0))),
+                                        new PipelineUpsertRequest.StepRequest.RouteRequest("fail", 0)),
+                                List.of(), List.of()),
                         new PipelineUpsertRequest.StepRequest("Deploy", PipelineStep.ContentType.PROMPT, "deploy",
-                                null, null, 0, 0, List.of()))
+                                null, null, 0, 0, List.of(), List.of(), List.of()))
         ), "Tester");
 
         PipelineRunDetail run = pipelineRunService.start(slug, "{}", "Tester");
@@ -218,11 +220,12 @@ class PipelineRunServiceTest {
                         new PipelineUpsertRequest.StepRequest("Check", PipelineStep.ContentType.PROMPT, "check",
                                 null, null, 0, 0, List.of(
                                         new PipelineUpsertRequest.StepRequest.RouteRequest("pass", 1),
-                                        new PipelineUpsertRequest.StepRequest.RouteRequest(null, 2))),
+                                        new PipelineUpsertRequest.StepRequest.RouteRequest(null, 2)),
+                                List.of(), List.of()),
                         new PipelineUpsertRequest.StepRequest("Deploy", PipelineStep.ContentType.PROMPT, "deploy",
-                                null, null, 0, 0, List.of()),
+                                null, null, 0, 0, List.of(), List.of(), List.of()),
                         new PipelineUpsertRequest.StepRequest("Fallback", PipelineStep.ContentType.PROMPT, "fallback",
-                                null, null, 0, 0, List.of()))
+                                null, null, 0, 0, List.of(), List.of(), List.of()))
         ), "Tester");
         PipelineRunDetail run = pipelineRunService.start(slug, "{}", "Tester");
 

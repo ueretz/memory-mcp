@@ -11,7 +11,8 @@ public record PipelineExecutionDetail(
     public record ParameterView(String name, String label, PipelineParameter.Type type, boolean required, String defaultValue) {
     }
 
-    public record StepView(int orderIndex, String title, String instructionText, String referenceText, List<RouteView> routes) {
+    public record StepView(int orderIndex, String title, String instructionText, String referenceText,
+                            List<RouteView> routes, List<String> outputs) {
 
         public record RouteView(String outcomeKey, Integer targetStepOrderIndex, String targetStepTitle) {
         }
