@@ -68,15 +68,29 @@ const flowNodes = computed(() => {
       id: String(step.orderIndex),
       type: 'pipelineStep',
       position: positions.get(step.orderIndex)!,
-      class: step.contentType === 'CONDITION' ? 'pipeline-node pipeline-node-condition' : 'pipeline-node',
-      data: { label: `${step.orderIndex + 1}. ${step.title}`, outputs: step.outputs, contentType: step.contentType },
+      style: { width: '260px', height: '190px' },
+      class: 'pipeline-node',
+      data: {
+        step: {
+          title: `${step.orderIndex + 1}. ${step.title}`,
+          contentType: step.contentType,
+          promptText: step.promptText,
+          assetId: step.assetId,
+          referenceAssetId: step.referenceAssetId,
+          outputs: step.outputs,
+          conditionOperator: step.conditionOperator,
+          conditionValue: step.conditionValue,
+        },
+        isEnd: false,
+        readonly: true,
+      },
     })),
     {
       id: END_NODE_ID,
       type: 'pipelineStep',
       position: { x: maxX + 240, y: 0 },
       class: 'pipeline-node pipeline-node-end',
-      data: { label: 'Конец рана', outputs: [], contentType: 'PROMPT' },
+      data: { step: null, label: 'Конец рана', isEnd: true },
     },
   ]
 })
@@ -126,7 +140,7 @@ const flowEdges = computed(() => {
       step.routes.map((route) => ({
         id: `${step.orderIndex}-${route.outcomeKey ?? 'default'}-${route.targetStepOrderIndex ?? END_NODE_ID}`,
         source: String(step.orderIndex),
-        sourceHandle: 'route',
+        sourceHandle: step.contentType === 'CONDITION' ? `route-${route.outcomeKey}` : 'route',
         target: route.targetStepOrderIndex === null ? END_NODE_ID : String(route.targetStepOrderIndex),
         targetHandle: 'data-in',
         label: route.outcomeKey ?? '(по умолчанию)' as string | undefined,

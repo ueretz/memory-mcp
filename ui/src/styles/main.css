@@ -258,36 +258,237 @@
   }
 }
 
-.pipeline-node {
-  border-radius: 0.75rem;
-  border: 1px solid var(--color-border);
-  background: var(--color-panel);
-  color: var(--color-content);
-  font-size: 12.5px;
-  padding: 8px 12px;
-}
-.pipeline-node-selected {
+/* The vue-flow node wrapper itself stays chromeless now - PipelineStepNode's .pipeline-card owns
+   the actual box (border/background/rounded corners/header). These classes only add a selection
+   ring or a status-color accent on top of that card via descendant selectors, plus opacity for
+   not-yet-reached nodes in the read-only run view. */
+.pipeline-node-selected .pipeline-card {
   box-shadow: 0 0 0 2px var(--color-accent);
 }
-.pipeline-node-end {
-  border-style: dashed;
-  color: var(--color-faint);
-}
-.pipeline-node-done {
+.pipeline-node-done .pipeline-card {
   border-color: var(--color-accent);
-  opacity: 1;
 }
-.pipeline-node-failed {
+.pipeline-node-failed .pipeline-card {
   border-color: #dc2626;
 }
-.pipeline-node-running {
+.pipeline-node-running .pipeline-card {
   border-color: var(--color-accent);
   box-shadow: 0 0 0 2px var(--color-accent-soft);
 }
 .pipeline-node-not-reached {
   opacity: 0.45;
 }
-.pipeline-node-condition {
-  clip-path: polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%);
-  padding: 20px 28px;
+
+.pipeline-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  border-radius: 0.75rem;
+  border: 1px solid var(--color-border);
+  background: var(--color-panel);
+  color: var(--color-content);
+  font-size: 12px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
+  overflow: hidden;
+}
+.pipeline-card-readonly {
+  opacity: 0.96;
+}
+.pipeline-card-end {
+  display: inline-flex;
+  align-items: center;
+  padding: 10px 16px;
+  border-radius: 0.75rem;
+  border: 1px dashed var(--color-border);
+  color: var(--color-faint);
+  background: var(--color-panel);
+  font-size: 12.5px;
+}
+.pipeline-card-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-elevated);
+}
+.pipeline-card-condition .pipeline-card-header {
+  background: color-mix(in srgb, var(--color-accent) 18%, var(--color-elevated));
+}
+.pipeline-card-variable .pipeline-card-header {
+  background: color-mix(in srgb, #a855f7 18%, var(--color-elevated));
+}
+.pipeline-card-title {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  color: var(--color-content);
+  font-size: 12.5px;
+  font-weight: 600;
+  outline: none;
+}
+.pipeline-card-remove {
+  flex-shrink: 0;
+  color: var(--color-faint);
+  padding: 2px;
+  border-radius: 4px;
+}
+.pipeline-card-remove:hover {
+  color: #dc2626;
+  background: rgba(220, 38, 38, 0.1);
+}
+.pipeline-card-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  overflow-y: auto;
+}
+.pipeline-card-textarea {
+  flex: 1;
+  min-height: 60px;
+  width: 100%;
+  resize: none;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: var(--color-elevated);
+  color: var(--color-content);
+  padding: 6px 8px;
+  font-size: 12px;
+}
+.pipeline-card-row {
+  display: flex;
+  gap: 6px;
+}
+.pipeline-card-select,
+.pipeline-card-input {
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: var(--color-elevated);
+  color: var(--color-content);
+  padding: 5px 7px;
+  font-size: 12px;
+}
+.pipeline-card-select {
+  width: 64px;
+  flex-shrink: 0;
+}
+.pipeline-card-input {
+  flex: 1;
+  min-width: 0;
+}
+.pipeline-card-label {
+  font-size: 10.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  color: var(--color-faint);
+}
+.pipeline-card-hint {
+  font-size: 10.5px;
+  color: var(--color-faint);
+  overflow-wrap: anywhere;
+}
+.pipeline-card-file {
+  font-size: 11px;
+}
+.pipeline-card-refs {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding-top: 4px;
+  border-top: 1px solid var(--color-border);
+}
+.pipeline-card-wired {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.pipeline-card-outputs {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-top: 4px;
+  border-top: 1px solid var(--color-border);
+}
+.pipeline-card-outputs-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.pipeline-card-add {
+  color: var(--color-accent);
+  font-weight: 700;
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  line-height: 1;
+}
+.pipeline-card-add:hover {
+  background: var(--color-accent-soft);
+}
+.pipeline-card-output-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding-right: 8px;
+}
+.pipeline-card-output-input {
+  flex: 1;
+  min-width: 0;
+  border: 1px solid var(--color-border);
+  border-radius: 5px;
+  background: var(--color-elevated);
+  color: var(--color-content);
+  padding: 3px 6px;
+  font-size: 11px;
+}
+.pipeline-card-remove-small {
+  flex-shrink: 0;
+  color: var(--color-faint);
+  width: 16px;
+  height: 16px;
+  line-height: 1;
+  border-radius: 4px;
+}
+.pipeline-card-remove-small:hover {
+  color: #dc2626;
+}
+
+.pipeline-handle {
+  width: 10px !important;
+  height: 10px !important;
+  border: 2px solid var(--color-panel) !important;
+}
+.pipeline-handle-route {
+  background: var(--color-content) !important;
+}
+.pipeline-handle-data {
+  background: #10b981 !important;
+}
+.pipeline-handle-inline {
+  position: absolute !important;
+  right: -13px !important;
+  top: 50% !important;
+  transform: translateY(-50%) !important;
+}
+.pipeline-handle-true {
+  background: #22c55e !important;
+}
+.pipeline-handle-false {
+  background: #ef4444 !important;
+}
+
+.pipeline-resize-line {
+  border-color: var(--color-accent) !important;
+}
+.pipeline-resize-handle {
+  background: var(--color-accent) !important;
+  width: 8px !important;
+  height: 8px !important;
+  border-radius: 2px !important;
 }

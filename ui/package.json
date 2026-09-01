@@ -16,6 +16,7 @@
   },
   "dependencies": {
     "@vue-flow/core": "^1.48.2",
+    "@vue-flow/node-resizer": "^1.5.1",
     "d3-drag": "^3.0.0",
     "d3-force": "^3.0.0",
     "d3-selection": "^3.0.0",

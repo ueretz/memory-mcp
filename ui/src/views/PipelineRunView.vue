@@ -55,13 +55,26 @@ const flowNodes = computed(() => {
     ...steps.map((step) => {
       const runStep = runStepByOrderIndex.get(step.orderIndex)
       const statusClass = runStep ? STATUS_CLASS[runStep.status] : 'pipeline-node pipeline-node-not-reached'
-      const conditionClass = step.contentType === 'CONDITION' ? ' pipeline-node-condition' : ''
       return {
         id: String(step.orderIndex),
         type: 'pipelineStep',
         position: positions.get(step.orderIndex)!,
-        class: (isCurrent(step.orderIndex) ? `${statusClass} pipeline-node-selected` : statusClass) + conditionClass,
-        data: { label: `${step.orderIndex + 1}. ${step.title}${runStep?.note ? ` — ${runStep.note}` : ''}`, outputs: step.outputs, contentType: step.contentType },
+        style: { width: '260px', height: '190px' },
+        class: isCurrent(step.orderIndex) ? `${statusClass} pipeline-node-selected` : statusClass,
+        data: {
+          step: {
+            title: `${step.orderIndex + 1}. ${step.title}${runStep?.note ? ` — ${runStep.note}` : ''}`,
+            contentType: step.contentType,
+            promptText: step.promptText,
+            assetId: step.assetId,
+            referenceAssetId: step.referenceAssetId,
+            outputs: step.outputs,
+            conditionOperator: step.conditionOperator,
+            conditionValue: step.conditionValue,
+          },
+          isEnd: false,
+          readonly: true,
+        },
       }
     }),
     {
@@ -69,7 +82,7 @@ const flowNodes = computed(() => {
       type: 'pipelineStep',
       position: { x: maxX + 240, y: 0 },
       class: run.value.currentStepOrderIndex === null ? 'pipeline-node pipeline-node-end pipeline-node-done' : 'pipeline-node pipeline-node-end',
-      data: { label: 'Конец рана', outputs: [], contentType: 'PROMPT' },
+      data: { step: null, label: 'Конец рана', isEnd: true },
     },
   ]
 })
