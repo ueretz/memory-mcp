@@ -41,6 +41,12 @@ public class PipelineStep {
     @Column(name = "reference_asset_id")
     private Long referenceAssetId;
 
+    @Column(name = "position_x", nullable = false)
+    private double positionX;
+
+    @Column(name = "position_y", nullable = false)
+    private double positionY;
+
     public Long getId() {
         return id;
     }
@@ -99,5 +105,21 @@ public class PipelineStep {
 
     public void setReferenceAssetId(Long referenceAssetId) {
         this.referenceAssetId = referenceAssetId;
+    }
+
+    public double getPositionX() {
+        return positionX;
+    }
+
+    public void setPositionX(double positionX) {
+        this.positionX = positionX;
+    }
+
+    public double getPositionY() {
+        return positionY;
+    }
+
+    public void setPositionY(double positionY) {
+        this.positionY = positionY;
     }
 }
