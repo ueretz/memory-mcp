@@ -37,7 +37,9 @@ the only new part is checking state back into memory-mcp as you go.
    response (`pipeline_run_start` or `pipeline_run_step_update`), the step to work on is whichever
    one has `orderIndex == currentStepOrderIndex` — for a non-branching pipeline this is always the
    next one in order, so nothing changes there. For each step:
-   - Substitute `{{paramName}}` in `instructionText` with the parameter values you collected.
+   - Use `resolvedInstructionText` from the run response (not `instructionText` from `pipeline_get`)
+     as this step's actual instructions - the server has already substituted any `{{data:...}}`
+     tokens with values earlier steps reported, alongside your own `{{paramName}}` substitution.
    - If `referenceText` is present, treat it as supplementary reference material (e.g. an example
      report format) for that step, not an instruction to follow literally.
    - Do the actual work using your normal tools.
@@ -49,6 +51,9 @@ the only new part is checking state back into memory-mcp as you go.
      use) and call `pipeline_run_step_update(runId, orderIndex, status, note, outcome)` — the
      `outcome` must exactly match one of that step's route keys or the call is rejected with the
      valid options listed.
+   - Check that step's `outputs` (from `pipeline_get`, step 1). If non-empty, decide the values for
+     each declared name and pass them as `outputsJson` on `pipeline_run_step_update` - a JSON object
+     like `{"summary": "..."}`. Skip this if `outputs` is empty for that step.
    - Read `currentStepOrderIndex` off the response: if it's a number, that's the next step to work
      on (loop back to the top of this step). If it's `null`, every path from here has ended — go
      to step 7 below and call `pipeline_run_complete`.
