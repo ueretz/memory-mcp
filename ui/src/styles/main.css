@@ -257,3 +257,33 @@
     @apply cursor-help rounded-md border border-dashed border-border-strong px-1.5 py-0.5 text-faint;
   }
 }
+
+.pipeline-node {
+  border-radius: 0.75rem;
+  border: 1px solid var(--color-border);
+  background: var(--color-panel);
+  color: var(--color-content);
+  font-size: 12.5px;
+  padding: 8px 12px;
+}
+.pipeline-node-selected {
+  box-shadow: 0 0 0 2px var(--color-accent);
+}
+.pipeline-node-end {
+  border-style: dashed;
+  color: var(--color-faint);
+}
+.pipeline-node-done {
+  border-color: var(--color-accent);
+  opacity: 1;
+}
+.pipeline-node-failed {
+  border-color: #dc2626;
+}
+.pipeline-node-running {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 2px var(--color-accent-soft);
+}
+.pipeline-node-not-reached {
+  opacity: 0.45;
+}
