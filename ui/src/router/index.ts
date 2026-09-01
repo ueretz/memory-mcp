@@ -48,6 +48,13 @@ export const router = createRouter({
       props: true,
     },
     {
+      path: '/p/:project/pipelines/:slug/board',
+      name: 'pipeline-board',
+      component: () => import('@/views/PipelineBoardView.vue'),
+      props: true,
+      meta: { bare: true },
+    },
+    {
       path: '/p/:project/pipelines/:slug',
       name: 'pipeline',
       component: () => import('@/views/PipelineView.vue'),

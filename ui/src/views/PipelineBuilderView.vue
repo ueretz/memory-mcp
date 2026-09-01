@@ -1,25 +1,12 @@
 <script setup lang="ts">
-import '@vue-flow/core/dist/style.css'
-
-import { VueFlow, type EdgeMouseEvent, type NodeDragEvent, type NodeMouseEvent } from '@vue-flow/core'
-import { computed, ref, toRef, watch } from 'vue'
+import { ref, toRef, watch, computed } from 'vue'
 import { useRouter } from 'vue-router'
 
-import { createPipeline, fetchPipeline, updatePipeline, uploadPipelineAsset } from '@/api/client'
-import type {
-  PipelineConditionOperator,
-  PipelineParameterType,
-  PipelineStepContentType,
-  PipelineUpsertDataLink,
-  PipelineUpsertOutput,
-  PipelineUpsertParameter,
-  PipelineUpsertRoute,
-  PipelineUpsertStep,
-} from '@/api/types'
+import { createPipeline, fetchPipeline, updatePipeline } from '@/api/client'
+import type { PipelineParameterType, PipelineUpsertParameter, PipelineUpsertStep } from '@/api/types'
 import AppIcon from '@/components/AppIcon.vue'
 import ErrorState from '@/components/ErrorState.vue'
 import PageHeader from '@/components/PageHeader.vue'
-import PipelineStepNode from '@/components/PipelineStepNode.vue'
 
 const props = defineProps<{ project: string; slug?: string }>()
 const project = toRef(props, 'project')
@@ -32,20 +19,13 @@ const slug = ref('')
 const name = ref('')
 const description = ref('')
 const parameters = ref<PipelineUpsertParameter[]>([])
+// Steps are never edited on this screen - assembling the board happens on the separate canvas
+// screen (PipelineBoardView). We still have to carry them through save() unchanged, because
+// updatePipeline replaces the whole pipeline definition - submitting an empty list here would
+// silently wipe out every step the author already built on the board.
 const steps = ref<PipelineUpsertStep[]>([])
 const saving = ref(false)
 const saveError = ref<string | null>(null)
-
-const END_NODE_ID = 'end'
-const endPosition = ref({ x: 480, y: 120 })
-
-const selectedStepIndex = ref<number | null>(null)
-const selectedEdge = ref<{ stepIndex: number; routeIndex: number } | null>(null)
-
-function edgeId(stepIndex: number, route: PipelineUpsertRoute): string {
-  const targetId = route.targetStepIndex === null ? END_NODE_ID : String(route.targetStepIndex)
-  return `${stepIndex}-${route.outcomeKey ?? 'default'}-${targetId}`
-}
 
 async function loadForEdit() {
   if (!editingSlug.value) return
@@ -74,17 +54,6 @@ async function loadForEdit() {
     conditionOperator: s.conditionOperator,
     conditionValue: s.conditionValue,
   }))
-  applyLegacyAutoLayoutIfNeeded()
-}
-
-function applyLegacyAutoLayoutIfNeeded() {
-  const allAtOrigin = steps.value.length > 0 && steps.value.every((s) => s.positionX === 0 && s.positionY === 0)
-  if (!allAtOrigin) return
-  steps.value.forEach((step, index) => {
-    step.positionX = index * 220
-    step.positionY = 0
-  })
-  endPosition.value = { x: steps.value.length * 220, y: 0 }
 }
 
 watch(editingSlug, loadForEdit, { immediate: true })
@@ -97,246 +66,6 @@ function removeParameter(index: number) {
   parameters.value.splice(index, 1)
 }
 
-function addStep(kind: PipelineStepContentType) {
-  const offset = steps.value.length * 220
-  const base = {
-    title: '',
-    contentType: kind,
-    promptText: '',
-    assetId: null,
-    referenceAssetId: null,
-    positionX: offset,
-    positionY: 200,
-    routes: [] as PipelineUpsertRoute[],
-    outputs: [] as PipelineUpsertOutput[],
-    dataLinksOut: [] as PipelineUpsertDataLink[],
-    conditionOperator: null as PipelineConditionOperator | null,
-    conditionValue: null as string | null,
-  }
-  if (kind === 'CONDITION') {
-    base.routes = [
-      { outcomeKey: 'true', targetStepIndex: null },
-      { outcomeKey: 'false', targetStepIndex: null },
-    ]
-    base.conditionOperator = 'EQUALS'
-    base.conditionValue = ''
-  } else if (kind === 'VARIABLE') {
-    base.outputs = [{ name: 'value' }]
-  }
-  steps.value.push(base)
-}
-
-function removeStep(index: number) {
-  steps.value.splice(index, 1)
-  // Routes AND data links referencing this step by index are now stale (indices shifted) - drop
-  // anything that pointed at the removed step, and shift down everything that pointed past it, so
-  // a save can't silently rewire to the wrong node (or get rejected by the backend's ancestor
-  // check because a stale targetStepIndex points past the end of the shrunk steps array).
-  steps.value.forEach((step) => {
-    step.routes = step.routes
-      .filter((r) => r.targetStepIndex !== index)
-      .map((r) => ({
-        ...r,
-        targetStepIndex: r.targetStepIndex !== null && r.targetStepIndex > index ? r.targetStepIndex - 1 : r.targetStepIndex,
-      }))
-    step.dataLinksOut = step.dataLinksOut
-      .filter((l) => l.targetStepIndex !== index)
-      .map((l) => ({
-        ...l,
-        targetStepIndex: l.targetStepIndex !== null && l.targetStepIndex > index ? l.targetStepIndex - 1 : l.targetStepIndex,
-      }))
-  })
-  selectedStepIndex.value = null
-  selectedEdge.value = null
-}
-
-function addOutput(stepIndex: number) {
-  steps.value[stepIndex].outputs.push({ name: '' })
-}
-
-function removeOutput(stepIndex: number, outputIndex: number) {
-  const removedName = steps.value[stepIndex].outputs[outputIndex].name
-  steps.value[stepIndex].outputs.splice(outputIndex, 1)
-  // A data link wiring the removed output would silently point at nothing - drop it rather than
-  // leave a dangling {{data:...}} token with no declared pin behind it.
-  steps.value[stepIndex].dataLinksOut = steps.value[stepIndex].dataLinksOut.filter(
-    (link) => link.sourceOutputName !== removedName,
-  )
-}
-
-// Kept as a script-side helper rather than inlining the template literal in the template's
-// mustache interpolation: Vue's template tokenizer finds an interpolation's closing "}}" via a
-// plain text scan, not JS-aware parsing, so a literal "}}" inside an inline template-literal
-// expression (as in `{{data:${x}}}`) closes the interpolation early and breaks the compile.
-function dataToken(token: string): string {
-  return `{{data:${token}}}`
-}
-
-function wiredInputsFor(stepIndex: number): { token: string; sourceStepTitle: string; sourceOutputName: string }[] {
-  const result: { token: string; sourceStepTitle: string; sourceOutputName: string }[] = []
-  steps.value.forEach((step, sourceIndex) => {
-    step.dataLinksOut.forEach((link) => {
-      if (link.targetStepIndex === stepIndex) {
-        result.push({ token: link.token, sourceStepTitle: step.title || `Шаг ${sourceIndex + 1}`, sourceOutputName: link.sourceOutputName })
-      }
-    })
-  })
-  return result
-}
-
-async function onMdFileChosen(index: number, event: Event) {
-  const file = (event.target as HTMLInputElement).files?.[0]
-  if (!file) return
-  const asset = await uploadPipelineAsset(file)
-  steps.value[index].assetId = asset.id
-}
-
-async function onReferenceFileChosen(index: number, event: Event) {
-  const file = (event.target as HTMLInputElement).files?.[0]
-  if (!file) return
-  const asset = await uploadPipelineAsset(file)
-  steps.value[index].referenceAssetId = asset.id
-}
-
-const flowNodes = computed(() => [
-  ...steps.value.map((step, index) => ({
-    id: String(index),
-    type: 'pipelineStep',
-    position: { x: step.positionX, y: step.positionY },
-    class: [
-      'pipeline-node',
-      step.contentType === 'CONDITION' ? 'pipeline-node-condition' : '',
-      selectedStepIndex.value === index ? 'pipeline-node-selected' : '',
-    ].filter(Boolean).join(' '),
-    data: { label: step.title || `Шаг ${index + 1}`, outputs: step.outputs, contentType: step.contentType },
-  })),
-  {
-    id: END_NODE_ID,
-    type: 'pipelineStep',
-    position: endPosition.value,
-    class: 'pipeline-node pipeline-node-end',
-    data: { label: 'Конец рана', outputs: [], contentType: 'PROMPT' },
-  },
-])
-
-const flowEdges = computed(() => [
-  ...steps.value.flatMap((step, index) =>
-    step.routes.map((route) => ({
-      id: edgeId(index, route),
-      source: String(index),
-      sourceHandle: 'route',
-      target: route.targetStepIndex === null ? END_NODE_ID : String(route.targetStepIndex),
-      targetHandle: 'data-in',
-      label: route.outcomeKey ?? '(по умолчанию)',
-    })),
-  ),
-  ...steps.value.flatMap((step, index) =>
-    step.dataLinksOut.map((link) => ({
-      id: `data-${link.token}`,
-      source: String(index),
-      sourceHandle: `output-${link.sourceOutputName}`,
-      target: String(link.targetStepIndex),
-      targetHandle: 'data-in',
-      class: 'pipeline-data-edge',
-      style: { strokeDasharray: '4 4', stroke: '#10b981' },
-    })),
-  ),
-])
-
-// Best-effort UI hint only - the authoritative check is PipelineService's graph validation on
-// save. A step is flagged if something else in the pipeline branches at all, but nothing routes
-// into this step and it isn't the first one - i.e. it looks like an unwired, mid-edit node.
-const unreachableStepIndexes = computed(() => {
-  const anyRoutes = steps.value.some((s) => s.routes.length > 0)
-  if (!anyRoutes) return new Set<number>()
-  const targeted = new Set<number>()
-  steps.value.forEach((step) => {
-    step.routes.forEach((route) => {
-      if (route.targetStepIndex !== null) targeted.add(route.targetStepIndex)
-    })
-  })
-  const result = new Set<number>()
-  steps.value.forEach((_, index) => {
-    if (index !== 0 && !targeted.has(index)) result.add(index)
-  })
-  return result
-})
-
-function onNodeDragStop({ node }: NodeDragEvent) {
-  if (node.id === END_NODE_ID) {
-    endPosition.value = { x: node.position.x, y: node.position.y }
-    return
-  }
-  const index = Number(node.id)
-  steps.value[index].positionX = node.position.x
-  steps.value[index].positionY = node.position.y
-}
-
-function onNodeClick({ node }: NodeMouseEvent) {
-  selectedEdge.value = null
-  selectedStepIndex.value = node.id === END_NODE_ID ? null : Number(node.id)
-}
-
-function onEdgeClick({ edge }: EdgeMouseEvent) {
-  selectedStepIndex.value = null
-  const stepIndex = Number(edge.source)
-  const routeIndex = steps.value[stepIndex].routes.findIndex((r) => edgeId(stepIndex, r) === edge.id)
-  selectedEdge.value = routeIndex >= 0 ? { stepIndex, routeIndex } : null
-}
-
-function onConnect(connection: { source: string; target: string; sourceHandle?: string | null; targetHandle?: string | null }) {
-  // NOTE: per the backend's graph-validation rule, once ANY step has an explicit route, every
-  // step's execution edges come only from its own explicit routes. So wiring a data link into a
-  // CONDITION step from a source step that has no route of its own will pass here but fail
-  // validation on save (ancestor-reachability check). We don't auto-create that connecting route -
-  // out of scope for this task; the backend's error message is expected to guide the author.
-  const sourceIndex = Number(connection.source)
-  if (connection.sourceHandle && connection.sourceHandle.startsWith('output-')) {
-    if (connection.target === END_NODE_ID) {
-      // The End node has no promptText/step to attach a {{data:...}} token to - a data link
-      // into it would crash on `Number('end')` (NaN) below, and it's meaningless anyway.
-      return
-    }
-    const sourceOutputName = connection.sourceHandle.slice('output-'.length)
-    const targetIndex = Number(connection.target)
-    const token = crypto.randomUUID()
-    steps.value[sourceIndex].dataLinksOut.push({ token, sourceOutputName, targetStepIndex: targetIndex })
-    const target = steps.value[targetIndex]
-    target.promptText = `${target.promptText ?? ''}\n{{data:${token}}}`
-    selectedStepIndex.value = null
-    selectedEdge.value = null
-    return
-  }
-  const targetIndex = connection.target === END_NODE_ID ? null : Number(connection.target)
-  steps.value[sourceIndex].routes.push({ outcomeKey: null, targetStepIndex: targetIndex })
-  selectedStepIndex.value = null
-  selectedEdge.value = { stepIndex: sourceIndex, routeIndex: steps.value[sourceIndex].routes.length - 1 }
-}
-
-function removeSelectedRoute() {
-  if (!selectedEdge.value) return
-  steps.value[selectedEdge.value.stepIndex].routes.splice(selectedEdge.value.routeIndex, 1)
-  selectedEdge.value = null
-}
-
-const selectedStep = computed(() => (selectedStepIndex.value !== null ? steps.value[selectedStepIndex.value] : null))
-const selectedRoute = computed(() =>
-  selectedEdge.value ? steps.value[selectedEdge.value.stepIndex].routes[selectedEdge.value.routeIndex] : null,
-)
-
-// A text <input v-model="route.outcomeKey"> that the user types into and clears yields "" rather
-// than null. The backend's default-route matching checks outcomeKey() == null specifically, so an
-// empty string would silently break the "empty = default route" fallback the UI advertises.
-function normalizedSteps(): PipelineUpsertStep[] {
-  return steps.value.map((step) => ({
-    ...step,
-    routes: step.routes.map((route) => ({
-      ...route,
-      outcomeKey: route.outcomeKey && route.outcomeKey.trim() !== '' ? route.outcomeKey : null,
-    })),
-  }))
-}
-
 async function save() {
   saving.value = true
   saveError.value = null
@@ -347,10 +76,12 @@ async function save() {
       description: description.value || null,
       projectScope: project.value,
       parameters: parameters.value,
-      steps: normalizedSteps(),
+      steps: steps.value,
     }
     const result = isEditing.value ? await updatePipeline(editingSlug.value!, request) : await createPipeline(request)
-    await router.push({ name: 'pipeline', params: { project: project.value, slug: result.slug } })
+    // Both creating a new pipeline and editing an existing one's metadata land on the board next -
+    // metadata here is just the setup step, the board is where the pipeline actually gets built.
+    await router.push({ name: 'pipeline-board', params: { project: project.value, slug: result.slug } })
   } catch (cause) {
     saveError.value = cause instanceof Error ? cause.message : String(cause)
   } finally {
@@ -363,7 +94,8 @@ async function save() {
   <div>
     <PageHeader
       eyebrow="Pipelines"
-      :title="isEditing ? 'Редактирование пайплайна' : 'Новый пайплайн'"
+      :title="isEditing ? 'Настройки пайплайна' : 'Новый пайплайн'"
+      :subtitle="isEditing ? 'Название, описание и входные параметры — сборка шагов на доске' : 'Задайте название и входные параметры, дальше — сборка шагов на доске'"
     />
 
     <ErrorState v-if="saveError" :message="saveError" />
@@ -405,164 +137,13 @@ async function save() {
         </div>
       </section>
 
-      <section class="rounded-2xl border border-border bg-panel p-5">
-        <div class="mb-3 flex items-center justify-between">
-          <h2 class="text-[13px] font-semibold tracking-wide text-content uppercase">Шаги</h2>
-          <div class="flex gap-2">
-            <button type="button" class="text-[12.5px] font-medium text-accent" @click="addStep('PROMPT')">+ Prompt</button>
-            <button type="button" class="text-[12.5px] font-medium text-accent" @click="addStep('CONDITION')">+ Condition</button>
-            <button type="button" class="text-[12.5px] font-medium text-accent" @click="addStep('VARIABLE')">+ Variable</button>
-          </div>
-        </div>
-        <p class="mb-3 text-[12px] text-faint">
-          Перетащите узел, чтобы разместить его; потяните от одного узла к другому, чтобы создать маршрут.
-          Клик по узлу или связи открывает панель редактирования справа.
-        </p>
-        <div class="flex gap-4">
-          <div class="h-[420px] flex-1 overflow-hidden rounded-xl border border-border bg-elevated">
-            <VueFlow
-              :nodes="flowNodes"
-              :edges="flowEdges"
-              :node-types="{ pipelineStep: PipelineStepNode }"
-              :nodes-connectable="true"
-              fit-view-on-init
-              @node-drag-stop="onNodeDragStop"
-              @node-click="onNodeClick"
-              @edge-click="onEdgeClick"
-              @connect="onConnect"
-            />
-          </div>
-          <aside class="w-72 shrink-0 rounded-xl border border-border bg-elevated p-4">
-            <template v-if="selectedStep && selectedStepIndex !== null">
-              <div class="mb-3 flex items-center justify-between">
-                <span class="text-[12px] text-faint">Шаг #{{ selectedStepIndex + 1 }}</span>
-                <button type="button" class="text-faint hover:text-red-600" @click="removeStep(selectedStepIndex)">
-                  <AppIcon name="trash" class="size-4" />
-                </button>
-              </div>
-              <span v-if="unreachableStepIndexes.has(selectedStepIndex)" class="mb-2 block text-[11.5px] text-amber-500">
-                ⚠ Ни один маршрут не ведёт в этот шаг
-              </span>
-              <input
-                v-model="selectedStep.title"
-                placeholder="Название шага"
-                class="mb-2 w-full rounded-lg border border-border bg-panel px-2 py-1.5 text-[12.5px] text-content"
-              />
-              <template v-if="selectedStep.contentType === 'PROMPT' || selectedStep.contentType === 'MD_FILE'">
-                <div class="mb-2 flex gap-3 text-[12.5px] text-muted">
-                  <label class="flex items-center gap-1"><input v-model="selectedStep.contentType" type="radio" value="PROMPT" /> Prompt</label>
-                  <label class="flex items-center gap-1"><input v-model="selectedStep.contentType" type="radio" value="MD_FILE" /> .md файл</label>
-                </div>
-                <textarea
-                  v-if="selectedStep.contentType === 'PROMPT'"
-                  v-model="selectedStep.promptText"
-                  rows="4"
-                  placeholder="Инструкция для Claude — можно {{paramName}}"
-                  class="w-full rounded-lg border border-border bg-panel px-2 py-1.5 text-[12.5px] text-content"
-                />
-                <div v-else class="text-[12.5px] text-muted">
-                  <input type="file" accept=".md" @change="onMdFileChosen(selectedStepIndex, $event)" />
-                  <span v-if="selectedStep.assetId" class="ml-2">Загружен: asset #{{ selectedStep.assetId }}</span>
-                </div>
-              </template>
-              <div v-else-if="selectedStep.contentType === 'CONDITION'" class="mb-2">
-                <label class="mb-1 block text-[12.5px] font-medium text-muted">Оператор сравнения</label>
-                <select v-model="selectedStep.conditionOperator" class="mb-2 w-full rounded-lg border border-border bg-panel px-2 py-1.5 text-[12.5px] text-content">
-                  <option value="EQUALS">равно</option>
-                  <option value="GREATER_THAN">больше</option>
-                  <option value="LESS_THAN">меньше</option>
-                  <option value="GREATER_OR_EQUAL">больше или равно</option>
-                  <option value="LESS_OR_EQUAL">меньше или равно</option>
-                </select>
-                <label class="mb-1 block text-[12.5px] font-medium text-muted">Значение для сравнения</label>
-                <input
-                  v-model="selectedStep.conditionValue"
-                  class="w-full rounded-lg border border-border bg-panel px-2 py-1.5 text-[12.5px] text-content"
-                  placeholder="напр. 10"
-                />
-                <p class="mt-2 text-[11.5px] text-faint">
-                  Сравнивается со значением, подключённым через входящую связь (data-link) от другого шага.
-                  Ветка "true"/"false" выбирается автоматически, без участия Claude.
-                </p>
-              </div>
-              <div v-else-if="selectedStep.contentType === 'VARIABLE'" class="mb-2">
-                <label class="mb-1 block text-[12.5px] font-medium text-muted">Значение</label>
-                <input
-                  v-model="selectedStep.promptText"
-                  class="w-full rounded-lg border border-border bg-panel px-2 py-1.5 text-[12.5px] text-content"
-                  placeholder="напр. hello"
-                />
-                <p class="mt-2 text-[11.5px] text-faint">
-                  Это значение публикуется в единственный output шага автоматически при старте рана, без участия Claude.
-                </p>
-              </div>
-              <div v-if="selectedStep.contentType === 'PROMPT' || selectedStep.contentType === 'MD_FILE'" class="mt-3 text-[12.5px] text-muted">
-                <label class="mb-1 block">Ссылочный файл (необязательно):</label>
-                <input type="file" @change="onReferenceFileChosen(selectedStepIndex, $event)" />
-                <span v-if="selectedStep.referenceAssetId" class="ml-2">Загружен: asset #{{ selectedStep.referenceAssetId }}</span>
-              </div>
-              <div class="mt-3 text-[12.5px] text-muted">
-                <div class="mb-1 flex items-center justify-between">
-                  <label class="font-medium">Выходы (пины)</label>
-                  <button
-                    v-if="!(selectedStep.contentType === 'VARIABLE' && selectedStep.outputs.length >= 1)"
-                    type="button" class="text-accent" @click="addOutput(selectedStepIndex)">+ Выход</button>
-                </div>
-                <div v-for="(output, outputIndex) in selectedStep.outputs" :key="outputIndex" class="mb-1 flex items-center gap-2">
-                  <input
-                    v-model="output.name"
-                    placeholder="имя, напр. summary"
-                    class="flex-1 rounded-lg border border-border bg-panel px-2 py-1 text-[12px] text-content"
-                  />
-                  <button
-                    v-if="selectedStep.contentType !== 'VARIABLE'"
-                    type="button" class="text-faint hover:text-red-600" @click="removeOutput(selectedStepIndex, outputIndex)">
-                    <AppIcon name="trash" class="size-4" />
-                  </button>
-                </div>
-              </div>
-              <div v-if="wiredInputsFor(selectedStepIndex).length" class="mt-3 text-[11.5px] text-faint">
-                <p class="mb-1 font-medium text-muted">Подключённые входы:</p>
-                <p v-for="input in wiredInputsFor(selectedStepIndex)" :key="input.token">
-                  {{ dataToken(input.token) }} → {{ input.sourceStepTitle }} . {{ input.sourceOutputName }}
-                </p>
-              </div>
-            </template>
-            <template v-else-if="selectedRoute">
-              <div class="mb-3 flex items-center justify-between">
-                <span class="text-[12px] text-faint">Маршрут</span>
-                <button type="button" class="text-faint hover:text-red-600" @click="removeSelectedRoute">
-                  <AppIcon name="trash" class="size-4" />
-                </button>
-              </div>
-              <label class="mb-1 block text-[12.5px] font-medium text-muted">Ключ outcome</label>
-              <input
-                v-if="steps[selectedEdge!.stepIndex].contentType !== 'CONDITION'"
-                v-model="selectedRoute.outcomeKey"
-                placeholder="пусто = маршрут по умолчанию"
-                class="w-full rounded-lg border border-border bg-panel px-2 py-1.5 text-[12.5px] text-content"
-              />
-              <p v-else class="w-full rounded-lg border border-border bg-elevated px-2 py-1.5 text-[12.5px] text-content">
-                {{ selectedRoute.outcomeKey }}
-              </p>
-              <p class="mt-2 text-[11.5px] text-faint">
-                Claude должен вернуть это значение как outcome в pipeline_run_step_update, чтобы run пошёл по этой
-                связи. Пустое значение — маршрут по умолчанию для этого шага (используется, если outcome не
-                передан или не совпал ни с одним другим маршрутом).
-              </p>
-            </template>
-            <p v-else class="text-[12.5px] text-faint">Выберите узел или связь на канвасе.</p>
-          </aside>
-        </div>
-      </section>
-
       <button
         type="button"
         :disabled="saving"
         class="rounded-lg bg-accent px-4 py-2 text-[13px] font-medium text-accent-fg transition hover:bg-accent-hover disabled:opacity-50"
         @click="save"
       >
-        {{ saving ? 'Сохранение…' : 'Сохранить' }}
+        {{ saving ? 'Сохранение…' : (isEditing ? 'Сохранить и открыть доску' : 'Создать и открыть доску') }}
       </button>
     </div>
   </div>

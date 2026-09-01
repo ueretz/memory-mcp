@@ -151,10 +151,10 @@ const STATUS_LABEL: Record<string, string> = {
       <PageHeader eyebrow="Pipeline" :title="pipeline?.name ?? slug" :subtitle="pipeline?.description ?? undefined">
         <template #actions>
           <RouterLink
-            :to="{ name: 'pipeline-edit', params: { project, slug } }"
+            :to="{ name: 'pipeline-board', params: { project, slug } }"
             class="inline-flex items-center gap-2 rounded-lg border border-border bg-panel px-3 py-2 text-[13px] font-medium text-content transition hover:border-accent/40 hover:text-accent"
           >
-            Редактировать
+            Открыть доску
           </RouterLink>
           <button
             type="button"
