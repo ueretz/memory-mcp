@@ -22,24 +22,36 @@ the only new part is checking state back into memory-mcp as you go.
    If the user's message already supplied values for every required parameter, use those.
    Otherwise ask for the missing ones before starting - don't guess.
 3. **Start the run:** `pipeline_run_start(slug, parametersJson)` with parameters as a JSON object
-   string, e.g. `{"folder": "src/config"}`. This returns `runId` and the ordered step list with
-   each step's `orderIndex`, `title`, `contentType`, and `status` (starts `PENDING`) — the step
-   content (`instructionText`/`referenceText`) isn't repeated here; match each step by
-   `orderIndex` against what `pipeline_get` already returned in step 1.
+   string, e.g. `{"folder": "src/config"}`. This returns `runId`, `currentStepOrderIndex` (which
+   step to work on next), and the full step list with each step's `orderIndex`, `title`,
+   `contentType`, and `status` (starts `PENDING`) — the step content (`instructionText`/
+   `referenceText`) isn't repeated here; match each step by `orderIndex` against what
+   `pipeline_get` already returned in step 1. **If the pipeline branches, don't assume the next
+   step is `orderIndex + 1` — always follow `currentStepOrderIndex` from the most recent response.**
 4. **Print a checklist** in chat before starting, one line per step, all unchecked:
    ```
    - [ ] 1. Check config history
    - [ ] 2. Save report
    ```
-5. **Work through steps in order.** For each step:
+5. **Work through steps following `currentStepOrderIndex`, not a fixed sequence.** After each
+   response (`pipeline_run_start` or `pipeline_run_step_update`), the step to work on is whichever
+   one has `orderIndex == currentStepOrderIndex` — for a non-branching pipeline this is always the
+   next one in order, so nothing changes there. For each step:
    - Substitute `{{paramName}}` in `instructionText` with the parameter values you collected.
    - If `referenceText` is present, treat it as supplementary reference material (e.g. an example
      report format) for that step, not an instruction to follow literally.
    - Do the actual work using your normal tools.
    - Update the checklist line in chat: `- [x]` on success, `- [!]` on failure.
-   - Call `pipeline_run_step_update(runId, orderIndex, status, note)` with `status` = `DONE` or
-     `FAILED` (`SKIPPED` if the user told you to skip this step), and a short `note` summarizing
-     what happened.
+   - Check that step's `routes` (from `pipeline_get`, step 1). If it's empty, call
+     `pipeline_run_step_update(runId, orderIndex, status, note)` exactly as before. If it has one
+     or more entries, decide which `outcome` value best matches what actually happened (e.g.
+     `"pass"`/`"fail"`, `"bug"`/`"feature"`/`"question"` — whatever keys that pipeline's routes
+     use) and call `pipeline_run_step_update(runId, orderIndex, status, note, outcome)` — the
+     `outcome` must exactly match one of that step's route keys or the call is rejected with the
+     valid options listed.
+   - Read `currentStepOrderIndex` off the response: if it's a number, that's the next step to work
+     on (loop back to the top of this step). If it's `null`, every path from here has ended — go
+     to step 7 below and call `pipeline_run_complete`.
 6. **On FAILED: stop.** Do not silently continue to the next step. Tell the user what failed and
    why, and ask how to proceed - retry the step, skip it, or abort the whole run
    (`pipeline_run_complete(runId, "ABORTED")`).
@@ -51,5 +63,6 @@ the only new part is checking state back into memory-mcp as you go.
 ## Resuming an interrupted run
 
 If the user asks to continue a pipeline run from an earlier session, call
-`pipeline_run_get(runId)` to see which steps are already `DONE`/`FAILED`/`SKIPPED`, and resume
-from the first `PENDING` step - don't redo finished steps.
+`pipeline_run_get(runId)` and resume from whatever step its `currentStepOrderIndex` points to -
+don't assume it's "the first `PENDING` step", since in a branching pipeline some `PENDING` steps
+may belong to a path that was never taken and will stay `PENDING` forever.
