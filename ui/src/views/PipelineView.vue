@@ -11,6 +11,7 @@ import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import EmptyState from '@/components/EmptyState.vue'
 import ErrorState from '@/components/ErrorState.vue'
 import PageHeader from '@/components/PageHeader.vue'
+import PipelineStepNode from '@/components/PipelineStepNode.vue'
 import SkeletonRows from '@/components/SkeletonRows.vue'
 import { useAsyncData } from '@/composables/useAsyncData'
 import { projectLocation } from '@/lib/links'
@@ -65,11 +66,18 @@ const flowNodes = computed(() => {
   return [
     ...steps.map((step) => ({
       id: String(step.orderIndex),
+      type: 'pipelineStep',
       position: positions.get(step.orderIndex)!,
-      label: `${step.orderIndex + 1}. ${step.title}`,
       class: 'pipeline-node',
+      data: { label: `${step.orderIndex + 1}. ${step.title}`, outputs: step.outputs },
     })),
-    { id: END_NODE_ID, position: { x: maxX + 240, y: 0 }, label: 'Конец рана', class: 'pipeline-node pipeline-node-end' },
+    {
+      id: END_NODE_ID,
+      type: 'pipelineStep',
+      position: { x: maxX + 240, y: 0 },
+      class: 'pipeline-node pipeline-node-end',
+      data: { label: 'Конец рана', outputs: [] },
+    },
   ]
 })
 
@@ -94,14 +102,27 @@ const flowEdges = computed(() => {
       }
     })
   }
-  return steps.flatMap((step) =>
-    step.routes.map((route) => ({
-      id: `${step.orderIndex}-${route.outcomeKey ?? 'default'}-${route.targetStepOrderIndex ?? END_NODE_ID}`,
-      source: String(step.orderIndex),
-      target: route.targetStepOrderIndex === null ? END_NODE_ID : String(route.targetStepOrderIndex),
-      label: route.outcomeKey ?? '(по умолчанию)' as string | undefined,
-    })),
-  )
+  return [
+    ...steps.flatMap((step) =>
+      step.routes.map((route) => ({
+        id: `${step.orderIndex}-${route.outcomeKey ?? 'default'}-${route.targetStepOrderIndex ?? END_NODE_ID}`,
+        source: String(step.orderIndex),
+        target: route.targetStepOrderIndex === null ? END_NODE_ID : String(route.targetStepOrderIndex),
+        label: route.outcomeKey ?? '(по умолчанию)' as string | undefined,
+      })),
+    ),
+    ...steps.flatMap((step) =>
+      step.dataLinksOut.map((link) => ({
+        id: `data-${link.token}`,
+        source: String(step.orderIndex),
+        sourceHandle: `output-${link.sourceOutputName}`,
+        target: String(link.targetStepOrderIndex),
+        targetHandle: 'data-in',
+        class: 'pipeline-data-edge',
+        style: { strokeDasharray: '4 4', stroke: '#10b981' },
+      })),
+    ),
+  ]
 })
 
 const STATUS_LABEL: Record<string, string> = {
@@ -147,7 +168,7 @@ const STATUS_LABEL: Record<string, string> = {
       <section v-else-if="pipeline" class="mb-9">
         <h2 class="mb-3 text-[13px] font-semibold tracking-wide text-content uppercase">Шаги</h2>
         <div class="h-[360px] overflow-hidden rounded-xl border border-border bg-elevated">
-          <VueFlow :nodes="flowNodes" :edges="flowEdges" :nodes-draggable="false" :edges-updatable="false" fit-view-on-init />
+          <VueFlow :nodes="flowNodes" :edges="flowEdges" :node-types="{ pipelineStep: PipelineStepNode }" :nodes-draggable="false" :edges-updatable="false" fit-view-on-init />
         </div>
       </section>
 

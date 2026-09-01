@@ -7,6 +7,7 @@ import { computed, toRef } from 'vue'
 import { fetchPipeline, fetchPipelineRun } from '@/api/client'
 import ErrorState from '@/components/ErrorState.vue'
 import PageHeader from '@/components/PageHeader.vue'
+import PipelineStepNode from '@/components/PipelineStepNode.vue'
 import SkeletonRows from '@/components/SkeletonRows.vue'
 import { useAsyncData } from '@/composables/useAsyncData'
 
@@ -56,16 +57,18 @@ const flowNodes = computed(() => {
       const statusClass = runStep ? STATUS_CLASS[runStep.status] : 'pipeline-node pipeline-node-not-reached'
       return {
         id: String(step.orderIndex),
+        type: 'pipelineStep',
         position: positions.get(step.orderIndex)!,
-        label: `${step.orderIndex + 1}. ${step.title}${runStep?.note ? ` — ${runStep.note}` : ''}`,
         class: isCurrent(step.orderIndex) ? `${statusClass} pipeline-node-selected` : statusClass,
+        data: { label: `${step.orderIndex + 1}. ${step.title}${runStep?.note ? ` — ${runStep.note}` : ''}`, outputs: step.outputs },
       }
     }),
     {
       id: END_NODE_ID,
+      type: 'pipelineStep',
       position: { x: maxX + 240, y: 0 },
-      label: 'Конец рана',
       class: run.value.currentStepOrderIndex === null ? 'pipeline-node pipeline-node-end pipeline-node-done' : 'pipeline-node pipeline-node-end',
+      data: { label: 'Конец рана', outputs: [] },
     },
   ]
 })
@@ -91,14 +94,27 @@ const flowEdges = computed(() => {
       }
     })
   }
-  return steps.flatMap((step) =>
-    step.routes.map((route) => ({
-      id: `${step.orderIndex}-${route.outcomeKey ?? 'default'}-${route.targetStepOrderIndex ?? END_NODE_ID}`,
-      source: String(step.orderIndex),
-      target: route.targetStepOrderIndex === null ? END_NODE_ID : String(route.targetStepOrderIndex),
-      label: route.outcomeKey ?? '(по умолчанию)' as string | undefined,
-    })),
-  )
+  return [
+    ...steps.flatMap((step) =>
+      step.routes.map((route) => ({
+        id: `${step.orderIndex}-${route.outcomeKey ?? 'default'}-${route.targetStepOrderIndex ?? END_NODE_ID}`,
+        source: String(step.orderIndex),
+        target: route.targetStepOrderIndex === null ? END_NODE_ID : String(route.targetStepOrderIndex),
+        label: route.outcomeKey ?? '(по умолчанию)' as string | undefined,
+      })),
+    ),
+    ...steps.flatMap((step) =>
+      step.dataLinksOut.map((link) => ({
+        id: `data-${link.token}`,
+        source: String(step.orderIndex),
+        sourceHandle: `output-${link.sourceOutputName}`,
+        target: String(link.targetStepOrderIndex),
+        targetHandle: 'data-in',
+        class: 'pipeline-data-edge',
+        style: { strokeDasharray: '4 4', stroke: '#10b981' },
+      })),
+    ),
+  ]
 })
 </script>
 
@@ -110,7 +126,7 @@ const flowEdges = computed(() => {
     <SkeletonRows v-else-if="loading || pipelineLoading" :rows="3" />
 
     <div v-else-if="run && pipeline" class="h-[420px] overflow-hidden rounded-xl border border-border bg-elevated">
-      <VueFlow :nodes="flowNodes" :edges="flowEdges" :nodes-draggable="false" :edges-updatable="false" fit-view-on-init />
+      <VueFlow :nodes="flowNodes" :edges="flowEdges" :node-types="{ pipelineStep: PipelineStepNode }" :nodes-draggable="false" :edges-updatable="false" fit-view-on-init />
     </div>
   </div>
 </template>
