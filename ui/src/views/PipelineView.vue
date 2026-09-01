@@ -1,5 +1,8 @@
 <script setup lang="ts">
-import { ref, toRef } from 'vue'
+import '@vue-flow/core/dist/style.css'
+
+import { VueFlow } from '@vue-flow/core'
+import { computed, ref, toRef } from 'vue'
 import { useRouter } from 'vue-router'
 
 import { deletePipeline, fetchPipeline, fetchPipelineRuns } from '@/api/client'
@@ -37,6 +40,35 @@ async function confirmDelete() {
     showDeleteConfirm.value = false
   }
 }
+
+const END_NODE_ID = 'end'
+
+const flowNodes = computed(() => {
+  if (!pipeline.value) return []
+  const steps = pipeline.value.steps
+  const maxX = steps.length > 0 ? Math.max(...steps.map((s) => s.positionX)) : 0
+  return [
+    ...steps.map((step) => ({
+      id: String(step.orderIndex),
+      position: { x: step.positionX, y: step.positionY },
+      label: `${step.orderIndex + 1}. ${step.title}`,
+      class: 'pipeline-node',
+    })),
+    { id: END_NODE_ID, position: { x: maxX + 240, y: 0 }, label: 'Конец рана', class: 'pipeline-node pipeline-node-end' },
+  ]
+})
+
+const flowEdges = computed(() => {
+  if (!pipeline.value) return []
+  return pipeline.value.steps.flatMap((step) =>
+    step.routes.map((route) => ({
+      id: `${step.orderIndex}-${route.outcomeKey ?? 'default'}-${route.targetStepOrderIndex ?? END_NODE_ID}`,
+      source: String(step.orderIndex),
+      target: route.targetStepOrderIndex === null ? END_NODE_ID : String(route.targetStepOrderIndex),
+      label: route.outcomeKey ?? '(по умолчанию)',
+    })),
+  )
+})
 
 const STATUS_LABEL: Record<string, string> = {
   RUNNING: 'Выполняется',
@@ -80,12 +112,9 @@ const STATUS_LABEL: Record<string, string> = {
 
       <section v-else-if="pipeline" class="mb-9">
         <h2 class="mb-3 text-[13px] font-semibold tracking-wide text-content uppercase">Шаги</h2>
-        <ol class="space-y-2">
-          <li v-for="step in pipeline.steps" :key="step.id" class="rounded-xl border border-border bg-panel p-4">
-            <p class="text-[13px] font-medium text-content">{{ step.orderIndex + 1 }}. {{ step.title }}</p>
-            <p class="mt-1 text-[12px] text-faint">{{ step.contentType === 'PROMPT' ? 'Prompt' : '.md файл' }}</p>
-          </li>
-        </ol>
+        <div class="h-[360px] overflow-hidden rounded-xl border border-border bg-elevated">
+          <VueFlow :nodes="flowNodes" :edges="flowEdges" :nodes-draggable="false" :edges-updatable="false" fit-view-on-init />
+        </div>
       </section>
 
       <section>
