@@ -261,15 +261,18 @@ const flowEdges = computed(() => [
     })),
   ),
   ...steps.value.flatMap((step, index) =>
-    step.dataLinksOut.map((link) => ({
-      id: `data-${link.token}`,
-      source: String(index),
-      sourceHandle: `output-${link.sourceOutputName}`,
-      target: String(link.targetStepIndex),
-      targetHandle: 'data-in',
-      class: 'pipeline-data-edge',
-      style: { strokeDasharray: '4 4', stroke: '#10b981' },
-    })),
+    step.dataLinksOut
+      .map((link) => ({ link, outputIndex: step.outputs.findIndex((o) => o.name === link.sourceOutputName) }))
+      .filter(({ outputIndex }) => outputIndex >= 0)
+      .map(({ link, outputIndex }) => ({
+        id: `data-${link.token}`,
+        source: String(index),
+        sourceHandle: `output-idx-${outputIndex}`,
+        target: String(link.targetStepIndex),
+        targetHandle: 'data-in',
+        class: 'pipeline-data-edge',
+        style: { strokeDasharray: '4 4', stroke: '#10b981' },
+      })),
   ),
 ])
 
@@ -304,13 +307,17 @@ function onConnect(connection: { source: string; target: string; sourceHandle?: 
   const sourceIndex = Number(connection.source)
   const sourceStep = steps.value[sourceIndex]
 
-  if (connection.sourceHandle && connection.sourceHandle.startsWith('output-')) {
+  if (connection.sourceHandle && connection.sourceHandle.startsWith('output-idx-')) {
     if (connection.target === END_NODE_ID) {
       // The End node has no promptText/step to attach a {{data:...}} token to - a data link
       // into it would crash on `Number('end')` (NaN) below, and it's meaningless anyway.
       return
     }
-    const sourceOutputName = connection.sourceHandle.slice('output-'.length)
+    // The handle carries the output's INDEX (stable across renames - vue-flow caches handle ids
+    // at mount, so a name-based id would report the pre-rename name here). Resolve the CURRENT
+    // name at connect time instead.
+    const outputIndex = Number(connection.sourceHandle.slice('output-idx-'.length))
+    const sourceOutputName = sourceStep.outputs[outputIndex]?.name ?? ''
     if (!sourceOutputName.trim()) {
       showHint('Сначала дайте выходу имя — потом тяните от него связь.')
       return

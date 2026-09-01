@@ -138,8 +138,11 @@ const OPERATORS: { value: PipelineConditionOperator; label: string }[] = [
             v-if="!data.readonly && data.step.contentType !== 'VARIABLE'"
             type="button" class="pipeline-card-remove-small nodrag" @click="data.onRemoveOutput?.(outputIndex)"
           >×</button>
+          <!-- Keyed by INDEX, not name: vue-flow caches handle ids in the node's handleBounds at
+               mount, so a name-based id goes stale the moment the user renames the output and the
+               next drag reports the old id. The index never changes for a mounted row. -->
           <Handle
-            :id="`output-${output.name}`"
+            :id="`output-idx-${outputIndex}`"
             type="source"
             :position="Position.Right"
             class="pipeline-handle pipeline-handle-data pipeline-handle-inline"
