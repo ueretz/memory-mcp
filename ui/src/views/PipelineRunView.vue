@@ -7,7 +7,7 @@ import { computed, toRef } from 'vue'
 import { fetchPipeline, fetchPipelineRun } from '@/api/client'
 import ErrorState from '@/components/ErrorState.vue'
 import PageHeader from '@/components/PageHeader.vue'
-import PipelineStepNode from '@/components/PipelineStepNode.vue'
+import PipelineMiniStepNode from '@/components/PipelineMiniStepNode.vue'
 import SkeletonRows from '@/components/SkeletonRows.vue'
 import { useAsyncData } from '@/composables/useAsyncData'
 
@@ -23,12 +23,13 @@ const title = computed(() => (run.value ? `Запуск #${run.value.id} — ${r
 const END_NODE_ID = 'end'
 const STEP_SPACING = 220
 
-const STATUS_CLASS: Record<string, string> = {
-  PENDING: 'pipeline-node pipeline-node-not-reached',
-  RUNNING: 'pipeline-node pipeline-node-running',
-  DONE: 'pipeline-node pipeline-node-done',
-  FAILED: 'pipeline-node pipeline-node-failed',
-  SKIPPED: 'pipeline-node pipeline-node-not-reached',
+// Run-step status -> PipelineMiniStepNode status (GitLab-CI-style circles).
+const MINI_STATUS: Record<string, string> = {
+  PENDING: 'pending',
+  RUNNING: 'running',
+  DONE: 'done',
+  FAILED: 'failed',
+  SKIPPED: 'skipped',
 }
 
 // Pipelines created before the canvas builder (or saved without dragging any node) have every
@@ -54,26 +55,16 @@ const flowNodes = computed(() => {
   return [
     ...steps.map((step) => {
       const runStep = runStepByOrderIndex.get(step.orderIndex)
-      const statusClass = runStep ? STATUS_CLASS[runStep.status] : 'pipeline-node pipeline-node-not-reached'
       return {
         id: String(step.orderIndex),
         type: 'pipelineStep',
         position: positions.get(step.orderIndex)!,
-        style: { width: '260px', height: '190px' },
-        class: isCurrent(step.orderIndex) ? `${statusClass} pipeline-node-selected` : statusClass,
         data: {
-          step: {
-            title: `${step.orderIndex + 1}. ${step.title}${runStep?.note ? ` — ${runStep.note}` : ''}`,
-            contentType: step.contentType,
-            promptText: step.promptText,
-            assetId: step.assetId,
-            referenceAssetId: step.referenceAssetId,
-            outputs: step.outputs,
-            conditionOperator: step.conditionOperator,
-            conditionValue: step.conditionValue,
-          },
-          isEnd: false,
-          readonly: true,
+          label: `${step.orderIndex + 1}. ${step.title}`,
+          status: runStep ? MINI_STATUS[runStep.status] : 'pending',
+          contentType: step.contentType,
+          current: isCurrent(step.orderIndex),
+          note: runStep?.note ?? null,
         },
       }
     }),
@@ -81,8 +72,10 @@ const flowNodes = computed(() => {
       id: END_NODE_ID,
       type: 'pipelineStep',
       position: { x: maxX + 240, y: 0 },
-      class: run.value.currentStepOrderIndex === null ? 'pipeline-node pipeline-node-end pipeline-node-done' : 'pipeline-node pipeline-node-end',
-      data: { step: null, label: 'Конец рана', isEnd: true },
+      data: {
+        label: 'Конец',
+        status: run.value.currentStepOrderIndex === null ? 'done' : 'end',
+      },
     },
   ]
 })
@@ -96,20 +89,9 @@ const flowEdges = computed(() => {
   if (!pipeline.value) return []
   const steps = pipeline.value.steps
   const hasAnyRoutes = steps.some((step) => step.routes.length > 0)
-  // Data-link edges are drawn unconditionally regardless of whether the pipeline is route-less
-  // (implicit chain) or has real routes - computed once here so both branches below can never
-  // drift apart on this again.
-  const dataLinkEdges = steps.flatMap((step) =>
-    step.dataLinksOut.map((link) => ({
-      id: `data-${link.token}`,
-      source: String(step.orderIndex),
-      sourceHandle: `output-${link.sourceOutputName}`,
-      target: String(link.targetStepOrderIndex),
-      targetHandle: 'data-in',
-      class: 'pipeline-data-edge',
-      style: { strokeDasharray: '4 4', stroke: '#10b981' },
-    })),
-  )
+  // Data-link edges are intentionally NOT drawn here: the compact GitLab-style view shows only
+  // control flow (statuses); data wiring is inspected on the board.
+  const dataLinkEdges: never[] = []
   if (!hasAnyRoutes) {
     return [
       ...steps.map((step, index) => {
@@ -132,7 +114,7 @@ const flowEdges = computed(() => {
       step.routes.map((route) => ({
         id: `${step.orderIndex}-${route.outcomeKey ?? 'default'}-${route.targetStepOrderIndex ?? END_NODE_ID}`,
         source: String(step.orderIndex),
-        sourceHandle: 'route',
+        sourceHandle: step.contentType === 'CONDITION' ? `route-${route.outcomeKey}` : 'route',
         target: route.targetStepOrderIndex === null ? END_NODE_ID : String(route.targetStepOrderIndex),
         targetHandle: 'data-in',
         label: route.outcomeKey ?? '(по умолчанию)' as string | undefined,
@@ -151,7 +133,7 @@ const flowEdges = computed(() => {
     <SkeletonRows v-else-if="loading || pipelineLoading" :rows="3" />
 
     <div v-else-if="run && pipeline" class="h-[420px] overflow-hidden rounded-xl border border-border bg-elevated">
-      <VueFlow :nodes="flowNodes" :edges="flowEdges" :node-types="{ pipelineStep: PipelineStepNode }" :nodes-draggable="false" :edges-updatable="false" fit-view-on-init />
+      <VueFlow :nodes="flowNodes" :edges="flowEdges" :node-types="{ pipelineStep: PipelineMiniStepNode }" :nodes-draggable="false" :edges-updatable="false" fit-view-on-init />
     </div>
   </div>
 </template>

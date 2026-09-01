@@ -37,13 +37,23 @@ const saveError = ref<string | null>(null)
 
 const END_NODE_ID = 'end'
 const endPosition = ref({ x: 480, y: 120 })
-const DEFAULT_SIZE = { width: 260, height: 190 }
+const DEFAULT_SIZE = { width: 280, height: 220 }
 // Card sizes are session-local, not persisted - resizing here is purely a canvas-editing
 // convenience, no backend field exists to round-trip it across reloads yet.
 const nodeSizes = ref<Record<number, { width: number; height: number }>>({})
 
 const selectedStepIndex = ref<number | null>(null)
 const selectedEdge = ref<{ stepIndex: number; routeIndex: number } | null>(null)
+
+const boardHint = ref<string | null>(null)
+let hintTimer: ReturnType<typeof setTimeout> | null = null
+function showHint(text: string) {
+  boardHint.value = text
+  if (hintTimer) clearTimeout(hintTimer)
+  hintTimer = setTimeout(() => {
+    boardHint.value = null
+  }, 4000)
+}
 
 function edgeId(stepIndex: number, route: PipelineUpsertRoute): string {
   const targetId = route.targetStepIndex === null ? END_NODE_ID : String(route.targetStepIndex)
@@ -156,6 +166,19 @@ function addOutput(stepIndex: number) {
   steps.value[stepIndex].outputs.push({ name: '' })
 }
 
+function renameOutput(stepIndex: number, outputIndex: number, newName: string) {
+  const step = steps.value[stepIndex]
+  const oldName = step.outputs[outputIndex].name
+  step.outputs[outputIndex].name = newName
+  // Data links reference outputs by NAME. Without this remap a rename leaves links pointing at
+  // the old name and the backend rejects the save with "wires an output it never declared".
+  step.dataLinksOut.forEach((link) => {
+    if (link.sourceOutputName === oldName) {
+      link.sourceOutputName = newName
+    }
+  })
+}
+
 function removeOutput(stepIndex: number, outputIndex: number) {
   const removedName = steps.value[stepIndex].outputs[outputIndex].name
   steps.value[stepIndex].outputs.splice(outputIndex, 1)
@@ -208,6 +231,7 @@ const flowNodes = computed(() => [
         onRemove: () => removeStep(index),
         onAddOutput: () => addOutput(index),
         onRemoveOutput: (outputIndex: number) => removeOutput(index, outputIndex),
+        onRenameOutput: (outputIndex: number, value: string) => renameOutput(index, outputIndex, value),
         onMdFileChosen: (event: Event) => onMdFileChosen(index, event),
         onReferenceFileChosen: (event: Event) => onReferenceFileChosen(index, event),
         onResize: (nextSize: { width: number; height: number }) => {
@@ -287,6 +311,10 @@ function onConnect(connection: { source: string; target: string; sourceHandle?: 
       return
     }
     const sourceOutputName = connection.sourceHandle.slice('output-'.length)
+    if (!sourceOutputName.trim()) {
+      showHint('Сначала дайте выходу имя — потом тяните от него связь.')
+      return
+    }
     const targetIndex = Number(connection.target)
     const token = crypto.randomUUID()
     sourceStep.dataLinksOut.push({ token, sourceOutputName, targetStepIndex: targetIndex })
@@ -344,16 +372,27 @@ const selectedRouteIsConditionBranch = computed(() =>
 // than null. The backend's default-route matching checks outcomeKey() == null specifically, so an
 // empty string would silently break the "empty = default route" fallback the UI advertises.
 function normalizedSteps(): PipelineUpsertStep[] {
-  return steps.value.map((step) => ({
-    ...step,
-    routes: step.routes.map((route) => ({
-      ...route,
-      outcomeKey: route.outcomeKey && route.outcomeKey.trim() !== '' ? route.outcomeKey : null,
-    })),
-  }))
+  return steps.value.map((step) => {
+    // Defensive: a link whose output no longer exists (state saved by an older UI build before
+    // rename-sync existed) would be rejected by the backend - drop it instead of blocking the save.
+    const declaredOutputs = new Set(step.outputs.map((o) => o.name))
+    return {
+      ...step,
+      routes: step.routes.map((route) => ({
+        ...route,
+        outcomeKey: route.outcomeKey && route.outcomeKey.trim() !== '' ? route.outcomeKey : null,
+      })),
+      dataLinksOut: step.dataLinksOut.filter((link) => declaredOutputs.has(link.sourceOutputName)),
+    }
+  })
 }
 
 async function save() {
+  const unnamedIndex = steps.value.findIndex((step) => step.outputs.some((o) => !o.name.trim()))
+  if (unnamedIndex >= 0) {
+    saveError.value = `У шага «${steps.value[unnamedIndex].title || `Шаг ${unnamedIndex + 1}`}» есть выход без имени — назовите его перед сохранением.`
+    return
+  }
   saving.value = true
   saveError.value = null
   try {
@@ -425,6 +464,13 @@ async function save() {
         @edge-click="onEdgeClick"
         @connect="onConnect"
       />
+
+      <div
+        v-if="boardHint"
+        class="absolute bottom-4 left-1/2 -translate-x-1/2 rounded-lg border border-border bg-panel px-4 py-2 text-[12.5px] text-content shadow-lg"
+      >
+        {{ boardHint }}
+      </div>
 
       <!-- The only editing surface still outside the node itself: a free-form route's outcome key
            (branching on an arbitrary Claude-reported outcome), floated over the canvas instead of

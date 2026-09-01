@@ -26,6 +26,7 @@ defineProps<
     onRemove?: () => void
     onAddOutput?: () => void
     onRemoveOutput?: (outputIndex: number) => void
+    onRenameOutput?: (outputIndex: number, name: string) => void
     onMdFileChosen?: (event: Event) => void
     onReferenceFileChosen?: (event: Event) => void
     onResize?: (size: { width: number; height: number }) => void
@@ -54,8 +55,8 @@ const OPERATORS: { value: PipelineConditionOperator; label: string }[] = [
   >
     <NodeResizer
       v-if="!data.readonly"
-      :min-width="240"
-      :min-height="150"
+      :min-width="260"
+      :min-height="180"
       line-class-name="pipeline-resize-line"
       handle-class-name="pipeline-resize-handle"
       @resize="(event: OnResize) => data.onResize?.({ width: event.params.width, height: event.params.height })"
@@ -126,7 +127,13 @@ const OPERATORS: { value: PipelineConditionOperator; label: string }[] = [
           >+</button>
         </div>
         <div v-for="(output, outputIndex) in data.step.outputs" :key="outputIndex" class="pipeline-card-output-row">
-          <input v-model="output.name" :disabled="data.readonly" placeholder="имя" class="pipeline-card-output-input nodrag" />
+          <input
+            :value="output.name"
+            :disabled="data.readonly"
+            placeholder="имя"
+            class="pipeline-card-output-input nodrag"
+            @input="data.onRenameOutput?.(outputIndex, ($event.target as HTMLInputElement).value)"
+          />
           <button
             v-if="!data.readonly && data.step.contentType !== 'VARIABLE'"
             type="button" class="pipeline-card-remove-small nodrag" @click="data.onRemoveOutput?.(outputIndex)"
