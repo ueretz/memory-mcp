@@ -68,15 +68,15 @@ const flowNodes = computed(() => {
       id: String(step.orderIndex),
       type: 'pipelineStep',
       position: positions.get(step.orderIndex)!,
-      class: 'pipeline-node',
-      data: { label: `${step.orderIndex + 1}. ${step.title}`, outputs: step.outputs },
+      class: step.contentType === 'CONDITION' ? 'pipeline-node pipeline-node-condition' : 'pipeline-node',
+      data: { label: `${step.orderIndex + 1}. ${step.title}`, outputs: step.outputs, contentType: step.contentType },
     })),
     {
       id: END_NODE_ID,
       type: 'pipelineStep',
       position: { x: maxX + 240, y: 0 },
       class: 'pipeline-node pipeline-node-end',
-      data: { label: 'Конец рана', outputs: [] },
+      data: { label: 'Конец рана', outputs: [], contentType: 'PROMPT' },
     },
   ]
 })
