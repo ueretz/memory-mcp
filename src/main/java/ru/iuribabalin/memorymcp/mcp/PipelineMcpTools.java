@@ -47,7 +47,10 @@ public class PipelineMcpTools {
     @McpTool(name = "pipeline_get",
             description = "Fetch a pipeline's full definition - its ordered steps and parameters. Uploaded .md step " +
                     "content and any optional reference attachment are inlined as plain text, no separate download " +
-                    "needed. Call before pipeline_run_start so you know what parameters to ask the user for.")
+                    "needed. A step's 'routes' list (if non-empty) shows which outcome values lead to which step - " +
+                    "read it before starting a run so you know what to pass as 'outcome' on " +
+                    "pipeline_run_step_update. Call pipeline_get before pipeline_run_start so you know what " +
+                    "parameters to ask the user for.")
     public PipelineExecutionDetail pipelineGet(
             @McpToolParam(description = "The pipeline's slug, from pipeline_list", required = true) String slug) {
         requireEnabled();
@@ -72,15 +75,19 @@ public class PipelineMcpTools {
     @McpTool(name = "pipeline_run_step_update",
             description = "Report the outcome of one pipeline run step after doing its work: RUNNING when you start " +
                     "it, then DONE or FAILED when you finish, or SKIPPED if the user told you to skip it. Include a " +
-                    "short note describing what you did or why it failed. On FAILED, stop and ask the user how to " +
-                    "proceed before calling this again - do not silently continue to the next step.")
+                    "short note describing what you did or why it failed. If pipeline_get showed this step has more " +
+                    "than one route, pass 'outcome' matching one of its route keys when reporting DONE so the run " +
+                    "advances down the right branch. Check the returned currentStepOrderIndex for what to do next - " +
+                    "null means every path from here has ended, call pipeline_run_complete. On FAILED, stop and ask " +
+                    "the user how to proceed before calling this again - do not silently continue to the next step.")
     public PipelineRunDetail pipelineRunStepUpdate(
             @McpToolParam(description = "The run id, from pipeline_run_start", required = true) Long runId,
             @McpToolParam(description = "0-based index of the step in the run's step list", required = true) Integer orderIndex,
             @McpToolParam(description = "New status: RUNNING, DONE, FAILED, or SKIPPED", required = true) PipelineRunStep.Status status,
-            @McpToolParam(description = "Short summary of what happened for this step", required = false) String note) {
+            @McpToolParam(description = "Short summary of what happened for this step", required = false) String note,
+            @McpToolParam(description = "This step's outcome - only needed when pipeline_get showed the step has more than one route; must exactly match one of that step's outcome keys", required = false) String outcome) {
         requireEnabled();
-        PipelineRunDetail run = pipelineRunService.updateStep(runId, orderIndex, status, note);
+        PipelineRunDetail run = pipelineRunService.updateStep(runId, orderIndex, status, note, outcome);
         usageEventRecorder.record(UsageEvent.Action.PIPELINE_RUN_STEP_UPDATE, String.valueOf(runId), null, null, null);
         return run;
     }

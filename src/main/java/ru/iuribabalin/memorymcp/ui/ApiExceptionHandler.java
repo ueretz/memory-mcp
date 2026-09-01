@@ -8,8 +8,10 @@ import ru.iuribabalin.memorymcp.service.FolderNotFoundException;
 import ru.iuribabalin.memorymcp.service.MemoryNotFoundException;
 import ru.iuribabalin.memorymcp.service.PdfRenderException;
 import ru.iuribabalin.memorymcp.service.PipelineAssetNotFoundException;
+import ru.iuribabalin.memorymcp.service.PipelineInvalidGraphException;
 import ru.iuribabalin.memorymcp.service.PipelineInvalidParametersException;
 import ru.iuribabalin.memorymcp.service.PipelineNotFoundException;
+import ru.iuribabalin.memorymcp.service.PipelineRunInvalidOutcomeException;
 import ru.iuribabalin.memorymcp.service.PipelineRunNotFoundException;
 import ru.iuribabalin.memorymcp.service.PipelineRunStepNotFoundException;
 import ru.iuribabalin.memorymcp.service.PipelineSlugTakenException;
@@ -71,8 +73,18 @@ public class ApiExceptionHandler {
         return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", ex.getMessage()));
     }
 
+    @ExceptionHandler(PipelineRunInvalidOutcomeException.class)
+    public ResponseEntity<Map<String, String>> handlePipelineRunInvalidOutcome(PipelineRunInvalidOutcomeException ex) {
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Map.of("error", ex.getMessage()));
+    }
+
     @ExceptionHandler(PipelineInvalidParametersException.class)
     public ResponseEntity<Map<String, String>> handlePipelineInvalidParameters(PipelineInvalidParametersException ex) {
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Map.of("error", ex.getMessage()));
+    }
+
+    @ExceptionHandler(PipelineInvalidGraphException.class)
+    public ResponseEntity<Map<String, String>> handlePipelineInvalidGraph(PipelineInvalidGraphException ex) {
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Map.of("error", ex.getMessage()));
     }
 }

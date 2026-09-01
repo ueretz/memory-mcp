@@ -27,8 +27,8 @@ class PipelineServiceTest {
                 slug, "Config diff", "Diffs configs against prod", "pipeline-svc-test-project",
                 List.of(new PipelineUpsertRequest.ParameterRequest("folder", "Folder to check", PipelineParameter.Type.STRING, true, null)),
                 List.of(
-                        new PipelineUpsertRequest.StepRequest("Check history", PipelineStep.ContentType.PROMPT, "Diff {{folder}} against prod", null, null),
-                        new PipelineUpsertRequest.StepRequest("Save report", PipelineStep.ContentType.PROMPT, "Save the report to memory", null, null)));
+                        new PipelineUpsertRequest.StepRequest("Check history", PipelineStep.ContentType.PROMPT, "Diff {{folder}} against prod", null, null, 0, 0, List.of()),
+                        new PipelineUpsertRequest.StepRequest("Save report", PipelineStep.ContentType.PROMPT, "Save the report to memory", null, null, 0, 0, List.of())));
     }
 
     @Test
@@ -57,7 +57,7 @@ class PipelineServiceTest {
         PipelineUpsertRequest updated = new PipelineUpsertRequest(
                 "config-diff-3", "Config diff v2", "desc", "pipeline-svc-test-project",
                 List.of(),
-                List.of(new PipelineUpsertRequest.StepRequest("Only step", PipelineStep.ContentType.PROMPT, "do it", null, null)));
+                List.of(new PipelineUpsertRequest.StepRequest("Only step", PipelineStep.ContentType.PROMPT, "do it", null, null, 0, 0, List.of())));
 
         PipelineDetail detail = pipelineService.update("config-diff-3", updated);
 
@@ -90,9 +90,143 @@ class PipelineServiceTest {
         PipelineUpsertRequest request = new PipelineUpsertRequest(
                 "config-diff-6", "Config diff", "Diffs configs against prod", "pipeline-svc-test-project",
                 List.of(),
-                List.of(new PipelineUpsertRequest.StepRequest("Missing file", PipelineStep.ContentType.MD_FILE, null, null, null)));
+                List.of(new PipelineUpsertRequest.StepRequest("Missing file", PipelineStep.ContentType.MD_FILE, null, null, null, 0, 0, List.of())));
 
         assertThatThrownBy(() -> pipelineService.create(request, "Tester"))
                 .isInstanceOf(PipelineInvalidParametersException.class);
+    }
+
+    @Test
+    void savesAndReadsBackPositionsAndRoutes() {
+        PipelineUpsertRequest request = new PipelineUpsertRequest(
+                "branch-1", "Branching pipeline", "desc", "pipeline-svc-test-project",
+                List.of(),
+                List.of(
+                        new PipelineUpsertRequest.StepRequest("Check", PipelineStep.ContentType.PROMPT, "check it",
+                                null, null, 10.0, 20.0,
+                                List.of(new PipelineUpsertRequest.StepRequest.RouteRequest("pass", 1),
+                                        new PipelineUpsertRequest.StepRequest.RouteRequest("fail", null))),
+                        new PipelineUpsertRequest.StepRequest("Deploy", PipelineStep.ContentType.PROMPT, "deploy it",
+                                null, null, 230.0, 20.0, List.of())));
+
+        PipelineDetail detail = pipelineService.create(request, "Tester");
+
+        PipelineDetail.PipelineStepView checkStep = detail.steps().get(0);
+        assertThat(checkStep.positionX()).isEqualTo(10.0);
+        assertThat(checkStep.positionY()).isEqualTo(20.0);
+        assertThat(checkStep.routes()).extracting(PipelineDetail.PipelineStepView.RouteView::outcomeKey)
+                .containsExactlyInAnyOrder("pass", "fail");
+        assertThat(checkStep.routes()).filteredOn(r -> "pass".equals(r.outcomeKey()))
+                .extracting(PipelineDetail.PipelineStepView.RouteView::targetStepOrderIndex)
+                .containsExactly(1);
+    }
+
+    @Test
+    void rejectsAPipelineWithACycle() {
+        // Single root (step 0) so the root-count check passes; steps 1 and 2 route to each
+        // other, forming a 2-cycle reachable from the root. This must be caught by the
+        // topological-sort (Kahn's algorithm) branch in validateGraph, not the root-count check.
+        PipelineUpsertRequest request = new PipelineUpsertRequest(
+                "branch-2", "Cyclic", "desc", "pipeline-svc-test-project",
+                List.of(),
+                List.of(
+                        new PipelineUpsertRequest.StepRequest("A", PipelineStep.ContentType.PROMPT, "a",
+                                null, null, 0, 0, List.of(new PipelineUpsertRequest.StepRequest.RouteRequest(null, 1))),
+                        new PipelineUpsertRequest.StepRequest("B", PipelineStep.ContentType.PROMPT, "b",
+                                null, null, 0, 0, List.of(new PipelineUpsertRequest.StepRequest.RouteRequest(null, 2))),
+                        new PipelineUpsertRequest.StepRequest("C", PipelineStep.ContentType.PROMPT, "c",
+                                null, null, 0, 0, List.of(new PipelineUpsertRequest.StepRequest.RouteRequest(null, 1)))));
+
+        assertThatThrownBy(() -> pipelineService.create(request, "Tester"))
+                .isInstanceOf(PipelineInvalidGraphException.class);
+    }
+
+    @Test
+    void rejectsARouteWithAnOutOfRangeTargetStepIndex() {
+        PipelineUpsertRequest request = new PipelineUpsertRequest(
+                "branch-7", "Out of range target", "desc", "pipeline-svc-test-project",
+                List.of(),
+                List.of(
+                        new PipelineUpsertRequest.StepRequest("A", PipelineStep.ContentType.PROMPT, "a",
+                                null, null, 0, 0, List.of(new PipelineUpsertRequest.StepRequest.RouteRequest(null, 5))),
+                        new PipelineUpsertRequest.StepRequest("B", PipelineStep.ContentType.PROMPT, "b",
+                                null, null, 0, 0, List.of())));
+
+        assertThatThrownBy(() -> pipelineService.create(request, "Tester"))
+                .isInstanceOf(PipelineInvalidGraphException.class);
+    }
+
+    @Test
+    void rejectsAPipelineWithTwoStartingSteps() {
+        PipelineUpsertRequest request = new PipelineUpsertRequest(
+                "branch-3", "Two roots", "desc", "pipeline-svc-test-project",
+                List.of(),
+                List.of(
+                        new PipelineUpsertRequest.StepRequest("A", PipelineStep.ContentType.PROMPT, "a",
+                                null, null, 0, 0, List.of(new PipelineUpsertRequest.StepRequest.RouteRequest(null, null))),
+                        new PipelineUpsertRequest.StepRequest("B", PipelineStep.ContentType.PROMPT, "b",
+                                null, null, 0, 0, List.of(new PipelineUpsertRequest.StepRequest.RouteRequest(null, null)))));
+
+        assertThatThrownBy(() -> pipelineService.create(request, "Tester"))
+                .isInstanceOf(PipelineInvalidGraphException.class);
+    }
+
+    @Test
+    void rejectsTwoDefaultRoutesOnTheSameStep() {
+        PipelineUpsertRequest request = new PipelineUpsertRequest(
+                "branch-4", "Two defaults", "desc", "pipeline-svc-test-project",
+                List.of(),
+                List.of(
+                        new PipelineUpsertRequest.StepRequest("A", PipelineStep.ContentType.PROMPT, "a",
+                                null, null, 0, 0, List.of(
+                                        new PipelineUpsertRequest.StepRequest.RouteRequest(null, 1),
+                                        new PipelineUpsertRequest.StepRequest.RouteRequest(null, null))),
+                        new PipelineUpsertRequest.StepRequest("B", PipelineStep.ContentType.PROMPT, "b",
+                                null, null, 0, 0, List.of())));
+
+        assertThatThrownBy(() -> pipelineService.create(request, "Tester"))
+                .isInstanceOf(PipelineInvalidGraphException.class);
+    }
+
+    @Test
+    void rejectsTwoRoutesWithTheSameNonNullOutcomeKeyOnTheSameStep() {
+        PipelineUpsertRequest request = new PipelineUpsertRequest(
+                "branch-7", "Duplicate outcome key", "desc", "pipeline-svc-test-project",
+                List.of(),
+                List.of(
+                        new PipelineUpsertRequest.StepRequest("A", PipelineStep.ContentType.PROMPT, "a",
+                                null, null, 0, 0, List.of(
+                                        new PipelineUpsertRequest.StepRequest.RouteRequest("pass", 1),
+                                        new PipelineUpsertRequest.StepRequest.RouteRequest("pass", null))),
+                        new PipelineUpsertRequest.StepRequest("B", PipelineStep.ContentType.PROMPT, "b",
+                                null, null, 0, 0, List.of())));
+
+        assertThatThrownBy(() -> pipelineService.create(request, "Tester"))
+                .isInstanceOf(PipelineInvalidGraphException.class);
+    }
+
+    @Test
+    void allowsAnUnwiredIsolatedStepAsAWarningOnlyNotAHardError() {
+        PipelineUpsertRequest request = new PipelineUpsertRequest(
+                "branch-5", "Isolated draft step", "desc", "pipeline-svc-test-project",
+                List.of(),
+                List.of(
+                        new PipelineUpsertRequest.StepRequest("A", PipelineStep.ContentType.PROMPT, "a",
+                                null, null, 0, 0, List.of(new PipelineUpsertRequest.StepRequest.RouteRequest(null, null))),
+                        new PipelineUpsertRequest.StepRequest("Not wired yet", PipelineStep.ContentType.PROMPT, "b",
+                                null, null, 300, 300, List.of())));
+
+        PipelineDetail detail = pipelineService.create(request, "Tester");
+
+        assertThat(detail.steps()).hasSize(2);
+    }
+
+    @Test
+    void aPipelineWithNoRoutesAnywhereSkipsGraphValidation() {
+        pipelineService.create(sampleRequest("branch-6"), "Tester");
+
+        PipelineDetail detail = pipelineService.get("branch-6");
+
+        assertThat(detail.steps()).allMatch(s -> s.routes().isEmpty());
     }
 }

@@ -155,6 +155,16 @@ export interface PipelineParameterView {
   orderIndex: number
 }
 
+export interface PipelineRouteView {
+  outcomeKey: string | null
+  targetStepOrderIndex: number | null
+}
+
+export interface PipelineUpsertRoute {
+  outcomeKey: string | null
+  targetStepIndex: number | null
+}
+
 export interface PipelineStepView {
   id: number
   orderIndex: number
@@ -163,6 +173,9 @@ export interface PipelineStepView {
   promptText: string | null
   assetId: number | null
   referenceAssetId: number | null
+  positionX: number
+  positionY: number
+  routes: PipelineRouteView[]
 }
 
 export interface PipelineSummary {
@@ -204,6 +217,9 @@ export interface PipelineUpsertStep {
   promptText: string | null
   assetId: number | null
   referenceAssetId: number | null
+  positionX: number
+  positionY: number
+  routes: PipelineUpsertRoute[]
 }
 
 export interface PipelineUpsertRequest {
@@ -245,5 +261,6 @@ export interface PipelineRunDetail {
   startedAt: string
   finishedAt: string | null
   startedBy: string | null
+  currentStepOrderIndex: number | null
   steps: PipelineRunStepView[]
 }

@@ -10,7 +10,7 @@ import java.util.List;
 public record PipelineRunDetail(
         Long id, Long pipelineId, String pipelineSlug, PipelineRun.Status status,
         String parametersJson, Instant startedAt, Instant finishedAt, String startedBy,
-        List<PipelineRunStepView> steps) {
+        Integer currentStepOrderIndex, List<PipelineRunStepView> steps) {
 
     public record PipelineRunStepView(
             Long id, int orderIndex, String title, PipelineStep.ContentType contentType,

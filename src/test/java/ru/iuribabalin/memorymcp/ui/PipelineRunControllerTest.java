@@ -50,7 +50,7 @@ class PipelineRunControllerTest {
     @Test
     void getReturnsTheRun() throws Exception {
         when(pipelineRunService.get(1L)).thenReturn(new PipelineRunDetail(
-                1L, 1L, "config-diff", PipelineRun.Status.RUNNING, "{}", Instant.now(), null, "Tester", List.of()));
+                1L, 1L, "config-diff", PipelineRun.Status.RUNNING, "{}", Instant.now(), null, "Tester", 0, List.of()));
 
         mockMvc.perform(get("/api/pipeline-runs/1"))
                 .andExpect(status().isOk())

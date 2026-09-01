@@ -25,6 +25,10 @@ public record PipelineDetail(
 
     public record PipelineStepView(
             Long id, int orderIndex, String title, PipelineStep.ContentType contentType,
-            String promptText, Long assetId, Long referenceAssetId) {
+            String promptText, Long assetId, Long referenceAssetId,
+            double positionX, double positionY, List<RouteView> routes) {
+
+        public record RouteView(String outcomeKey, Integer targetStepOrderIndex) {
+        }
     }
 }
