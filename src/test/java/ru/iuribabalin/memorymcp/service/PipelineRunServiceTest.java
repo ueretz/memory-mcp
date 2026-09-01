@@ -52,7 +52,7 @@ class PipelineRunServiceTest {
         createSamplePipeline("run-test-2");
         PipelineRunDetail run = pipelineRunService.start("run-test-2", "{\"folder\":\"src\"}", "Tester");
 
-        PipelineRunDetail updated = pipelineRunService.updateStep(run.id(), 0, PipelineRunStep.Status.DONE, "diffed fine", null);
+        PipelineRunDetail updated = pipelineRunService.updateStep(run.id(), 0, PipelineRunStep.Status.DONE, "diffed fine", null, null);
 
         assertThat(updated.steps().get(0).status()).isEqualTo(PipelineRunStep.Status.DONE);
         assertThat(updated.steps().get(0).note()).isEqualTo("diffed fine");
@@ -152,7 +152,7 @@ class PipelineRunServiceTest {
         createBranchingPipeline("run-test-8");
         PipelineRunDetail run = pipelineRunService.start("run-test-8", "{}", "Tester");
 
-        PipelineRunDetail updated = pipelineRunService.updateStep(run.id(), 0, PipelineRunStep.Status.DONE, "ok", "pass");
+        PipelineRunDetail updated = pipelineRunService.updateStep(run.id(), 0, PipelineRunStep.Status.DONE, "ok", "pass", null);
 
         assertThat(updated.currentStepOrderIndex()).isEqualTo(1);
     }
@@ -162,7 +162,7 @@ class PipelineRunServiceTest {
         createBranchingPipeline("run-test-9");
         PipelineRunDetail run = pipelineRunService.start("run-test-9", "{}", "Tester");
 
-        PipelineRunDetail updated = pipelineRunService.updateStep(run.id(), 0, PipelineRunStep.Status.DONE, "broke", "fail");
+        PipelineRunDetail updated = pipelineRunService.updateStep(run.id(), 0, PipelineRunStep.Status.DONE, "broke", "fail", null);
 
         assertThat(updated.currentStepOrderIndex()).isEqualTo(2);
     }
@@ -172,7 +172,7 @@ class PipelineRunServiceTest {
         createBranchingPipeline("run-test-10");
         PipelineRunDetail run = pipelineRunService.start("run-test-10", "{}", "Tester");
 
-        assertThatThrownBy(() -> pipelineRunService.updateStep(run.id(), 0, PipelineRunStep.Status.DONE, "ok", "not-a-real-outcome"))
+        assertThatThrownBy(() -> pipelineRunService.updateStep(run.id(), 0, PipelineRunStep.Status.DONE, "ok", "not-a-real-outcome", null))
                 .isInstanceOf(PipelineRunInvalidOutcomeException.class)
                 .hasMessageContaining("pass")
                 .hasMessageContaining("fail");
@@ -183,7 +183,7 @@ class PipelineRunServiceTest {
         createSamplePipeline("run-test-11");
         PipelineRunDetail run = pipelineRunService.start("run-test-11", "{\"folder\":\"src\"}", "Tester");
 
-        PipelineRunDetail updated = pipelineRunService.updateStep(run.id(), 0, PipelineRunStep.Status.DONE, "ok", null);
+        PipelineRunDetail updated = pipelineRunService.updateStep(run.id(), 0, PipelineRunStep.Status.DONE, "ok", null, null);
 
         assertThat(updated.currentStepOrderIndex()).isEqualTo(1);
     }
@@ -192,9 +192,9 @@ class PipelineRunServiceTest {
     void doneOnTheLastStepOfABranchEndsTheRun() {
         createBranchingPipeline("run-test-12");
         PipelineRunDetail run = pipelineRunService.start("run-test-12", "{}", "Tester");
-        pipelineRunService.updateStep(run.id(), 0, PipelineRunStep.Status.DONE, "ok", "pass");
+        pipelineRunService.updateStep(run.id(), 0, PipelineRunStep.Status.DONE, "ok", "pass", null);
 
-        PipelineRunDetail updated = pipelineRunService.updateStep(run.id(), 1, PipelineRunStep.Status.DONE, "deployed", null);
+        PipelineRunDetail updated = pipelineRunService.updateStep(run.id(), 1, PipelineRunStep.Status.DONE, "deployed", null, null);
 
         assertThat(updated.currentStepOrderIndex()).isNull();
     }
@@ -204,7 +204,7 @@ class PipelineRunServiceTest {
         createSamplePipeline("run-test-14");
         PipelineRunDetail run = pipelineRunService.start("run-test-14", "{\"folder\":\"src\"}", "Tester");
 
-        PipelineRunDetail updated = pipelineRunService.updateStep(run.id(), 0, PipelineRunStep.Status.SKIPPED, "skip it", null);
+        PipelineRunDetail updated = pipelineRunService.updateStep(run.id(), 0, PipelineRunStep.Status.SKIPPED, "skip it", null, null);
 
         assertThat(updated.steps().get(0).status()).isEqualTo(PipelineRunStep.Status.SKIPPED);
         assertThat(updated.currentStepOrderIndex()).isEqualTo(1);
@@ -229,7 +229,7 @@ class PipelineRunServiceTest {
         ), "Tester");
         PipelineRunDetail run = pipelineRunService.start(slug, "{}", "Tester");
 
-        PipelineRunDetail updated = pipelineRunService.updateStep(run.id(), 0, PipelineRunStep.Status.SKIPPED, "skip it", null);
+        PipelineRunDetail updated = pipelineRunService.updateStep(run.id(), 0, PipelineRunStep.Status.SKIPPED, "skip it", null, null);
 
         assertThat(updated.currentStepOrderIndex()).isEqualTo(2);
     }
@@ -239,8 +239,60 @@ class PipelineRunServiceTest {
         createBranchingPipeline("run-test-16");
         PipelineRunDetail run = pipelineRunService.start("run-test-16", "{}", "Tester");
 
-        PipelineRunDetail updated = pipelineRunService.updateStep(run.id(), 0, PipelineRunStep.Status.SKIPPED, "skip it", null);
+        PipelineRunDetail updated = pipelineRunService.updateStep(run.id(), 0, PipelineRunStep.Status.SKIPPED, "skip it", null, null);
 
         assertThat(updated.currentStepOrderIndex()).isNull();
+    }
+
+    private void createDataLinkPipeline(String slug) {
+        pipelineService.create(new PipelineUpsertRequest(
+                slug, "Data link run", "desc", "pipeline-run-svc-test-project",
+                List.of(),
+                List.of(
+                        new PipelineUpsertRequest.StepRequest("Summarize", PipelineStep.ContentType.PROMPT, "summarize it",
+                                null, null, 0, 0, List.of(),
+                                List.of(new PipelineUpsertRequest.StepRequest.OutputRequest("summary")),
+                                List.of(new PipelineUpsertRequest.StepRequest.DataLinkRequest("tok-1", "summary", 1))),
+                        new PipelineUpsertRequest.StepRequest("Report", PipelineStep.ContentType.PROMPT, "Write it up: {{data:tok-1}}",
+                                null, null, 0, 0, List.of(), List.of(), List.of()))
+        ), "Tester");
+    }
+
+    @Test
+    void resolvedInstructionTextSubstitutesAReportedOutputValue() {
+        createDataLinkPipeline("run-test-17");
+        PipelineRunDetail run = pipelineRunService.start("run-test-17", "{}", "Tester");
+
+        PipelineRunDetail updated = pipelineRunService.updateStep(run.id(), 0, PipelineRunStep.Status.DONE, "ok", null, "{\"summary\":\"all green\"}");
+
+        assertThat(updated.steps().get(1).resolvedInstructionText()).isEqualTo("Write it up: all green");
+    }
+
+    @Test
+    void resolvedInstructionTextSubstitutesEmptyStringWhenTheOutputWasNeverReported() {
+        createDataLinkPipeline("run-test-18");
+        PipelineRunDetail run = pipelineRunService.start("run-test-18", "{}", "Tester");
+
+        PipelineRunDetail updated = pipelineRunService.updateStep(run.id(), 0, PipelineRunStep.Status.DONE, "ok", null, null);
+
+        assertThat(updated.steps().get(1).resolvedInstructionText()).isEqualTo("Write it up: ");
+    }
+
+    @Test
+    void updateStepRejectsAnUndeclaredOutputKey() {
+        createDataLinkPipeline("run-test-19");
+        PipelineRunDetail run = pipelineRunService.start("run-test-19", "{}", "Tester");
+
+        assertThatThrownBy(() -> pipelineRunService.updateStep(run.id(), 0, PipelineRunStep.Status.DONE, "ok", null, "{\"typo\":\"x\"}"))
+                .isInstanceOf(PipelineRunUnknownOutputException.class)
+                .hasMessageContaining("summary");
+    }
+
+    @Test
+    void resolvedInstructionTextIsPlainPromptTextWhenTheStepHasNoIncomingDataLinks() {
+        createSamplePipeline("run-test-20");
+        PipelineRunDetail run = pipelineRunService.start("run-test-20", "{\"folder\":\"src\"}", "Tester");
+
+        assertThat(run.steps().get(0).resolvedInstructionText()).isEqualTo("Diff {{folder}}");
     }
 }

@@ -14,6 +14,7 @@ public record PipelineRunDetail(
 
     public record PipelineRunStepView(
             Long id, int orderIndex, String title, PipelineStep.ContentType contentType,
-            PipelineRunStep.Status status, String note, Instant startedAt, Instant finishedAt) {
+            PipelineRunStep.Status status, String note, Instant startedAt, Instant finishedAt,
+            String resolvedInstructionText) {
     }
 }

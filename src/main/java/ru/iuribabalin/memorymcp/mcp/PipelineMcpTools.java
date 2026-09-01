@@ -87,7 +87,7 @@ public class PipelineMcpTools {
             @McpToolParam(description = "Short summary of what happened for this step", required = false) String note,
             @McpToolParam(description = "This step's outcome - only needed when pipeline_get showed the step has more than one route; must exactly match one of that step's outcome keys", required = false) String outcome) {
         requireEnabled();
-        PipelineRunDetail run = pipelineRunService.updateStep(runId, orderIndex, status, note, outcome);
+        PipelineRunDetail run = pipelineRunService.updateStep(runId, orderIndex, status, note, outcome, null);
         usageEventRecorder.record(UsageEvent.Action.PIPELINE_RUN_STEP_UPDATE, String.valueOf(runId), null, null, null);
         return run;
     }

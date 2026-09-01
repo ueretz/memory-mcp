@@ -79,7 +79,7 @@ class PipelineMcpToolsTest {
     void runStepUpdateDelegatesAndRecordsUsage() {
         when(settingsService.isEnabled(SettingsService.PIPELINES_ENABLED)).thenReturn(true);
         PipelineRunDetail runDetail = new PipelineRunDetail(1L, 1L, "config-diff", PipelineRun.Status.RUNNING, "{}", Instant.now(), null, null, 1, List.of());
-        when(pipelineRunService.updateStep(1L, 0, PipelineRunStep.Status.DONE, "ok", "success")).thenReturn(runDetail);
+        when(pipelineRunService.updateStep(1L, 0, PipelineRunStep.Status.DONE, "ok", "success", null)).thenReturn(runDetail);
 
         PipelineRunDetail result = pipelineMcpTools.pipelineRunStepUpdate(1L, 0, PipelineRunStep.Status.DONE, "ok", "success");
 

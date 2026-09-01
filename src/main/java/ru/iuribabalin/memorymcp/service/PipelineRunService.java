@@ -5,18 +5,27 @@ import org.springframework.transaction.annotation.Transactional;
 import ru.iuribabalin.memorymcp.dto.PipelineRunDetail;
 import ru.iuribabalin.memorymcp.dto.PipelineRunSummary;
 import ru.iuribabalin.memorymcp.entity.Pipeline;
+import ru.iuribabalin.memorymcp.entity.PipelineDataLink;
 import ru.iuribabalin.memorymcp.entity.PipelineRun;
 import ru.iuribabalin.memorymcp.entity.PipelineRunStep;
+import ru.iuribabalin.memorymcp.entity.PipelineRunStepOutput;
 import ru.iuribabalin.memorymcp.entity.PipelineStep;
+import ru.iuribabalin.memorymcp.entity.PipelineStepOutput;
 import ru.iuribabalin.memorymcp.entity.PipelineStepRoute;
+import ru.iuribabalin.memorymcp.repository.PipelineDataLinkRepository;
 import ru.iuribabalin.memorymcp.repository.PipelineRepository;
 import ru.iuribabalin.memorymcp.repository.PipelineRunRepository;
+import ru.iuribabalin.memorymcp.repository.PipelineRunStepOutputRepository;
 import ru.iuribabalin.memorymcp.repository.PipelineRunStepRepository;
+import ru.iuribabalin.memorymcp.repository.PipelineStepOutputRepository;
 import ru.iuribabalin.memorymcp.repository.PipelineStepRepository;
 import ru.iuribabalin.memorymcp.repository.PipelineStepRouteRepository;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
@@ -30,17 +39,29 @@ public class PipelineRunService {
     private final PipelineRepository pipelineRepository;
     private final PipelineStepRepository pipelineStepRepository;
     private final PipelineStepRouteRepository pipelineStepRouteRepository;
+    private final PipelineStepOutputRepository pipelineStepOutputRepository;
+    private final PipelineDataLinkRepository pipelineDataLinkRepository;
+    private final PipelineRunStepOutputRepository pipelineRunStepOutputRepository;
+    private final ObjectMapper objectMapper;
 
     public PipelineRunService(PipelineRunRepository pipelineRunRepository,
                                PipelineRunStepRepository pipelineRunStepRepository,
                                PipelineRepository pipelineRepository,
                                PipelineStepRepository pipelineStepRepository,
-                               PipelineStepRouteRepository pipelineStepRouteRepository) {
+                               PipelineStepRouteRepository pipelineStepRouteRepository,
+                               PipelineStepOutputRepository pipelineStepOutputRepository,
+                               PipelineDataLinkRepository pipelineDataLinkRepository,
+                               PipelineRunStepOutputRepository pipelineRunStepOutputRepository,
+                               ObjectMapper objectMapper) {
         this.pipelineRunRepository = pipelineRunRepository;
         this.pipelineRunStepRepository = pipelineRunStepRepository;
         this.pipelineRepository = pipelineRepository;
         this.pipelineStepRepository = pipelineStepRepository;
         this.pipelineStepRouteRepository = pipelineStepRouteRepository;
+        this.pipelineStepOutputRepository = pipelineStepOutputRepository;
+        this.pipelineDataLinkRepository = pipelineDataLinkRepository;
+        this.pipelineRunStepOutputRepository = pipelineRunStepOutputRepository;
+        this.objectMapper = objectMapper;
     }
 
     @Transactional
@@ -71,7 +92,8 @@ public class PipelineRunService {
     }
 
     @Transactional
-    public PipelineRunDetail updateStep(Long runId, int orderIndex, PipelineRunStep.Status status, String note, String outcome) {
+    public PipelineRunDetail updateStep(Long runId, int orderIndex, PipelineRunStep.Status status, String note,
+                                         String outcome, String outputsJson) {
         PipelineRun run = resolve(runId);
         PipelineRunStep runStep = pipelineRunStepRepository.findByRunIdAndOrderIndex(runId, orderIndex)
                 .orElseThrow(() -> new PipelineRunStepNotFoundException(runId, orderIndex));
@@ -87,12 +109,43 @@ public class PipelineRunService {
         runStep.setNote(note);
         pipelineRunStepRepository.save(runStep);
 
+        if (outputsJson != null && !outputsJson.isBlank() && runStep.getPipelineStepId() != null) {
+            recordOutputs(runStep, outputsJson);
+        }
+
         if ((status == PipelineRunStep.Status.DONE || status == PipelineRunStep.Status.SKIPPED)
                 && runStep.getPipelineStepId() != null) {
             run.setCurrentStepOrderIndex(resolveNextOrderIndexForStatus(run.getPipelineId(), runStep.getPipelineStepId(), orderIndex, outcome, status));
             pipelineRunRepository.save(run);
         }
         return toDetail(run, pipelineSlugOf(run));
+    }
+
+    private void recordOutputs(PipelineRunStep runStep, String outputsJson) {
+        List<PipelineStepOutput> declared = pipelineStepOutputRepository.findByStepId(runStep.getPipelineStepId());
+        Map<String, Long> outputIdByName = declared.stream()
+                .collect(Collectors.toMap(PipelineStepOutput::getName, PipelineStepOutput::getId));
+        JsonNode node;
+        try {
+            node = objectMapper.readTree(outputsJson);
+        } catch (Exception ex) {
+            throw new PipelineRunUnknownOutputException(outputsJson,
+                    declared.stream().map(PipelineStepOutput::getName).toList());
+        }
+        for (String name : node.propertyNames()) {
+            Long outputId = outputIdByName.get(name);
+            if (outputId == null) {
+                throw new PipelineRunUnknownOutputException(name,
+                        declared.stream().map(PipelineStepOutput::getName).toList());
+            }
+            PipelineRunStepOutput runStepOutput = pipelineRunStepOutputRepository
+                    .findByRunStepIdAndOutputId(runStep.getId(), outputId)
+                    .orElseGet(PipelineRunStepOutput::new);
+            runStepOutput.setRunStepId(runStep.getId());
+            runStepOutput.setOutputId(outputId);
+            runStepOutput.setValue(node.get(name).asString());
+            pipelineRunStepOutputRepository.save(runStepOutput);
+        }
     }
 
     @Transactional
@@ -221,13 +274,54 @@ public class PipelineRunService {
     }
 
     private PipelineRunDetail toDetail(PipelineRun run, String pipelineSlug) {
-        List<PipelineRunDetail.PipelineRunStepView> steps = pipelineRunStepRepository
-                .findByRunIdOrderByOrderIndexAsc(run.getId()).stream()
+        List<PipelineRunStep> runSteps = pipelineRunStepRepository.findByRunIdOrderByOrderIndexAsc(run.getId());
+        List<Long> pipelineStepIds = runSteps.stream().map(PipelineRunStep::getPipelineStepId)
+                .filter(Objects::nonNull).toList();
+        Map<Long, PipelineStep> stepById = pipelineStepRepository.findAllById(pipelineStepIds).stream()
+                .collect(Collectors.toMap(PipelineStep::getId, s -> s));
+        Map<Long, Long> runStepIdByPipelineStepId = runSteps.stream()
+                .filter(rs -> rs.getPipelineStepId() != null)
+                .collect(Collectors.toMap(PipelineRunStep::getPipelineStepId, PipelineRunStep::getId));
+        List<PipelineDataLink> incomingLinks = pipelineDataLinkRepository.findByTargetStepIdIn(pipelineStepIds);
+        List<Long> sourceRunStepIds = incomingLinks.stream()
+                .map(link -> runStepIdByPipelineStepId.get(link.getSourceStepId()))
+                .filter(Objects::nonNull)
+                .toList();
+        Map<String, String> reportedValues = pipelineRunStepOutputRepository.findByRunStepIdIn(sourceRunStepIds).stream()
+                .collect(Collectors.toMap(o -> o.getRunStepId() + ":" + o.getOutputId(), PipelineRunStepOutput::getValue));
+
+        List<PipelineRunDetail.PipelineRunStepView> steps = runSteps.stream()
                 .map(s -> new PipelineRunDetail.PipelineRunStepView(s.getId(), s.getOrderIndex(), s.getTitle(),
-                        s.getContentType(), s.getStatus(), s.getNote(), s.getStartedAt(), s.getFinishedAt()))
+                        s.getContentType(), s.getStatus(), s.getNote(), s.getStartedAt(), s.getFinishedAt(),
+                        resolveInstructionText(s, stepById, incomingLinks, runStepIdByPipelineStepId, reportedValues)))
                 .toList();
         return new PipelineRunDetail(run.getId(), run.getPipelineId(), pipelineSlug, run.getStatus(),
                 run.getParametersJson(), run.getStartedAt(), run.getFinishedAt(), run.getStartedBy(),
                 run.getCurrentStepOrderIndex(), steps);
+    }
+
+    private String resolveInstructionText(PipelineRunStep runStep, Map<Long, PipelineStep> stepById,
+                                           List<PipelineDataLink> allIncomingLinks,
+                                           Map<Long, Long> runStepIdByPipelineStepId,
+                                           Map<String, String> reportedValues) {
+        if (runStep.getPipelineStepId() == null) {
+            return null;
+        }
+        PipelineStep step = stepById.get(runStep.getPipelineStepId());
+        if (step == null || step.getPromptText() == null) {
+            return null;
+        }
+        String text = step.getPromptText();
+        for (PipelineDataLink link : allIncomingLinks) {
+            if (!link.getTargetStepId().equals(runStep.getPipelineStepId())) {
+                continue;
+            }
+            Long sourceRunStepId = runStepIdByPipelineStepId.get(link.getSourceStepId());
+            String value = sourceRunStepId != null
+                    ? reportedValues.getOrDefault(sourceRunStepId + ":" + link.getSourceOutputId(), "")
+                    : "";
+            text = text.replace("{{data:" + link.getToken() + "}}", value);
+        }
+        return text;
     }
 }
