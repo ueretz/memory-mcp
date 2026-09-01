@@ -16,6 +16,7 @@ import type {
 import AppIcon from '@/components/AppIcon.vue'
 import ErrorState from '@/components/ErrorState.vue'
 import PageHeader from '@/components/PageHeader.vue'
+import PipelineStepNode from '@/components/PipelineStepNode.vue'
 
 const props = defineProps<{ project: string; slug?: string }>()
 const project = toRef(props, 'project')
@@ -175,28 +176,43 @@ async function onReferenceFileChosen(index: number, event: Event) {
 const flowNodes = computed(() => [
   ...steps.value.map((step, index) => ({
     id: String(index),
+    type: 'pipelineStep',
     position: { x: step.positionX, y: step.positionY },
-    label: step.title || `Шаг ${index + 1}`,
     class: selectedStepIndex.value === index ? 'pipeline-node pipeline-node-selected' : 'pipeline-node',
+    data: { label: step.title || `Шаг ${index + 1}`, outputs: step.outputs },
   })),
   {
     id: END_NODE_ID,
+    type: 'pipelineStep',
     position: endPosition.value,
-    label: 'Конец рана',
     class: 'pipeline-node pipeline-node-end',
+    data: { label: 'Конец рана', outputs: [] },
   },
 ])
 
-const flowEdges = computed(() =>
-  steps.value.flatMap((step, index) =>
+const flowEdges = computed(() => [
+  ...steps.value.flatMap((step, index) =>
     step.routes.map((route) => ({
       id: edgeId(index, route),
       source: String(index),
+      sourceHandle: 'route',
       target: route.targetStepIndex === null ? END_NODE_ID : String(route.targetStepIndex),
+      targetHandle: 'data-in',
       label: route.outcomeKey ?? '(по умолчанию)',
     })),
   ),
-)
+  ...steps.value.flatMap((step, index) =>
+    step.dataLinksOut.map((link) => ({
+      id: `data-${link.token}`,
+      source: String(index),
+      sourceHandle: `output-${link.sourceOutputName}`,
+      target: String(link.targetStepIndex),
+      targetHandle: 'data-in',
+      class: 'pipeline-data-edge',
+      style: { strokeDasharray: '4 4', stroke: '#10b981' },
+    })),
+  ),
+])
 
 // Best-effort UI hint only - the authoritative check is PipelineService's graph validation on
 // save. A step is flagged if something else in the pipeline branches at all, but nothing routes
@@ -239,8 +255,19 @@ function onEdgeClick({ edge }: EdgeMouseEvent) {
   selectedEdge.value = routeIndex >= 0 ? { stepIndex, routeIndex } : null
 }
 
-function onConnect(connection: { source: string; target: string }) {
+function onConnect(connection: { source: string; target: string; sourceHandle?: string | null; targetHandle?: string | null }) {
   const sourceIndex = Number(connection.source)
+  if (connection.sourceHandle && connection.sourceHandle.startsWith('output-')) {
+    const sourceOutputName = connection.sourceHandle.slice('output-'.length)
+    const targetIndex = Number(connection.target)
+    const token = crypto.randomUUID()
+    steps.value[sourceIndex].dataLinksOut.push({ token, sourceOutputName, targetStepIndex: targetIndex })
+    const target = steps.value[targetIndex]
+    target.promptText = `${target.promptText ?? ''}\n{{data:${token}}}`
+    selectedStepIndex.value = null
+    selectedEdge.value = null
+    return
+  }
   const targetIndex = connection.target === END_NODE_ID ? null : Number(connection.target)
   steps.value[sourceIndex].routes.push({ outcomeKey: null, targetStepIndex: targetIndex })
   selectedStepIndex.value = null
@@ -353,6 +380,7 @@ async function save() {
             <VueFlow
               :nodes="flowNodes"
               :edges="flowEdges"
+              :node-types="{ pipelineStep: PipelineStepNode }"
               :nodes-connectable="true"
               fit-view-on-init
               @node-drag-stop="onNodeDragStop"
