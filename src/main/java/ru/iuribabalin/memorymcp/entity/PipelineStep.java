@@ -13,7 +13,9 @@ import jakarta.persistence.Table;
 @Table(name = "pipeline_steps")
 public class PipelineStep {
 
-    public enum ContentType { PROMPT, MD_FILE }
+    public enum ContentType { PROMPT, MD_FILE, CONDITION, VARIABLE }
+
+    public enum ConditionOperator { EQUALS, GREATER_THAN, LESS_THAN, GREATER_OR_EQUAL, LESS_OR_EQUAL }
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -40,6 +42,13 @@ public class PipelineStep {
 
     @Column(name = "reference_asset_id")
     private Long referenceAssetId;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "condition_operator", length = 20)
+    private ConditionOperator conditionOperator;
+
+    @Column(name = "condition_value", length = 500)
+    private String conditionValue;
 
     @Column(name = "position_x", nullable = false)
     private double positionX;
@@ -105,6 +114,22 @@ public class PipelineStep {
 
     public void setReferenceAssetId(Long referenceAssetId) {
         this.referenceAssetId = referenceAssetId;
+    }
+
+    public ConditionOperator getConditionOperator() {
+        return conditionOperator;
+    }
+
+    public void setConditionOperator(ConditionOperator conditionOperator) {
+        this.conditionOperator = conditionOperator;
+    }
+
+    public String getConditionValue() {
+        return conditionValue;
+    }
+
+    public void setConditionValue(String conditionValue) {
+        this.conditionValue = conditionValue;
     }
 
     public double getPositionX() {
