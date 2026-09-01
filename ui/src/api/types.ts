@@ -165,6 +165,29 @@ export interface PipelineUpsertRoute {
   targetStepIndex: number | null
 }
 
+export interface PipelineOutputView {
+  id: number
+  name: string
+}
+
+export interface PipelineUpsertOutput {
+  name: string
+}
+
+export interface PipelineDataLinkView {
+  id: number
+  token: string
+  sourceOutputName: string
+  targetStepOrderIndex: number | null
+  targetStepTitle: string | null
+}
+
+export interface PipelineUpsertDataLink {
+  token: string
+  sourceOutputName: string
+  targetStepIndex: number | null
+}
+
 export interface PipelineStepView {
   id: number
   orderIndex: number
@@ -176,6 +199,8 @@ export interface PipelineStepView {
   positionX: number
   positionY: number
   routes: PipelineRouteView[]
+  outputs: PipelineOutputView[]
+  dataLinksOut: PipelineDataLinkView[]
 }
 
 export interface PipelineSummary {
@@ -220,6 +245,8 @@ export interface PipelineUpsertStep {
   positionX: number
   positionY: number
   routes: PipelineUpsertRoute[]
+  outputs: PipelineUpsertOutput[]
+  dataLinksOut: PipelineUpsertDataLink[]
 }
 
 export interface PipelineUpsertRequest {
@@ -250,6 +277,7 @@ export interface PipelineRunStepView {
   note: string | null
   startedAt: string | null
   finishedAt: string | null
+  resolvedInstructionText: string | null
 }
 
 export interface PipelineRunDetail {
