@@ -133,7 +133,8 @@ export interface SettingSummary {
 }
 
 export type PipelineParameterType = 'STRING' | 'NUMBER' | 'BOOLEAN'
-export type PipelineStepContentType = 'PROMPT' | 'MD_FILE'
+export type PipelineStepContentType = 'PROMPT' | 'MD_FILE' | 'CONDITION' | 'VARIABLE'
+export type PipelineConditionOperator = 'EQUALS' | 'GREATER_THAN' | 'LESS_THAN' | 'GREATER_OR_EQUAL' | 'LESS_OR_EQUAL'
 export type PipelineRunStatus = 'RUNNING' | 'DONE' | 'FAILED' | 'ABORTED'
 export type PipelineRunStepStatus = 'PENDING' | 'RUNNING' | 'DONE' | 'FAILED' | 'SKIPPED'
 
@@ -201,6 +202,8 @@ export interface PipelineStepView {
   routes: PipelineRouteView[]
   outputs: PipelineOutputView[]
   dataLinksOut: PipelineDataLinkView[]
+  conditionOperator: PipelineConditionOperator | null
+  conditionValue: string | null
 }
 
 export interface PipelineSummary {
@@ -247,6 +250,8 @@ export interface PipelineUpsertStep {
   routes: PipelineUpsertRoute[]
   outputs: PipelineUpsertOutput[]
   dataLinksOut: PipelineUpsertDataLink[]
+  conditionOperator: PipelineConditionOperator | null
+  conditionValue: string | null
 }
 
 export interface PipelineUpsertRequest {
