@@ -46,12 +46,27 @@ COPY --from=build /workspace/build/libs/memory-mcp.jar app.jar
 # up front means that check always finds everything already there and never reaches the network;
 # PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD is a second guard so a future dependency bump that adds a new
 # required browser fails loudly (missing executable) instead of silently blocking a request again.
-RUN java -Djarmode=tools -jar app.jar extract --destination /app/extracted \
+# Both the ~600MB+ of browser binaries and the apt package downloads used to get re-fetched from
+# the network on EVERY rebuild, because this RUN sits after `COPY --from=build .../app.jar`
+# above - a layer that changes on every code change, so Docker never got to reuse its own layer
+# cache here either way. BuildKit cache mounts sidestep that entirely: the browsers land in
+# /root/.cache/ms-playwright (Playwright's default install path) and the apt archives/index in
+# their usual spots, all inside cache mounts that persist across builds independently of the
+# regular layer cache. Playwright's installer already skips re-downloading a browser it finds
+# present at its target path, so a warm cache makes this step a no-network no-op. Cache-mounted
+# directories are never committed to the image, though, so the browsers have to be copied out to a
+# normal path (/ms-playwright) before PLAYWRIGHT_BROWSERS_PATH can point runtime lookups at them.
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
+    --mount=type=cache,target=/root/.cache/ms-playwright \
+    java -Djarmode=tools -jar app.jar extract --destination /app/extracted \
     && apt-get update \
     && java -cp "/app/extracted/lib/*" \
          com.microsoft.playwright.CLI install --with-deps \
-    && rm -rf /app/extracted /var/lib/apt/lists/*
+    && mkdir -p /ms-playwright && cp -a /root/.cache/ms-playwright/. /ms-playwright/ \
+    && rm -rf /app/extracted
 
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
 
 EXPOSE 8080
