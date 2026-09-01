@@ -258,6 +258,11 @@ function onEdgeClick({ edge }: EdgeMouseEvent) {
 function onConnect(connection: { source: string; target: string; sourceHandle?: string | null; targetHandle?: string | null }) {
   const sourceIndex = Number(connection.source)
   if (connection.sourceHandle && connection.sourceHandle.startsWith('output-')) {
+    if (connection.target === END_NODE_ID) {
+      // The End node has no promptText/step to attach a {{data:...}} token to - a data link
+      // into it would crash on `Number('end')` (NaN) below, and it's meaningless anyway.
+      return
+    }
     const sourceOutputName = connection.sourceHandle.slice('output-'.length)
     const targetIndex = Number(connection.target)
     const token = crypto.randomUUID()
