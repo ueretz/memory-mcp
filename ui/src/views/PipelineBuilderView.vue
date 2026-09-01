@@ -110,15 +110,22 @@ function addStep() {
 
 function removeStep(index: number) {
   steps.value.splice(index, 1)
-  // Routes referencing this step by index are now stale (indices shifted) - drop anything that
-  // pointed at the removed step, and shift down everything that pointed past it, so a save can't
-  // silently rewire to the wrong node.
+  // Routes AND data links referencing this step by index are now stale (indices shifted) - drop
+  // anything that pointed at the removed step, and shift down everything that pointed past it, so
+  // a save can't silently rewire to the wrong node (or get rejected by the backend's ancestor
+  // check because a stale targetStepIndex points past the end of the shrunk steps array).
   steps.value.forEach((step) => {
     step.routes = step.routes
       .filter((r) => r.targetStepIndex !== index)
       .map((r) => ({
         ...r,
         targetStepIndex: r.targetStepIndex !== null && r.targetStepIndex > index ? r.targetStepIndex - 1 : r.targetStepIndex,
+      }))
+    step.dataLinksOut = step.dataLinksOut
+      .filter((l) => l.targetStepIndex !== index)
+      .map((l) => ({
+        ...l,
+        targetStepIndex: l.targetStepIndex !== null && l.targetStepIndex > index ? l.targetStepIndex - 1 : l.targetStepIndex,
       }))
   })
   selectedStepIndex.value = null
