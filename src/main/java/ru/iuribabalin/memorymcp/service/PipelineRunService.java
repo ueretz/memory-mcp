@@ -88,6 +88,8 @@ public class PipelineRunService {
             runStep.setStatus(PipelineRunStep.Status.PENDING);
             pipelineRunStepRepository.save(runStep);
         }
+        advancePastNonInteractiveSteps(run, steps);
+        pipelineRunRepository.save(run);
         return toDetail(run, pipeline.getSlug());
     }
 
@@ -116,6 +118,8 @@ public class PipelineRunService {
         if ((status == PipelineRunStep.Status.DONE || status == PipelineRunStep.Status.SKIPPED)
                 && runStep.getPipelineStepId() != null) {
             run.setCurrentStepOrderIndex(resolveNextOrderIndexForStatus(run.getPipelineId(), runStep.getPipelineStepId(), orderIndex, outcome, status));
+            List<PipelineStep> allSteps = pipelineStepRepository.findByPipelineIdOrderByOrderIndexAsc(run.getPipelineId());
+            advancePastNonInteractiveSteps(run, allSteps);
             pipelineRunRepository.save(run);
         }
         return toDetail(run, pipelineSlugOf(run));
@@ -266,6 +270,96 @@ public class PipelineRunService {
                 .map(PipelineStep::getOrderIndex)
                 .findFirst()
                 .orElse(null);
+    }
+
+    private void advancePastNonInteractiveSteps(PipelineRun run, List<PipelineStep> orderedSteps) {
+        while (run.getCurrentStepOrderIndex() != null) {
+            PipelineStep step = orderedSteps.get(run.getCurrentStepOrderIndex());
+            if (step.getContentType() == PipelineStep.ContentType.CONDITION) {
+                run.setCurrentStepOrderIndex(executeConditionStep(run, step));
+            } else if (step.getContentType() == PipelineStep.ContentType.VARIABLE) {
+                run.setCurrentStepOrderIndex(executeVariableStep(run, step));
+            } else {
+                return;
+            }
+        }
+    }
+
+    private Integer executeConditionStep(PipelineRun run, PipelineStep step) {
+        PipelineRunStep runStep = pipelineRunStepRepository.findByRunIdAndOrderIndex(run.getId(), step.getOrderIndex())
+                .orElseThrow(() -> new PipelineRunStepNotFoundException(run.getId(), step.getOrderIndex()));
+        String actualValue = resolveConditionInputValue(run, step);
+        boolean result = evaluateCondition(step.getConditionOperator(), actualValue, step.getConditionValue());
+        String outcome = result ? "true" : "false";
+        Instant now = Instant.now();
+        runStep.setStatus(PipelineRunStep.Status.DONE);
+        runStep.setStartedAt(now);
+        runStep.setFinishedAt(now);
+        runStep.setNote("Condition evaluated to " + outcome + " (" + actualValue + " " + step.getConditionOperator() + " " + step.getConditionValue() + ")");
+        pipelineRunStepRepository.save(runStep);
+        return resolveNextOrderIndex(run.getPipelineId(), step.getId(), step.getOrderIndex(), outcome);
+    }
+
+    private String resolveConditionInputValue(PipelineRun run, PipelineStep step) {
+        List<PipelineDataLink> incoming = pipelineDataLinkRepository.findByTargetStepIdIn(List.of(step.getId()));
+        if (incoming.isEmpty()) {
+            return "";
+        }
+        PipelineDataLink link = incoming.get(0);
+        return pipelineRunStepRepository.findByRunIdAndPipelineStepId(run.getId(), link.getSourceStepId())
+                .flatMap(sourceRunStep -> pipelineRunStepOutputRepository.findByRunStepIdAndOutputId(sourceRunStep.getId(), link.getSourceOutputId()))
+                .map(PipelineRunStepOutput::getValue)
+                .orElse("");
+    }
+
+    private boolean evaluateCondition(PipelineStep.ConditionOperator operator, String actualValue, String comparand) {
+        if (operator == PipelineStep.ConditionOperator.EQUALS) {
+            return actualValue.equals(comparand);
+        }
+        Double actualNumber = parseNumberOrNull(actualValue);
+        Double comparandNumber = parseNumberOrNull(comparand);
+        if (actualNumber == null || comparandNumber == null) {
+            return false;
+        }
+        return switch (operator) {
+            case GREATER_THAN -> actualNumber > comparandNumber;
+            case LESS_THAN -> actualNumber < comparandNumber;
+            case GREATER_OR_EQUAL -> actualNumber >= comparandNumber;
+            case LESS_OR_EQUAL -> actualNumber <= comparandNumber;
+            default -> false;
+        };
+    }
+
+    private Double parseNumberOrNull(String value) {
+        try {
+            return Double.parseDouble(value);
+        } catch (NumberFormatException ex) {
+            return null;
+        }
+    }
+
+    private Integer executeVariableStep(PipelineRun run, PipelineStep step) {
+        PipelineRunStep runStep = pipelineRunStepRepository.findByRunIdAndOrderIndex(run.getId(), step.getOrderIndex())
+                .orElseThrow(() -> new PipelineRunStepNotFoundException(run.getId(), step.getOrderIndex()));
+        Instant now = Instant.now();
+        runStep.setStatus(PipelineRunStep.Status.DONE);
+        runStep.setStartedAt(now);
+        runStep.setFinishedAt(now);
+        runStep.setNote("Variable set to its configured value");
+        pipelineRunStepRepository.save(runStep);
+
+        List<PipelineStepOutput> outputs = pipelineStepOutputRepository.findByStepId(step.getId());
+        if (!outputs.isEmpty()) {
+            PipelineStepOutput output = outputs.get(0);
+            PipelineRunStepOutput runStepOutput = pipelineRunStepOutputRepository
+                    .findByRunStepIdAndOutputId(runStep.getId(), output.getId())
+                    .orElseGet(PipelineRunStepOutput::new);
+            runStepOutput.setRunStepId(runStep.getId());
+            runStepOutput.setOutputId(output.getId());
+            runStepOutput.setValue(step.getPromptText());
+            pipelineRunStepOutputRepository.save(runStepOutput);
+        }
+        return resolveNextOrderIndex(run.getPipelineId(), step.getId(), step.getOrderIndex(), null);
     }
 
     private PipelineRunSummary toSummary(PipelineRun run, String pipelineSlug) {

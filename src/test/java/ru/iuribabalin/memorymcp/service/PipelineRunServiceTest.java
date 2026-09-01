@@ -295,4 +295,119 @@ class PipelineRunServiceTest {
 
         assertThat(run.steps().get(0).resolvedInstructionText()).isEqualTo("Diff {{folder}}");
     }
+
+    private void createConditionPipeline(String slug, PipelineStep.ConditionOperator operator, String conditionValue) {
+        pipelineService.create(new PipelineUpsertRequest(
+                slug, "Condition run", "desc", "pipeline-run-svc-test-project",
+                List.of(),
+                List.of(
+                        new PipelineUpsertRequest.StepRequest("Score", PipelineStep.ContentType.PROMPT, "score it",
+                                null, null, 0, 0,
+                                List.of(new PipelineUpsertRequest.StepRequest.RouteRequest(null, 1)),
+                                List.of(new PipelineUpsertRequest.StepRequest.OutputRequest("score")),
+                                List.of(new PipelineUpsertRequest.StepRequest.DataLinkRequest("tok-1", "score", 1)),
+                                null, null),
+                        new PipelineUpsertRequest.StepRequest("Check score", PipelineStep.ContentType.CONDITION, null,
+                                null, null, 0, 0,
+                                List.of(new PipelineUpsertRequest.StepRequest.RouteRequest("true", 2),
+                                        new PipelineUpsertRequest.StepRequest.RouteRequest("false", 3)),
+                                List.of(), List.of(), operator, conditionValue),
+                        new PipelineUpsertRequest.StepRequest("Deploy", PipelineStep.ContentType.PROMPT, "deploy it",
+                                null, null, 0, 0, List.of(), List.of(), List.of(), null, null),
+                        new PipelineUpsertRequest.StepRequest("Rollback", PipelineStep.ContentType.PROMPT, "rollback it",
+                                null, null, 0, 0, List.of(), List.of(), List.of(), null, null))
+        ), "Tester");
+    }
+
+    @Test
+    void conditionEvaluatingTrueRoutesToTheTrueBranchWithoutClaudeSeeingTheConditionStep() {
+        createConditionPipeline("cond-run-1", PipelineStep.ConditionOperator.GREATER_THAN, "10");
+        PipelineRunDetail run = pipelineRunService.start("cond-run-1", "{}", "Tester");
+        assertThat(run.currentStepOrderIndex()).isZero();
+
+        PipelineRunDetail updated = pipelineRunService.updateStep(run.id(), 0, PipelineRunStep.Status.DONE, "ok", null, "{\"score\":\"20\"}");
+
+        assertThat(updated.currentStepOrderIndex()).isEqualTo(2);
+        assertThat(updated.steps().get(1).status()).isEqualTo(PipelineRunStep.Status.DONE);
+    }
+
+    @Test
+    void conditionEvaluatingFalseRoutesToTheFalseBranch() {
+        createConditionPipeline("cond-run-2", PipelineStep.ConditionOperator.GREATER_THAN, "10");
+        PipelineRunDetail run = pipelineRunService.start("cond-run-2", "{}", "Tester");
+
+        PipelineRunDetail updated = pipelineRunService.updateStep(run.id(), 0, PipelineRunStep.Status.DONE, "ok", null, "{\"score\":\"5\"}");
+
+        assertThat(updated.currentStepOrderIndex()).isEqualTo(3);
+    }
+
+    @Test
+    void conditionWithUnparseableNumericInputEvaluatesFalse() {
+        createConditionPipeline("cond-run-3", PipelineStep.ConditionOperator.GREATER_THAN, "10");
+        PipelineRunDetail run = pipelineRunService.start("cond-run-3", "{}", "Tester");
+
+        PipelineRunDetail updated = pipelineRunService.updateStep(run.id(), 0, PipelineRunStep.Status.DONE, "ok", null, "{\"score\":\"not-a-number\"}");
+
+        assertThat(updated.currentStepOrderIndex()).isEqualTo(3);
+    }
+
+    @Test
+    void conditionUsesEqualsOnRawStrings() {
+        createConditionPipeline("cond-run-4", PipelineStep.ConditionOperator.EQUALS, "yes");
+        PipelineRunDetail run = pipelineRunService.start("cond-run-4", "{}", "Tester");
+
+        PipelineRunDetail updated = pipelineRunService.updateStep(run.id(), 0, PipelineRunStep.Status.DONE, "ok", null, "{\"score\":\"yes\"}");
+
+        assertThat(updated.currentStepOrderIndex()).isEqualTo(2);
+    }
+
+    @Test
+    void variableAsTheRootStepAutoExecutesBeforeStartReturns() {
+        pipelineService.create(new PipelineUpsertRequest(
+                "var-run-1", "Variable run", "desc", "pipeline-run-svc-test-project",
+                List.of(),
+                List.of(
+                        new PipelineUpsertRequest.StepRequest("Greeting", PipelineStep.ContentType.VARIABLE, "hello",
+                                null, null, 0, 0, List.of(),
+                                List.of(new PipelineUpsertRequest.StepRequest.OutputRequest("greeting")),
+                                List.of(new PipelineUpsertRequest.StepRequest.DataLinkRequest("tok-2", "greeting", 1)),
+                                null, null),
+                        new PipelineUpsertRequest.StepRequest("Use it", PipelineStep.ContentType.PROMPT, "say {{data:tok-2}}",
+                                null, null, 0, 0, List.of(), List.of(), List.of(), null, null))
+        ), "Tester");
+
+        PipelineRunDetail run = pipelineRunService.start("var-run-1", "{}", "Tester");
+
+        assertThat(run.currentStepOrderIndex()).isEqualTo(1);
+        assertThat(run.steps().get(0).status()).isEqualTo(PipelineRunStep.Status.DONE);
+        assertThat(run.steps().get(1).resolvedInstructionText()).isEqualTo("say hello");
+    }
+
+    @Test
+    void consecutiveVariableAndConditionStepsAllAutoAdvanceInOneCall() {
+        pipelineService.create(new PipelineUpsertRequest(
+                "chain-run-1", "Chained auto steps", "desc", "pipeline-run-svc-test-project",
+                List.of(),
+                List.of(
+                        new PipelineUpsertRequest.StepRequest("Set threshold", PipelineStep.ContentType.VARIABLE, "5",
+                                null, null, 0, 0,
+                                List.of(new PipelineUpsertRequest.StepRequest.RouteRequest(null, 1)),
+                                List.of(new PipelineUpsertRequest.StepRequest.OutputRequest("threshold")),
+                                List.of(new PipelineUpsertRequest.StepRequest.DataLinkRequest("tok-3", "threshold", 1)),
+                                null, null),
+                        new PipelineUpsertRequest.StepRequest("Check threshold", PipelineStep.ContentType.CONDITION, null,
+                                null, null, 0, 0,
+                                List.of(new PipelineUpsertRequest.StepRequest.RouteRequest("true", 2),
+                                        new PipelineUpsertRequest.StepRequest.RouteRequest("false", null)),
+                                List.of(), List.of(), PipelineStep.ConditionOperator.EQUALS, "5"),
+                        new PipelineUpsertRequest.StepRequest("Notify", PipelineStep.ContentType.PROMPT, "notify",
+                                null, null, 0, 0, List.of(), List.of(), List.of(), null, null))
+        ), "Tester");
+
+        PipelineRunDetail run = pipelineRunService.start("chain-run-1", "{}", "Tester");
+
+        assertThat(run.currentStepOrderIndex()).isEqualTo(2);
+        assertThat(run.steps().get(0).status()).isEqualTo(PipelineRunStep.Status.DONE);
+        assertThat(run.steps().get(1).status()).isEqualTo(PipelineRunStep.Status.DONE);
+    }
 }
