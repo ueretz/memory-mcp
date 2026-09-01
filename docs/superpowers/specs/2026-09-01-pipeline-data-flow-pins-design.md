@@ -182,10 +182,16 @@ public record StepRequest(
 `dataLinksOut` lives on the source step, mirroring how `routes` already represents outgoing edges
 on their source step. `token` is the client-generated UUID already embedded in the target step's
 `promptText` (decision 6) - `PipelineService` stores it verbatim, it does not generate its own.
-`PipelineService` persists steps first (to get real ids), then outputs (need step ids), then
-resolves `dataLinksOut` indices to real target step ids and runs section 2's validation before
-committing - same two-phase save routes already use. A duplicate `token` on update (unchanged link,
-already existing) is an upsert-by-token, not a new row.
+`PipelineService.replaceParametersAndSteps` already deletes and recreates every step/route on
+**every** save (not an incremental diff/upsert) - outputs and data links follow the same
+delete-and-recreate convention (cascades via `ON DELETE CASCADE` when steps are deleted, then
+recreated fresh from the request). `PipelineService` persists steps first (to get real ids), then
+outputs (need step ids), then resolves `dataLinksOut` indices to real target step ids and runs
+section 2's validation before committing. Because the frontend reloads `token` values from
+`PipelineDetail` on every edit-session start (`loadForEdit`) and keeps them in local state across
+saves, the same token is submitted again on a follow-up save of an unchanged link, and a fresh row
+with that same token is created - never a problem, since the old row was already cascade-deleted
+along with its step.
 
 `PipelineDetail.PipelineStepView` (read side) gains matching `outputs: List<OutputView(Long id,
 String name)>` and `dataLinksOut: List<DataLinkView(Long id, String token, String sourceOutputName,
