@@ -445,6 +445,11 @@ public class PipelineService {
         pipelineStepOutputRepository.deleteByStepIdIn(existingStepIds);
         pipelineStepRouteRepository.deleteByStepIdIn(existingStepIds);
         pipelineStepRepository.deleteByPipelineId(pipelineId);
+        // The derived deleteBy* queries remove entities through the persistence context, and
+        // Hibernate flushes INSERTs before DELETEs. Without an explicit flush the re-created data
+        // links (same client-generated token as the rows being removed) would hit
+        // ux_pipeline_data_links_token while the old rows still exist.
+        pipelineStepRepository.flush();
 
         List<PipelineStep> savedSteps = new ArrayList<>();
         int stepIndex = 0;

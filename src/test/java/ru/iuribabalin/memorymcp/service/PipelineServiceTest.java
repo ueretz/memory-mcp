@@ -234,6 +234,30 @@ class PipelineServiceTest {
     }
 
     @Test
+    void resavingAPipelineKeepsItsDataLinkTokens() {
+        // The board resubmits every existing link with the same client-generated token on each
+        // save. Deleting the old rows and inserting the new ones in one flush must not trip the
+        // unique token index - the old rows have to be gone before the new ones are written.
+        PipelineUpsertRequest request = new PipelineUpsertRequest(
+                "data-link-resave", "Data link pipeline", "desc", "pipeline-svc-test-project",
+                List.of(),
+                List.of(
+                        new PipelineUpsertRequest.StepRequest("Summarize", PipelineStep.ContentType.PROMPT, "summarize it",
+                                null, null, 0, 0, List.of(),
+                                List.of(new PipelineUpsertRequest.StepRequest.OutputRequest("summary")),
+                                List.of(new PipelineUpsertRequest.StepRequest.DataLinkRequest("tok-resave", "summary", 1)), null, null),
+                        new PipelineUpsertRequest.StepRequest("Report", PipelineStep.ContentType.PROMPT, "use {{data:tok-resave}}",
+                                null, null, 0, 0, List.of(), List.of(), List.of(), null, null)));
+        pipelineService.create(request, "Tester");
+
+        PipelineDetail detail = pipelineService.update("data-link-resave", request);
+
+        assertThat(detail.steps().get(0).dataLinksOut())
+                .extracting(PipelineDetail.PipelineStepView.DataLinkView::token)
+                .containsExactly("tok-resave");
+    }
+
+    @Test
     void savesAndReadsBackOutputsAndDataLinks() {
         PipelineUpsertRequest request = new PipelineUpsertRequest(
                 "data-link-1", "Data link pipeline", "desc", "pipeline-svc-test-project",
