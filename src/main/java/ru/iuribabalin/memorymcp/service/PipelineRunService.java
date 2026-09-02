@@ -21,10 +21,14 @@ import ru.iuribabalin.memorymcp.repository.PipelineRunStepRepository;
 import ru.iuribabalin.memorymcp.repository.PipelineStepOutputRepository;
 import ru.iuribabalin.memorymcp.repository.PipelineStepRepository;
 import ru.iuribabalin.memorymcp.repository.PipelineStepRouteRepository;
+import tools.jackson.core.type.TypeReference;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
 import java.time.Instant;
+import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.Deque;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -81,7 +85,8 @@ public class PipelineRunService {
         run.setParametersJson(parametersJson);
         run.setStartedAt(now);
         run.setStartedBy(startedBy);
-        run.setCurrentStepOrderIndex(resolveRootOrderIndex(steps));
+        Integer root = resolveRootOrderIndex(steps);
+        run.setCurrentStepOrderIndex(root);
         run = pipelineRunRepository.save(run);
         for (PipelineStep step : steps) {
             PipelineRunStep runStep = new PipelineRunStep();
@@ -93,7 +98,10 @@ public class PipelineRunService {
             runStep.setStatus(PipelineRunStep.Status.PENDING);
             pipelineRunStepRepository.save(runStep);
         }
-        advancePastNonInteractiveSteps(run, steps);
+        // Start from an empty active set: activate() decides what is actually active (the root may
+        // be a server-executed step that immediately hands over to its successor).
+        setActiveSteps(run, List.of());
+        activate(run, steps, root == null ? List.of() : List.of(root));
         pipelineRunRepository.save(run);
         return toDetail(run, pipeline.getSlug());
     }
@@ -101,7 +109,10 @@ public class PipelineRunService {
     @Transactional
     public PipelineRunDetail updateStep(Long runId, int orderIndex, PipelineRunStep.Status status, String note,
                                          String outcome, String outputsJson) {
-        PipelineRun run = resolve(runId);
+        // Row lock: parallel branches report back concurrently and each report rewrites the run's
+        // active-step set, so two updates must not interleave their read-modify-write.
+        PipelineRun run = pipelineRunRepository.findByIdForUpdate(runId)
+                .orElseThrow(() -> new PipelineRunNotFoundException(runId));
         PipelineRunStep runStep = pipelineRunStepRepository.findByRunIdAndOrderIndex(runId, orderIndex)
                 .orElseThrow(() -> new PipelineRunStepNotFoundException(runId, orderIndex));
         Instant now = Instant.now();
@@ -122,9 +133,12 @@ public class PipelineRunService {
 
         if ((status == PipelineRunStep.Status.DONE || status == PipelineRunStep.Status.SKIPPED)
                 && runStep.getPipelineStepId() != null) {
-            run.setCurrentStepOrderIndex(resolveNextOrderIndexForStatus(run.getPipelineId(), runStep.getPipelineStepId(), orderIndex, outcome, status));
+            List<Integer> active = activeSteps(run);
+            active.remove(Integer.valueOf(orderIndex));
+            setActiveSteps(run, active);
+            Integer next = resolveNextOrderIndexForStatus(run.getPipelineId(), runStep.getPipelineStepId(), orderIndex, outcome, status);
             List<PipelineStep> allSteps = pipelineStepRepository.findByPipelineIdOrderByOrderIndexAsc(run.getPipelineId());
-            advancePastNonInteractiveSteps(run, allSteps);
+            activate(run, allSteps, next == null ? List.of() : List.of(next));
             pipelineRunRepository.save(run);
         }
         return toDetail(run, pipelineSlugOf(run));
@@ -277,17 +291,121 @@ public class PipelineRunService {
                 .orElse(null);
     }
 
-    private void advancePastNonInteractiveSteps(PipelineRun run, List<PipelineStep> orderedSteps) {
-        while (run.getCurrentStepOrderIndex() != null) {
-            PipelineStep step = orderedSteps.get(run.getCurrentStepOrderIndex());
-            if (step.getContentType() == PipelineStep.ContentType.CONDITION) {
-                run.setCurrentStepOrderIndex(executeConditionStep(run, step));
-            } else if (step.getContentType() == PipelineStep.ContentType.VARIABLE) {
-                run.setCurrentStepOrderIndex(executeVariableStep(run, step));
-            } else {
-                return;
+    // ---- Active-step set ---------------------------------------------------------------------
+    // A run tracks the SET of steps Claude should be working on. Sequential pipelines keep exactly
+    // one; a PARALLEL step fans out to several, a JOIN step folds them back. currentStepOrderIndex
+    // mirrors the first active step so callers built for the single-pointer model keep working.
+
+    private static final TypeReference<List<Integer>> INT_LIST = new TypeReference<>() {
+    };
+
+    List<Integer> activeSteps(PipelineRun run) {
+        if (run.getActiveStepsJson() == null) {
+            return run.getCurrentStepOrderIndex() == null
+                    ? new ArrayList<>()
+                    : new ArrayList<>(List.of(run.getCurrentStepOrderIndex()));
+        }
+        try {
+            return new ArrayList<>(objectMapper.readValue(run.getActiveStepsJson(), INT_LIST));
+        } catch (Exception ex) {
+            return new ArrayList<>();
+        }
+    }
+
+    private void setActiveSteps(PipelineRun run, List<Integer> active) {
+        List<Integer> sorted = active.stream().distinct().sorted().toList();
+        run.setActiveStepsJson(objectMapper.writeValueAsString(sorted));
+        run.setCurrentStepOrderIndex(sorted.isEmpty() ? null : sorted.get(0));
+    }
+
+    /**
+     * Walks forward from {@code initial}: server-executed steps (CONDITION, VARIABLE, PARALLEL, JOIN)
+     * run immediately and enqueue whatever they lead to; PROMPT / MD_FILE steps become active and
+     * wait for Claude. Terminates because the route graph is validated acyclic at save time.
+     */
+    private void activate(PipelineRun run, List<PipelineStep> orderedSteps, List<Integer> initial) {
+        List<Integer> active = activeSteps(run);
+        Deque<Integer> queue = new ArrayDeque<>(initial);
+        while (!queue.isEmpty()) {
+            int index = queue.poll();
+            PipelineStep step = orderedSteps.get(index);
+            if (step.getContentType() != PipelineStep.ContentType.PROMPT && step.getContentType() != PipelineStep.ContentType.MD_FILE) {
+                active.remove(Integer.valueOf(index));
+            }
+            switch (step.getContentType()) {
+                case CONDITION -> enqueue(queue, executeConditionStep(run, step));
+                case VARIABLE -> enqueue(queue, executeVariableStep(run, step));
+                case PARALLEL -> executeParallelStep(run, step, orderedSteps).forEach(queue::add);
+                case JOIN -> enqueue(queue, executeJoinStep(run, step, orderedSteps));
+                default -> {
+                    boolean pending = pipelineRunStepRepository.findByRunIdAndOrderIndex(run.getId(), index)
+                            .map(rs -> rs.getStatus() == PipelineRunStep.Status.PENDING)
+                            .orElse(false);
+                    if (pending && !active.contains(index)) {
+                        active.add(index);
+                    }
+                }
             }
         }
+        setActiveSteps(run, active);
+    }
+
+    private static void enqueue(Deque<Integer> queue, Integer index) {
+        if (index != null) {
+            queue.add(index);
+        }
+    }
+
+    /** Marks the fan-out step done and returns every branch start - all of them run at once. */
+    private List<Integer> executeParallelStep(PipelineRun run, PipelineStep step, List<PipelineStep> orderedSteps) {
+        PipelineRunStep runStep = pipelineRunStepRepository.findByRunIdAndOrderIndex(run.getId(), step.getOrderIndex())
+                .orElseThrow(() -> new PipelineRunStepNotFoundException(run.getId(), step.getOrderIndex()));
+        Map<Long, Integer> orderIndexById = orderedSteps.stream()
+                .collect(Collectors.toMap(PipelineStep::getId, PipelineStep::getOrderIndex));
+        List<Integer> branches = pipelineStepRouteRepository.findByStepId(step.getId()).stream()
+                .map(PipelineStepRoute::getTargetStepId)
+                .filter(Objects::nonNull)
+                .map(orderIndexById::get)
+                .filter(Objects::nonNull)
+                .distinct()
+                .toList();
+        Instant now = Instant.now();
+        runStep.setStatus(PipelineRunStep.Status.DONE);
+        runStep.setStartedAt(now);
+        runStep.setFinishedAt(now);
+        runStep.setNote("Запущено веток параллельно: " + branches.size());
+        pipelineRunStepRepository.save(runStep);
+        return branches;
+    }
+
+    /**
+     * Counts one more arriving branch. Completes (and returns its successor) only once every route
+     * that leads into this step has arrived; until then the step stays pending and returns null.
+     */
+    private Integer executeJoinStep(PipelineRun run, PipelineStep step, List<PipelineStep> orderedSteps) {
+        PipelineRunStep runStep = pipelineRunStepRepository.findByRunIdAndOrderIndex(run.getId(), step.getOrderIndex())
+                .orElseThrow(() -> new PipelineRunStepNotFoundException(run.getId(), step.getOrderIndex()));
+        if (runStep.getStatus() == PipelineRunStep.Status.DONE) {
+            return null;
+        }
+        long expected = pipelineStepRouteRepository.findByStepIdIn(orderedSteps.stream().map(PipelineStep::getId).toList()).stream()
+                .filter(r -> step.getId().equals(r.getTargetStepId()))
+                .count();
+        int arrived = runStep.getArrivedCount() + 1;
+        runStep.setArrivedCount(arrived);
+        if (runStep.getStartedAt() == null) {
+            runStep.setStartedAt(Instant.now());
+        }
+        if (arrived < expected) {
+            runStep.setNote("Ждёт ветки: " + arrived + " из " + expected);
+            pipelineRunStepRepository.save(runStep);
+            return null;
+        }
+        runStep.setStatus(PipelineRunStep.Status.DONE);
+        runStep.setFinishedAt(Instant.now());
+        runStep.setNote("Все ветки завершены: " + expected);
+        pipelineRunStepRepository.save(runStep);
+        return resolveNextOrderIndex(run.getPipelineId(), step.getId(), step.getOrderIndex(), null);
     }
 
     private Integer executeConditionStep(PipelineRun run, PipelineStep step) {
@@ -405,8 +523,24 @@ public class PipelineRunService {
     }
 
     private PipelineRunSummary toSummary(PipelineRun run, String pipelineSlug) {
+        List<PipelineRunStep> runSteps = pipelineRunStepRepository.findByRunIdOrderByOrderIndexAsc(run.getId());
+        Integer current = run.getCurrentStepOrderIndex();
+        String currentTitle = current == null ? null : runSteps.stream()
+                .filter(s -> s.getOrderIndex() == current)
+                .map(PipelineRunStep::getTitle)
+                .findFirst()
+                .orElse(null);
+        int done = (int) runSteps.stream()
+                .filter(s -> s.getStatus() == PipelineRunStep.Status.DONE || s.getStatus() == PipelineRunStep.Status.SKIPPED)
+                .count();
+        Map<Integer, String> titleByOrderIndex = runSteps.stream()
+                .collect(Collectors.toMap(PipelineRunStep::getOrderIndex, PipelineRunStep::getTitle));
+        List<PipelineRunSummary.ActiveStepView> activeViews = activeSteps(run).stream()
+                .map(i -> new PipelineRunSummary.ActiveStepView(i, titleByOrderIndex.getOrDefault(i, "")))
+                .toList();
         return new PipelineRunSummary(run.getId(), run.getPipelineId(), pipelineSlug, run.getStatus(),
-                run.getStartedAt(), run.getFinishedAt(), run.getStartedBy());
+                run.getStartedAt(), run.getFinishedAt(), run.getStartedBy(),
+                current, currentTitle, done, runSteps.size(), activeViews);
     }
 
     private PipelineRunDetail toDetail(PipelineRun run, String pipelineSlug) {
@@ -441,7 +575,7 @@ public class PipelineRunService {
                 .toList();
         return new PipelineRunDetail(run.getId(), run.getPipelineId(), pipelineSlug, run.getStatus(),
                 run.getParametersJson(), run.getStartedAt(), run.getFinishedAt(), run.getStartedBy(),
-                run.getCurrentStepOrderIndex(), steps);
+                run.getCurrentStepOrderIndex(), steps, activeSteps(run));
     }
 
     private String resolveInstructionText(PipelineRunStep runStep, Map<Long, PipelineStep> stepById,

@@ -216,7 +216,8 @@ public class PipelineService {
         for (int i = 0; i < n; i++) {
             List<PipelineUpsertRequest.StepRequest.RouteRequest> routes = steps.get(i).routes();
             long defaultRoutes = routes.stream().filter(r -> r.outcomeKey() == null).count();
-            if (defaultRoutes > 1) {
+            // A PARALLEL step's routes are all unkeyed on purpose - every one of them fires.
+            if (defaultRoutes > 1 && steps.get(i).contentType() != PipelineStep.ContentType.PARALLEL) {
                 throw new PipelineInvalidGraphException(
                         "Step '" + steps.get(i).title() + "' has more than one default route");
             }
@@ -410,7 +411,39 @@ public class PipelineService {
                 validateConditionStep(step, incomingDataLinkCount[i]);
             } else if (step.contentType() == PipelineStep.ContentType.VARIABLE) {
                 validateVariableStep(step);
+            } else if (step.contentType() == PipelineStep.ContentType.PARALLEL) {
+                validateParallelStep(step, incomingDataLinkCount[i]);
+            } else if (step.contentType() == PipelineStep.ContentType.JOIN) {
+                validateJoinStep(step, incomingDataLinkCount[i]);
             }
+        }
+    }
+
+    private void validateParallelStep(PipelineUpsertRequest.StepRequest step, int incomingDataLinkCount) {
+        long wired = step.routes().stream().filter(r -> r.targetStepIndex() != null).count();
+        if (wired < 1) {
+            throw new PipelineInvalidGraphException(
+                    "Step '" + step.title() + "' is type PARALLEL and needs at least one branch wired to a step");
+        }
+        if (step.routes().stream().anyMatch(r -> r.outcomeKey() != null)) {
+            throw new PipelineInvalidGraphException(
+                    "Step '" + step.title() + "' is type PARALLEL - its branches cannot have outcome keys, every branch always runs");
+        }
+        if (!step.outputs().isEmpty() || incomingDataLinkCount != 0) {
+            throw new PipelineInvalidGraphException(
+                    "Step '" + step.title() + "' is type PARALLEL and carries no data - it can have neither outputs nor incoming data links");
+        }
+    }
+
+    private void validateJoinStep(PipelineUpsertRequest.StepRequest step, int incomingDataLinkCount) {
+        boolean hasNamedRoute = step.routes().stream().anyMatch(r -> r.outcomeKey() != null);
+        if (step.routes().size() > 1 || hasNamedRoute) {
+            throw new PipelineInvalidGraphException(
+                    "Step '" + step.title() + "' is type JOIN and can have at most one route, with no outcome key");
+        }
+        if (!step.outputs().isEmpty() || incomingDataLinkCount != 0) {
+            throw new PipelineInvalidGraphException(
+                    "Step '" + step.title() + "' is type JOIN and carries no data - it can have neither outputs nor incoming data links");
         }
     }
 

@@ -580,4 +580,51 @@ class PipelineServiceTest {
 
         assertThat(detail.parameterLinks()).extracting(PipelineDetail.PipelineParameterLinkView::parameterName).containsExactly("count");
     }
+
+    @Test
+    void rejectsAParallelStepWithKeyedBranchesOrNoWiredBranch() {
+        PipelineUpsertRequest keyed = new PipelineUpsertRequest(
+                "parallel-1", "Parallel", "desc", "pipeline-svc-test-project", List.of(),
+                List.of(
+                        new PipelineUpsertRequest.StepRequest("Fan out", PipelineStep.ContentType.PARALLEL, null,
+                                null, null, 0, 0,
+                                List.of(new PipelineUpsertRequest.StepRequest.RouteRequest("a", 1)),
+                                List.of(), List.of(), null, null),
+                        new PipelineUpsertRequest.StepRequest("Work", PipelineStep.ContentType.PROMPT, "work",
+                                null, null, 0, 0, List.of(), List.of(), List.of(), null, null)));
+        assertThatThrownBy(() -> pipelineService.create(keyed, "Tester"))
+                .isInstanceOf(PipelineInvalidGraphException.class)
+                .hasMessageContaining("outcome keys");
+
+        PipelineUpsertRequest unwired = new PipelineUpsertRequest(
+                "parallel-2", "Parallel", "desc", "pipeline-svc-test-project", List.of(),
+                List.of(
+                        new PipelineUpsertRequest.StepRequest("Fan out", PipelineStep.ContentType.PARALLEL, null,
+                                null, null, 0, 0,
+                                List.of(new PipelineUpsertRequest.StepRequest.RouteRequest(null, null)),
+                                List.of(), List.of(), null, null)));
+        assertThatThrownBy(() -> pipelineService.create(unwired, "Tester"))
+                .isInstanceOf(PipelineInvalidGraphException.class)
+                .hasMessageContaining("at least one branch");
+    }
+
+    @Test
+    void aParallelStepMayHaveSeveralUnkeyedRoutes() {
+        PipelineUpsertRequest request = new PipelineUpsertRequest(
+                "parallel-3", "Parallel", "desc", "pipeline-svc-test-project", List.of(),
+                List.of(
+                        new PipelineUpsertRequest.StepRequest("Fan out", PipelineStep.ContentType.PARALLEL, null,
+                                null, null, 0, 0,
+                                List.of(new PipelineUpsertRequest.StepRequest.RouteRequest(null, 1),
+                                        new PipelineUpsertRequest.StepRequest.RouteRequest(null, 2)),
+                                List.of(), List.of(), null, null),
+                        new PipelineUpsertRequest.StepRequest("A", PipelineStep.ContentType.PROMPT, "a",
+                                null, null, 0, 0, List.of(), List.of(), List.of(), null, null),
+                        new PipelineUpsertRequest.StepRequest("B", PipelineStep.ContentType.PROMPT, "b",
+                                null, null, 0, 0, List.of(), List.of(), List.of(), null, null)));
+
+        PipelineDetail detail = pipelineService.create(request, "Tester");
+
+        assertThat(detail.steps().get(0).routes()).hasSize(2);
+    }
 }

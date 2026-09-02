@@ -310,6 +310,10 @@ function removeOutput(stepIndex: number, outputIndex: number) {
 
 function addBranch(stepIndex: number) {
   const step = steps.value[stepIndex]
+  if (step.contentType === 'PARALLEL') {
+    step.routes.push({ outcomeKey: null, target: null })
+    return
+  }
   // The default "далее" port stays last; named branches go above it.
   step.routes.splice(step.routes.length - 1, 0, { outcomeKey: '', target: null })
 }

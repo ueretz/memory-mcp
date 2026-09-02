@@ -10,7 +10,8 @@ import {
   DEFAULT_ROUTE_LABEL,
   acceptsDataInput,
   hasEditableOutputs,
-  supportsNamedBranches,
+  hasOutputs,
+  supportsAddingPorts,
   type BoardStep,
 } from '@/lib/pipelineBoard'
 
@@ -64,7 +65,9 @@ const props = defineProps<
 >()
 
 const kind = computed(() => BLOCK_KIND_BY_TYPE[props.data.step.contentType])
-const canAddBranch = computed(() => supportsNamedBranches(props.data.step.contentType))
+const canAddBranch = computed(() => supportsAddingPorts(props.data.step.contentType))
+const isParallel = computed(() => props.data.step.contentType === 'PARALLEL')
+const showOutputs = computed(() => hasOutputs(props.data.step.contentType))
 const showDataIn = computed(() => acceptsDataInput(props.data.step.contentType))
 const editableOutputs = computed(() => hasEditableOutputs(props.data.step.contentType))
 const isCondition = computed(() => props.data.step.contentType === 'CONDITION')
@@ -149,6 +152,14 @@ function pinClassForRoute(outcomeKey: string | null): string {
         <p class="pl-hint">Публикуется как выход «{{ data.step.outputs[0]?.name || 'value' }}» сразу при запуске, без Claude.</p>
       </template>
 
+      <template v-else-if="data.step.contentType === 'PARALLEL'">
+        <p class="pl-hint">Все ветки стартуют одновременно: каждую выполняет отдельный суб-агент. Чтобы дождаться их и продолжить, соедините ветки с блоком «Ожидать все».</p>
+      </template>
+
+      <template v-else-if="data.step.contentType === 'JOIN'">
+        <p class="pl-hint">Ждёт, пока завершатся все входящие ветки, и только потом переходит дальше.</p>
+      </template>
+
       <label v-if="data.step.contentType === 'PROMPT' || data.step.contentType === 'MD_FILE'" class="pl-file pl-file-secondary">
         <input type="file" class="sr-only" @change="data.on.referenceFileChosen($event)" />
         <AppIcon name="link" class="size-3.5" />
@@ -182,7 +193,7 @@ function pinClassForRoute(outcomeKey: string | null): string {
 
       <div class="pl-port-group">
         <div class="pl-port-group-head">
-          <span class="pl-port-label">{{ isCondition ? 'Ветки' : 'Переходы' }}</span>
+          <span class="pl-port-label">{{ isCondition || isParallel ? 'Ветки' : 'Переходы' }}</span>
           <button v-if="canAddBranch" type="button" class="pl-text-btn nodrag" @click="data.on.addBranch()">
             <AppIcon name="plus" class="size-3" />ветка
           </button>
@@ -195,6 +206,12 @@ function pinClassForRoute(outcomeKey: string | null): string {
         >
           <template v-if="isCondition">
             <span class="pl-branch-key" :class="route.outcomeKey === 'true' ? 'pl-branch-true' : 'pl-branch-false'">{{ route.outcomeKey }}</span>
+          </template>
+          <template v-else-if="isParallel">
+            <span class="pl-branch-default">ветка {{ routeIndex + 1 }}</span>
+            <button v-if="data.step.routes.length > 1" type="button" class="pl-icon-btn pl-icon-btn-xs nodrag" title="Удалить ветку" @click="data.on.removeBranch(routeIndex)">
+              <AppIcon name="close" class="size-3" />
+            </button>
           </template>
           <template v-else-if="route.outcomeKey === null">
             <span class="pl-branch-default">{{ DEFAULT_ROUTE_LABEL }}</span>
@@ -233,7 +250,7 @@ function pinClassForRoute(outcomeKey: string | null): string {
         </div>
       </div>
 
-      <div v-if="!isCondition" class="pl-port-group">
+      <div v-if="showOutputs" class="pl-port-group">
         <div class="pl-port-group-head">
           <span class="pl-port-label">Выходы</span>
           <button v-if="editableOutputs" type="button" class="pl-text-btn nodrag" @click="data.on.addOutput()">

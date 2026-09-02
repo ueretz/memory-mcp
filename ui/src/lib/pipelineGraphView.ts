@@ -2,6 +2,7 @@ import { MarkerType } from '@vue-flow/core'
 
 import type { PipelineDetail, PipelineRunDetail, PipelineStepView } from '@/api/types'
 import { WIRE_COLORS } from '@/lib/pipelineBoard'
+import { isActiveStep, stageStatusFor, type StageStatus } from '@/lib/pipelineRuns'
 
 /**
  * Shared edge builder for the read-only status graphs (PipelineView, PipelineRunView).
@@ -93,13 +94,14 @@ export function buildViewEdges(pipeline: PipelineDetail, taken?: (spec: { source
  * run has nowhere left to go.
  */
 export function takenEdgePredicate(run: PipelineRunDetail) {
+  // (imports isActiveStep from pipelineRuns)
   const statusByOrderIndex = new Map(run.steps.map((s) => [s.orderIndex, s.status]))
   return ({ sourceOrderIndex, targetOrderIndex }: { sourceOrderIndex: number; targetOrderIndex: number | null }) => {
     const sourceStatus = statusByOrderIndex.get(sourceOrderIndex)
     if (sourceStatus !== 'DONE' && sourceStatus !== 'SKIPPED') return false
     if (targetOrderIndex === null) return run.currentStepOrderIndex === null
     const targetStatus = statusByOrderIndex.get(targetOrderIndex)
-    return targetStatus !== undefined && targetStatus !== 'PENDING' || run.currentStepOrderIndex === targetOrderIndex
+    return (targetStatus !== undefined && targetStatus !== 'PENDING') || isActiveStep(run, targetOrderIndex)
   }
 }
 
@@ -122,4 +124,48 @@ export function endNodePosition(pipeline: PipelineDetail, positions: Map<number,
   const maxX = Math.max(...steps.map((s) => positions.get(s.orderIndex)!.x))
   const ys = steps.filter((s) => positions.get(s.orderIndex)!.x === maxX).map((s) => positions.get(s.orderIndex)!.y)
   return { x: maxX + 300, y: Math.min(...ys) }
+}
+
+export interface StatusNode {
+  id: string
+  type: 'pipelineStep'
+  position: { x: number; y: number }
+  class?: string
+  data: {
+    label: string
+    status: StageStatus
+    contentType?: PipelineStepView['contentType']
+    current?: boolean
+    note?: string | null
+  }
+}
+
+/**
+ * Nodes for the read-only status graph: neutral when no run is selected, otherwise each step is
+ * colored by that run's progress and the step the run is standing on is marked current.
+ */
+export function buildStatusNodes(pipeline: PipelineDetail, run: PipelineRunDetail | null): StatusNode[] {
+  const positions = viewPositions(pipeline)
+  const runStepByOrderIndex = new Map(run?.steps.map((s) => [s.orderIndex, s]) ?? [])
+  const finished = run !== null && run.currentStepOrderIndex === null && run.status === 'DONE'
+  return [
+    ...pipeline.steps.map((step) => ({
+      id: String(step.orderIndex),
+      type: 'pipelineStep' as const,
+      position: positions.get(step.orderIndex)!,
+      data: {
+        label: `${step.orderIndex + 1}. ${step.title}`,
+        status: run ? stageStatusFor(run, step.orderIndex) : ('neutral' as StageStatus),
+        contentType: step.contentType,
+        current: run !== null && run.status === 'RUNNING' && isActiveStep(run, step.orderIndex),
+        note: runStepByOrderIndex.get(step.orderIndex)?.note ?? null,
+      },
+    })),
+    {
+      id: END_NODE_ID,
+      type: 'pipelineStep' as const,
+      position: endNodePosition(pipeline, positions),
+      data: { label: 'Конец', status: (finished ? 'done' : 'end') as StageStatus },
+    },
+  ]
 }

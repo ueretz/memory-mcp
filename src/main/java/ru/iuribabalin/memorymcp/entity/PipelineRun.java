@@ -43,6 +43,10 @@ public class PipelineRun {
     @Column(name = "current_step_order_index")
     private Integer currentStepOrderIndex;
 
+    /** JSON array of the order indexes currently active (see PipelineRunService); null for pre-V18 runs. */
+    @Column(name = "active_steps_json", columnDefinition = "text")
+    private String activeStepsJson;
+
     public Long getId() {
         return id;
     }
@@ -101,5 +105,13 @@ public class PipelineRun {
 
     public void setCurrentStepOrderIndex(Integer currentStepOrderIndex) {
         this.currentStepOrderIndex = currentStepOrderIndex;
+    }
+
+    public String getActiveStepsJson() {
+        return activeStepsJson;
+    }
+
+    public void setActiveStepsJson(String activeStepsJson) {
+        this.activeStepsJson = activeStepsJson;
     }
 }

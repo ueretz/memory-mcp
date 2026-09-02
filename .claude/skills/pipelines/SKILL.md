@@ -58,9 +58,10 @@ the only new part is checking state back into memory-mcp as you go.
    - Check that step's `outputs` (from `pipeline_get`, step 1). If non-empty, decide the values for
      each declared name and pass them as `outputsJson` on `pipeline_run_step_update` - a JSON object
      like `{"summary": "..."}`. Skip this if `outputs` is empty for that step.
-   - Read `currentStepOrderIndex` off the response: if it's a number, that's the next step to work
-     on (loop back to the top of this step). If it's `null`, every path from here has ended — go
-     to step 7 below and call `pipeline_run_complete`.
+   - Read `activeStepOrderIndexes` off the response: one entry means that's the next step to work
+     on (loop back to the top of this step); several entries mean parallel branches - see the
+     section below. An empty list means every path has ended — go to step 7 below and call
+     `pipeline_run_complete`.
 6. **On FAILED: stop.** Do not silently continue to the next step. Tell the user what failed and
    why, and ask how to proceed - retry the step, skip it, or abort the whole run
    (`pipeline_run_complete(runId, "ABORTED")`).
@@ -68,6 +69,34 @@ the only new part is checking state back into memory-mcp as you go.
    summary with a link to the dashboard's read-only run view:
    `{dashboardBaseUrl}/p/{projectScope}/pipelines/{slug}/runs/{runId}` (derive `dashboardBaseUrl`
    from the MCP server URL the user connected to, typically `http://localhost:8080`).
+
+## Parallel branches (several active steps at once)
+
+A pipeline may contain a **Параллельно** (PARALLEL) block: the server fans out to every branch at
+once, and a **Ожидать все** (JOIN) block waits until each branch has finished. Both are executed
+server-side; you never act on them directly. What changes for you: every run response carries
+`activeStepOrderIndexes` - the full list of steps to work on right now (`currentStepOrderIndex` is
+just its first entry, kept for compatibility).
+
+- **One active step** - proceed exactly as above.
+- **Several active steps** - run them concurrently, one sub-agent per step, in a single message:
+  1. For each active step call `pipeline_run_step_update(runId, orderIndex, "RUNNING")` so the
+     dashboard shows the branch in progress.
+  2. Dispatch one `Agent` per step (all in the same message so they run in parallel). Give each
+     sub-agent that step's `resolvedInstructionText`, its `referenceText` if any, the run
+     parameters, and the list of `outputs` it must produce. The sub-agent does the work and returns
+     a short result, the values for every declared output, and - if the step has more than one
+     route - the `outcome` key it picked. Sub-agents must NOT call pipeline tools themselves; you
+     record their results.
+  3. As each sub-agent reports back, call `pipeline_run_step_update(runId, orderIndex, "DONE", note,
+     outcome, outputsJson)` for that step (or `"FAILED"` - then stop and ask, as usual). Update the
+     checklist line.
+  4. Read `activeStepOrderIndexes` off the latest response: new steps may have appeared (a branch
+     continued, or the JOIN released the step after it). Repeat until the list is empty, then
+     complete the run.
+
+Branches that reach the end of the run on their own simply disappear from the active list; a JOIN
+that is still waiting is not listed either (it is not your step to work on).
 
 ## Resuming an interrupted run
 

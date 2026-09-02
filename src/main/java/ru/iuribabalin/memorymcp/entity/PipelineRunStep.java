@@ -50,6 +50,10 @@ public class PipelineRunStep {
     @Column(name = "finished_at")
     private Instant finishedAt;
 
+    /** JOIN steps only: how many incoming branches have reached this step so far in the run. */
+    @Column(name = "arrived_count", nullable = false)
+    private int arrivedCount;
+
     public Long getId() {
         return id;
     }
@@ -124,5 +128,13 @@ public class PipelineRunStep {
 
     public void setFinishedAt(Instant finishedAt) {
         this.finishedAt = finishedAt;
+    }
+
+    public int getArrivedCount() {
+        return arrivedCount;
+    }
+
+    public void setArrivedCount(int arrivedCount) {
+        this.arrivedCount = arrivedCount;
     }
 }

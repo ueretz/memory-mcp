@@ -71,6 +71,8 @@ export const BLOCK_KINDS: BlockKindMeta[] = [
   { kind: 'MD_FILE', label: 'MD-файл', description: 'Инструкция из загруженного файла', icon: 'document', color: '#2563eb' },
   { kind: 'CONDITION', label: 'Условие', description: 'Сравнивает значение и выбирает ветку', icon: 'branch', color: '#d97706' },
   { kind: 'VARIABLE', label: 'Переменная', description: 'Фиксированное значение как выход', icon: 'variable', color: '#0d9488' },
+  { kind: 'PARALLEL', label: 'Параллельно', description: 'Запускает все ветки одновременно, каждую — суб-агентом', icon: 'fanout', color: '#0ea5e9' },
+  { kind: 'JOIN', label: 'Ожидать все', description: 'Продолжает, когда все ветки завершились', icon: 'join', color: '#6366f1' },
 ]
 
 export const BLOCK_KIND_BY_TYPE: Record<PipelineStepContentType, BlockKindMeta> = Object.fromEntries(
@@ -95,7 +97,17 @@ export function supportsNamedBranches(kind: PipelineStepContentType): boolean {
 
 /** Does this kind of step take a data input wire? */
 export function acceptsDataInput(kind: PipelineStepContentType): boolean {
-  return kind !== 'VARIABLE'
+  return kind !== 'VARIABLE' && kind !== 'PARALLEL' && kind !== 'JOIN'
+}
+
+/** Does this kind of step publish data outputs at all? */
+export function hasOutputs(kind: PipelineStepContentType): boolean {
+  return kind !== 'CONDITION' && kind !== 'PARALLEL' && kind !== 'JOIN'
+}
+
+/** Can the author add/remove transition ports? (PROMPT/MD_FILE add keyed branches, PARALLEL adds unkeyed ones.) */
+export function supportsAddingPorts(kind: PipelineStepContentType): boolean {
+  return supportsNamedBranches(kind) || kind === 'PARALLEL'
 }
 
 /** Can the author add/remove data outputs on this kind of step? */
@@ -147,10 +159,16 @@ export function ensureFixedPorts(step: BoardStep): void {
     ]
     return
   }
+  if (step.contentType === 'PARALLEL') {
+    // Every port is an unkeyed branch that always fires; start with two so the fan-out is visible.
+    const branches = step.routes.filter((r) => r.outcomeKey === null)
+    step.routes = branches.length >= 2 ? branches : [...branches, ...Array.from({ length: 2 - branches.length }, () => ({ outcomeKey: null, target: null }) as BoardRoute)]
+    return
+  }
   const named = step.routes.filter((r) => r.outcomeKey !== null)
   const defaults = step.routes.filter((r) => r.outcomeKey === null)
   const defaultRoute = defaults[0] ?? { outcomeKey: null, target: null }
-  step.routes = step.contentType === 'VARIABLE' ? [defaultRoute] : [...named, defaultRoute]
+  step.routes = step.contentType === 'VARIABLE' || step.contentType === 'JOIN' ? [defaultRoute] : [...named, defaultRoute]
 }
 
 export function fromDetail(pipeline: PipelineDetail): BoardStep[] {
@@ -408,6 +426,12 @@ export function collectIssues(steps: BoardStep[], paramLinks: BoardParamLink[] =
       if (unwired.length > 0) {
         issues.push({ stepIndex: i, severity: 'warning', text: `«${title}»: ветка ${unwired.join(' и ')} не подключена — путь завершится` })
       }
+    }
+    if (step.contentType === 'PARALLEL' && !step.routes.some((r) => typeof r.target === 'number')) {
+      issues.push({ stepIndex: i, severity: 'error', text: `«${title}»: ни одна ветка не подключена к блоку` })
+    }
+    if (step.contentType === 'JOIN' && !steps.some((s) => s.routes.some((r) => r.target === i))) {
+      issues.push({ stepIndex: i, severity: 'warning', text: `«${title}»: в блок не входит ни одна ветка — ждать нечего` })
     }
     if (step.contentType === 'VARIABLE' && (!step.promptText || !step.promptText.trim())) {
       issues.push({ stepIndex: i, severity: 'error', text: `«${title}»: у переменной нет значения` })

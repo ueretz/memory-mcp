@@ -13,7 +13,12 @@ import jakarta.persistence.Table;
 @Table(name = "pipeline_steps")
 public class PipelineStep {
 
-    public enum ContentType { PROMPT, MD_FILE, CONDITION, VARIABLE }
+    /**
+     * PROMPT / MD_FILE are worked on by Claude. CONDITION, VARIABLE, PARALLEL and JOIN are executed by
+     * the server: PARALLEL activates every route target at once (branches run concurrently, one
+     * sub-agent each), JOIN waits until each of its incoming branches has arrived.
+     */
+    public enum ContentType { PROMPT, MD_FILE, CONDITION, VARIABLE, PARALLEL, JOIN }
 
     public enum ConditionOperator { EQUALS, GREATER_THAN, LESS_THAN, GREATER_OR_EQUAL, LESS_OR_EQUAL }
 

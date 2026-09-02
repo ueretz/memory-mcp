@@ -133,7 +133,7 @@ export interface SettingSummary {
 }
 
 export type PipelineParameterType = 'STRING' | 'NUMBER' | 'BOOLEAN'
-export type PipelineStepContentType = 'PROMPT' | 'MD_FILE' | 'CONDITION' | 'VARIABLE'
+export type PipelineStepContentType = 'PROMPT' | 'MD_FILE' | 'CONDITION' | 'VARIABLE' | 'PARALLEL' | 'JOIN'
 export type PipelineConditionOperator = 'EQUALS' | 'GREATER_THAN' | 'LESS_THAN' | 'GREATER_OR_EQUAL' | 'LESS_OR_EQUAL'
 export type PipelineRunStatus = 'RUNNING' | 'DONE' | 'FAILED' | 'ABORTED'
 export type PipelineRunStepStatus = 'PENDING' | 'RUNNING' | 'DONE' | 'FAILED' | 'SKIPPED'
@@ -287,6 +287,11 @@ export interface PipelineRunSummary {
   startedAt: string
   finishedAt: string | null
   startedBy: string | null
+  currentStepOrderIndex: number | null
+  currentStepTitle: string | null
+  doneStepCount: number
+  totalStepCount: number
+  activeSteps: { orderIndex: number; title: string }[]
 }
 
 export interface PipelineRunStepView {
@@ -312,4 +317,6 @@ export interface PipelineRunDetail {
   startedBy: string | null
   currentStepOrderIndex: number | null
   steps: PipelineRunStepView[]
+  /** Every step being worked on right now - several while parallel branches are in flight. */
+  activeStepOrderIndexes: number[]
 }

@@ -460,4 +460,69 @@ class PipelineRunServiceTest {
         assertThat(pipelineRunService.start("param-cond-1", "{\"count\":\"20\"}", "Tester").currentStepOrderIndex()).isEqualTo(1);
         assertThat(pipelineRunService.start("param-cond-1", "{\"count\":5}", "Tester").currentStepOrderIndex()).isEqualTo(2);
     }
+
+    private PipelineUpsertRequest.StepRequest prompt(String title, List<PipelineUpsertRequest.StepRequest.RouteRequest> routes) {
+        return new PipelineUpsertRequest.StepRequest(title, PipelineStep.ContentType.PROMPT, title.toLowerCase(),
+                null, null, 0, 0, routes, List.of(), List.of(), null, null);
+    }
+
+    private void createForkJoinPipeline(String slug) {
+        // 0 Collect -> 1 PARALLEL -> {2 Lint, 3 Test} -> 4 JOIN -> 5 Report -> end
+        pipelineService.create(new PipelineUpsertRequest(
+                slug, "Fork/join", "desc", "pipeline-run-svc-test-project",
+                List.of(),
+                List.of(
+                        prompt("Collect", List.of(new PipelineUpsertRequest.StepRequest.RouteRequest(null, 1))),
+                        new PipelineUpsertRequest.StepRequest("Fan out", PipelineStep.ContentType.PARALLEL, null,
+                                null, null, 0, 0,
+                                List.of(new PipelineUpsertRequest.StepRequest.RouteRequest(null, 2),
+                                        new PipelineUpsertRequest.StepRequest.RouteRequest(null, 3)),
+                                List.of(), List.of(), null, null),
+                        prompt("Lint", List.of(new PipelineUpsertRequest.StepRequest.RouteRequest(null, 4))),
+                        prompt("Test", List.of(new PipelineUpsertRequest.StepRequest.RouteRequest(null, 4))),
+                        new PipelineUpsertRequest.StepRequest("Wait for all", PipelineStep.ContentType.JOIN, null,
+                                null, null, 0, 0,
+                                List.of(new PipelineUpsertRequest.StepRequest.RouteRequest(null, 5)),
+                                List.of(), List.of(), null, null),
+                        prompt("Report", List.of(new PipelineUpsertRequest.StepRequest.RouteRequest(null, null))))
+        ), "Tester");
+    }
+
+    @Test
+    void parallelStepActivatesEveryBranchAndJoinWaitsForAllOfThem() {
+        createForkJoinPipeline("fork-join-1");
+        PipelineRunDetail run = pipelineRunService.start("fork-join-1", "{}", "Tester");
+        assertThat(run.activeStepOrderIndexes()).containsExactly(0);
+
+        PipelineRunDetail forked = pipelineRunService.updateStep(run.id(), 0, PipelineRunStep.Status.DONE, "ok", null, null);
+        assertThat(forked.activeStepOrderIndexes()).containsExactly(2, 3);
+        assertThat(forked.currentStepOrderIndex()).isEqualTo(2);
+        assertThat(forked.steps().get(1).status()).isEqualTo(PipelineRunStep.Status.DONE);
+
+        PipelineRunDetail oneDone = pipelineRunService.updateStep(run.id(), 3, PipelineRunStep.Status.DONE, "tests green", null, null);
+        assertThat(oneDone.activeStepOrderIndexes()).containsExactly(2);
+        assertThat(oneDone.steps().get(4).status()).isEqualTo(PipelineRunStep.Status.PENDING);
+        assertThat(oneDone.steps().get(4).note()).contains("1 из 2");
+
+        PipelineRunDetail joined = pipelineRunService.updateStep(run.id(), 2, PipelineRunStep.Status.DONE, "lint clean", null, null);
+        assertThat(joined.steps().get(4).status()).isEqualTo(PipelineRunStep.Status.DONE);
+        assertThat(joined.activeStepOrderIndexes()).containsExactly(5);
+
+        PipelineRunDetail finished = pipelineRunService.updateStep(run.id(), 5, PipelineRunStep.Status.DONE, "reported", null, null);
+        assertThat(finished.activeStepOrderIndexes()).isEmpty();
+        assertThat(finished.currentStepOrderIndex()).isNull();
+    }
+
+    @Test
+    void runSummaryListsEveryActiveStep() {
+        createForkJoinPipeline("fork-join-2");
+        PipelineRunDetail run = pipelineRunService.start("fork-join-2", "{}", "Tester");
+        pipelineRunService.updateStep(run.id(), 0, PipelineRunStep.Status.DONE, "ok", null, null);
+
+        var summary = pipelineRunService.listByPipeline("fork-join-2").get(0);
+
+        assertThat(summary.activeSteps()).extracting(s -> s.title()).containsExactly("Lint", "Test");
+        assertThat(summary.doneStepCount()).isEqualTo(2);
+        assertThat(summary.totalStepCount()).isEqualTo(6);
+    }
 }
