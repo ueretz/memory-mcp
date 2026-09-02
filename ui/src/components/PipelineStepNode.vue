@@ -1,160 +1,274 @@
 <script setup lang="ts">
 import { Handle, Position, type NodeProps } from '@vue-flow/core'
 import { NodeResizer, type OnResize } from '@vue-flow/node-resizer'
+import { computed } from 'vue'
 
-import type { PipelineConditionOperator, PipelineUpsertStep } from '@/api/types'
+import type { PipelineConditionOperator } from '@/api/types'
 import AppIcon from '@/components/AppIcon.vue'
+import {
+  BLOCK_KIND_BY_TYPE,
+  DEFAULT_ROUTE_LABEL,
+  acceptsDataInput,
+  hasEditableOutputs,
+  supportsNamedBranches,
+  type BoardStep,
+} from '@/lib/pipelineBoard'
 
-// Declared as the full `NodeProps<Data>` (not just `{ data: ... }`) because vue-flow's
-// `:node-types` prop requires each component to be assignable to `NodeComponent`, which expects
-// the whole NodeProps shape (id, type, selected, connectable, ...) - a component typed with only
-// a `data` prop type-checks fine on its own but fails to satisfy `NodeComponent` when registered.
-// The custom fields all live under the single `data` prop this generic produces (mirroring the
-// original label/outputs/contentType version of this component) - there is no flattening.
-//
-// `data.step` is the SAME reactive object the board keeps in its `steps` array, not a copy - every
-// `v-model` in this template mutates it directly, so there is no separate emit/update plumbing for
-// simple field edits. Structural changes (delete, add/remove an output, upload a file, resize)
-// still need the board's own methods, so those come through as plain callback props instead.
-defineProps<
+/**
+ * Editable step card for the pipeline board.
+ *
+ * Every wire attaches to a named port, and every port the step can have is drawn on the card up
+ * front - nothing appears only after a drag:
+ *   - `flow-in`        (left, header)   incoming transition
+ *   - `data-in`        (left, footer)   incoming data wire (not on VARIABLE)
+ *   - `flow-out-<i>`   (right, footer)  one per transition port: named branches, then "далее";
+ *                                       CONDITION has exactly `true` and `false`
+ *   - `data-out-<i>`   (right, footer)  one per declared output
+ * Port handles are keyed by INDEX, not name: vue-flow caches handle ids at mount, so a name-based
+ * id would report the pre-rename name on the next drag.
+ *
+ * `data.step` is the same reactive object the board keeps in its `steps` array - `v-model`s here
+ * mutate it directly. Structural changes go through the `data.on` callbacks.
+ */
+export interface StepNodeActions {
+  remove: () => void
+  addOutput: () => void
+  removeOutput: (outputIndex: number) => void
+  renameOutput: (outputIndex: number, name: string) => void
+  addBranch: () => void
+  removeBranch: (routeIndex: number) => void
+  unwireRoute: (routeIndex: number) => void
+  unwireInput: (token: string) => void
+  mdFileChosen: (event: Event) => void
+  referenceFileChosen: (event: Event) => void
+  resize: (size: { width: number; height: number }) => void
+}
+
+export interface WiredInput {
+  token: string
+  sourceStepTitle: string
+  sourceOutputName: string
+}
+
+const props = defineProps<
   NodeProps<{
-    step: PipelineUpsertStep | null
-    label: string
-    isEnd: boolean
-    readonly?: boolean
-    wiredInputs?: { token: string; sourceStepTitle: string; sourceOutputName: string }[]
-    onRemove?: () => void
-    onAddOutput?: () => void
-    onRemoveOutput?: (outputIndex: number) => void
-    onRenameOutput?: (outputIndex: number, name: string) => void
-    onMdFileChosen?: (event: Event) => void
-    onReferenceFileChosen?: (event: Event) => void
-    onResize?: (size: { width: number; height: number }) => void
+    step: BoardStep
+    index: number
+    isStart: boolean
+    unreachable: boolean
+    flowInWired: boolean
+    wiredInputs: WiredInput[]
+    routeTargets: (string | null)[]
+    on: StepNodeActions
   }>
 >()
 
+const kind = computed(() => BLOCK_KIND_BY_TYPE[props.data.step.contentType])
+const canAddBranch = computed(() => supportsNamedBranches(props.data.step.contentType))
+const showDataIn = computed(() => acceptsDataInput(props.data.step.contentType))
+const editableOutputs = computed(() => hasEditableOutputs(props.data.step.contentType))
+const isCondition = computed(() => props.data.step.contentType === 'CONDITION')
+
 const OPERATORS: { value: PipelineConditionOperator; label: string }[] = [
-  { value: 'EQUALS', label: '=' },
-  { value: 'GREATER_THAN', label: '>' },
-  { value: 'LESS_THAN', label: '<' },
-  { value: 'GREATER_OR_EQUAL', label: '>=' },
-  { value: 'LESS_OR_EQUAL', label: '<=' },
+  { value: 'EQUALS', label: 'равно' },
+  { value: 'GREATER_THAN', label: 'больше' },
+  { value: 'LESS_THAN', label: 'меньше' },
+  { value: 'GREATER_OR_EQUAL', label: 'не меньше' },
+  { value: 'LESS_OR_EQUAL', label: 'не больше' },
 ]
+
+function pinClassForRoute(outcomeKey: string | null): string {
+  if (outcomeKey === 'true' && isCondition.value) return 'pl-pin-true'
+  if (outcomeKey === 'false' && isCondition.value) return 'pl-pin-false'
+  return ''
+}
 </script>
 
 <template>
-  <div v-if="data.isEnd" class="pipeline-card pipeline-card-end">
-    <Handle id="data-in" type="target" :position="Position.Left" class="pipeline-handle pipeline-handle-route" />
-    <span class="pipeline-card-end-label">{{ data.label }}</span>
-  </div>
-
-  <div
-    v-else-if="data.step"
-    class="pipeline-card h-full w-full"
-    :class="[`pipeline-card-${data.step.contentType.toLowerCase()}`, { 'pipeline-card-readonly': data.readonly }]"
-  >
+  <div class="pl-card" :class="[`pl-card-${data.step.contentType.toLowerCase()}`, { 'pl-card-unreachable': data.unreachable }]" :style="{ '--kind': kind.color }">
     <NodeResizer
-      v-if="!data.readonly"
-      :min-width="260"
-      :min-height="180"
-      line-class-name="pipeline-resize-line"
-      handle-class-name="pipeline-resize-handle"
-      @resize="(event: OnResize) => data.onResize?.({ width: event.params.width, height: event.params.height })"
+      :min-width="280"
+      :min-height="160"
+      line-class-name="pl-resize-line"
+      handle-class-name="pl-resize-handle"
+      @resize="(event: OnResize) => data.on.resize({ width: event.params.width, height: event.params.height })"
     />
 
-    <Handle id="data-in" type="target" :position="Position.Left" class="pipeline-handle pipeline-handle-route" />
-
-    <div class="pipeline-card-header">
-      <input
-        v-model="data.step.title"
-        :disabled="data.readonly"
-        placeholder="Название шага"
-        class="pipeline-card-title nodrag"
+    <header class="pl-card-head">
+      <Handle
+        id="flow-in"
+        type="target"
+        :position="Position.Left"
+        class="pl-pin pl-pin-flow pl-pin-flow-in"
+        :class="{ 'pl-pin-wired': data.flowInWired }"
+        title="Вход перехода"
       />
-      <button v-if="!data.readonly" type="button" class="pipeline-card-remove nodrag" title="Удалить шаг" @click="data.onRemove?.()">
+      <span class="pl-kind-tile"><AppIcon :name="kind.icon" class="size-3.5" /></span>
+      <div class="pl-head-text">
+        <span class="pl-kind-label">{{ kind.label }} · {{ data.index + 1 }}</span>
+        <input v-model="data.step.title" placeholder="Название шага" class="pl-title nodrag" />
+      </div>
+      <span v-if="data.isStart" class="pl-chip pl-chip-start" title="Выполнение начинается с этого блока"><AppIcon name="play" class="size-3" />старт</span>
+      <span v-else-if="data.unreachable" class="pl-chip pl-chip-warn" title="До блока нет пути от старта — он никогда не выполнится"><AppIcon name="warning" class="size-3" />недостижим</span>
+      <button type="button" class="pl-icon-btn nodrag" title="Удалить блок" @click="data.on.remove()">
         <AppIcon name="trash" class="size-3.5" />
       </button>
-    </div>
+    </header>
 
-    <div class="pipeline-card-body nodrag nowheel">
+    <section class="pl-card-body nodrag nowheel">
       <template v-if="data.step.contentType === 'PROMPT'">
         <textarea
           v-model="data.step.promptText"
-          :disabled="data.readonly"
-          placeholder="Инструкция для Claude — можно {{paramName}}"
-          class="pipeline-card-textarea"
+          rows="4"
+          placeholder="Что должен сделать Claude на этом шаге. Параметры пайплайна доступны как {{имя}}."
+          class="pl-textarea"
         />
       </template>
 
       <template v-else-if="data.step.contentType === 'MD_FILE'">
-        <input v-if="!data.readonly" type="file" accept=".md" class="pipeline-card-file" @change="data.onMdFileChosen?.($event)" />
-        <span v-if="data.step.assetId" class="pipeline-card-hint">Загружен: asset #{{ data.step.assetId }}</span>
+        <label class="pl-file">
+          <input type="file" accept=".md" class="sr-only" @change="data.on.mdFileChosen($event)" />
+          <AppIcon name="document" class="size-3.5" />
+          <span>{{ data.step.assetId ? `Файл #${data.step.assetId} загружен — заменить` : 'Загрузить .md с инструкцией' }}</span>
+        </label>
       </template>
 
       <template v-else-if="data.step.contentType === 'CONDITION'">
-        <div class="pipeline-card-row">
-          <select v-model="data.step.conditionOperator" :disabled="data.readonly" class="pipeline-card-select">
+        <div class="pl-condition">
+          <span class="pl-condition-lhs">значение</span>
+          <select v-model="data.step.conditionOperator" class="pl-select">
             <option v-for="op in OPERATORS" :key="op.value" :value="op.value">{{ op.label }}</option>
           </select>
-          <input v-model="data.step.conditionValue" :disabled="data.readonly" placeholder="напр. 10" class="pipeline-card-input" />
+          <input v-model="data.step.conditionValue" placeholder="10" class="pl-input" />
         </div>
-        <p class="pipeline-card-hint">Сравнивается со входящей связью. Ветка выбирается автоматически.</p>
+        <p class="pl-hint">Сравнивается значение со входа данных. Ветка выбирается сервером, без Claude.</p>
       </template>
 
       <template v-else-if="data.step.contentType === 'VARIABLE'">
-        <input v-model="data.step.promptText" :disabled="data.readonly" placeholder="напр. hello" class="pipeline-card-input" />
-        <p class="pipeline-card-hint">Публикуется в единственный output автоматически, без Claude.</p>
+        <input v-model="data.step.promptText" placeholder="Значение, например: src/config" class="pl-input" />
+        <p class="pl-hint">Публикуется как выход «{{ data.step.outputs[0]?.name || 'value' }}» сразу при запуске, без Claude.</p>
       </template>
 
-      <div v-if="data.step.contentType === 'PROMPT' || data.step.contentType === 'MD_FILE'" class="pipeline-card-refs">
-        <label class="pipeline-card-label">Ссылочный файл:</label>
-        <input v-if="!data.readonly" type="file" class="pipeline-card-file" @change="data.onReferenceFileChosen?.($event)" />
-        <span v-if="data.step.referenceAssetId" class="pipeline-card-hint">#{{ data.step.referenceAssetId }}</span>
-      </div>
+      <label v-if="data.step.contentType === 'PROMPT' || data.step.contentType === 'MD_FILE'" class="pl-file pl-file-secondary">
+        <input type="file" class="sr-only" @change="data.on.referenceFileChosen($event)" />
+        <AppIcon name="link" class="size-3.5" />
+        <span>{{ data.step.referenceAssetId ? `Справочный файл #${data.step.referenceAssetId}` : 'Приложить справочный файл' }}</span>
+      </label>
+    </section>
 
-      <div v-if="data.wiredInputs && data.wiredInputs.length" class="pipeline-card-wired">
-        <p v-for="input in data.wiredInputs" :key="input.token" class="pipeline-card-hint">
-          ← {{ input.sourceStepTitle }}.{{ input.sourceOutputName }}
-        </p>
-      </div>
-
-      <div v-if="data.step.contentType !== 'CONDITION'" class="pipeline-card-outputs">
-        <div class="pipeline-card-outputs-header">
-          <span class="pipeline-card-label">Выходы</span>
-          <button
-            v-if="!data.readonly && !(data.step.contentType === 'VARIABLE' && data.step.outputs.length >= 1)"
-            type="button" class="pipeline-card-add nodrag" @click="data.onAddOutput?.()"
-          >+</button>
+    <footer class="pl-ports">
+      <div v-if="showDataIn" class="pl-port-row pl-port-row-in">
+        <Handle
+          id="data-in"
+          type="target"
+          :position="Position.Left"
+          class="pl-pin pl-pin-data"
+          :class="{ 'pl-pin-wired': data.wiredInputs.length > 0 }"
+          title="Вход данных"
+        />
+        <div class="pl-port-in-body">
+          <span class="pl-port-label">{{ isCondition ? 'Что сравнивать' : 'Входные данные' }}</span>
+          <ul v-if="data.wiredInputs.length" class="pl-wired-list">
+            <li v-for="input in data.wiredInputs" :key="input.token" class="pl-wired-item">
+              <span class="pl-wired-name">{{ input.sourceStepTitle }} <b>·</b> {{ input.sourceOutputName }}</span>
+              <button type="button" class="pl-icon-btn pl-icon-btn-xs nodrag" title="Отвязать" @click="data.on.unwireInput(input.token)">
+                <AppIcon name="close" class="size-3" />
+              </button>
+            </li>
+          </ul>
+          <span v-else class="pl-port-empty">{{ isCondition ? 'подключите выход другого блока' : 'необязательно — выход другого блока' }}</span>
         </div>
-        <div v-for="(output, outputIndex) in data.step.outputs" :key="outputIndex" class="pipeline-card-output-row">
-          <input
-            :value="output.name"
-            :disabled="data.readonly"
-            placeholder="имя"
-            class="pipeline-card-output-input nodrag"
-            @input="data.onRenameOutput?.(outputIndex, ($event.target as HTMLInputElement).value)"
-          />
+      </div>
+
+      <div class="pl-port-group">
+        <div class="pl-port-group-head">
+          <span class="pl-port-label">{{ isCondition ? 'Ветки' : 'Переходы' }}</span>
+          <button v-if="canAddBranch" type="button" class="pl-text-btn nodrag" @click="data.on.addBranch()">
+            <AppIcon name="plus" class="size-3" />ветка
+          </button>
+        </div>
+        <div
+          v-for="(route, routeIndex) in data.step.routes"
+          :key="routeIndex"
+          class="pl-port-row pl-port-row-out"
+          :class="{ 'pl-port-row-default': route.outcomeKey === null && !isCondition }"
+        >
+          <template v-if="isCondition">
+            <span class="pl-branch-key" :class="route.outcomeKey === 'true' ? 'pl-branch-true' : 'pl-branch-false'">{{ route.outcomeKey }}</span>
+          </template>
+          <template v-else-if="route.outcomeKey === null">
+            <span class="pl-branch-default">{{ DEFAULT_ROUTE_LABEL }}</span>
+          </template>
+          <template v-else>
+            <input
+              v-model="route.outcomeKey"
+              placeholder="ключ outcome"
+              class="pl-branch-input nodrag"
+              title="Claude вернёт это значение как outcome — по нему выбирается переход"
+            />
+            <button type="button" class="pl-icon-btn pl-icon-btn-xs nodrag" title="Удалить ветку" @click="data.on.removeBranch(routeIndex)">
+              <AppIcon name="close" class="size-3" />
+            </button>
+          </template>
+          <span class="pl-port-target" :class="{ 'pl-port-target-empty': data.routeTargets[routeIndex] === null }">
+            {{ data.routeTargets[routeIndex] ?? 'не подключён' }}
+          </span>
           <button
-            v-if="!data.readonly && data.step.contentType !== 'VARIABLE'"
-            type="button" class="pipeline-card-remove-small nodrag" @click="data.onRemoveOutput?.(outputIndex)"
-          >×</button>
-          <!-- Keyed by INDEX, not name: vue-flow caches handle ids in the node's handleBounds at
-               mount, so a name-based id goes stale the moment the user renames the output and the
-               next drag reports the old id. The index never changes for a mounted row. -->
+            v-if="route.target !== null"
+            type="button"
+            class="pl-icon-btn pl-icon-btn-xs nodrag"
+            title="Отсоединить переход"
+            @click="data.on.unwireRoute(routeIndex)"
+          >
+            <AppIcon name="unlink" class="size-3" />
+          </button>
           <Handle
-            :id="`output-idx-${outputIndex}`"
+            :id="`flow-out-${routeIndex}`"
             type="source"
             :position="Position.Right"
-            class="pipeline-handle pipeline-handle-data pipeline-handle-inline"
+            class="pl-pin pl-pin-flow"
+            :class="[pinClassForRoute(route.outcomeKey), { 'pl-pin-wired': route.target !== null }]"
+            :title="route.outcomeKey ?? DEFAULT_ROUTE_LABEL"
           />
         </div>
       </div>
-    </div>
 
-    <template v-if="data.step.contentType === 'CONDITION'">
-      <Handle id="route-true" type="source" :position="Position.Right" title="true" class="pipeline-handle pipeline-handle-true" />
-      <Handle id="route-false" type="source" :position="Position.Bottom" title="false" class="pipeline-handle pipeline-handle-false" />
-    </template>
-    <Handle v-else id="route" type="source" :position="Position.Right" class="pipeline-handle pipeline-handle-route" />
+      <div v-if="!isCondition" class="pl-port-group">
+        <div class="pl-port-group-head">
+          <span class="pl-port-label">Выходы</span>
+          <button v-if="editableOutputs" type="button" class="pl-text-btn nodrag" @click="data.on.addOutput()">
+            <AppIcon name="plus" class="size-3" />выход
+          </button>
+        </div>
+        <p v-if="data.step.outputs.length === 0" class="pl-port-empty pl-port-empty-block">
+          Нет выходов. Добавьте, чтобы передать результат шага дальше по проводу.
+        </p>
+        <div v-for="(output, outputIndex) in data.step.outputs" :key="outputIndex" class="pl-port-row pl-port-row-out">
+          <input
+            :value="output.name"
+            placeholder="имя выхода"
+            class="pl-branch-input nodrag"
+            @input="data.on.renameOutput(outputIndex, ($event.target as HTMLInputElement).value)"
+          />
+          <button
+            v-if="editableOutputs"
+            type="button"
+            class="pl-icon-btn pl-icon-btn-xs nodrag"
+            title="Удалить выход"
+            @click="data.on.removeOutput(outputIndex)"
+          >
+            <AppIcon name="close" class="size-3" />
+          </button>
+          <Handle
+            :id="`data-out-${outputIndex}`"
+            type="source"
+            :position="Position.Right"
+            class="pl-pin pl-pin-data"
+            :class="{ 'pl-pin-wired': data.step.dataLinksOut.some((l) => l.sourceOutputName === output.name) }"
+            :title="output.name || 'выход'"
+          />
+        </div>
+      </div>
+    </footer>
   </div>
 </template>

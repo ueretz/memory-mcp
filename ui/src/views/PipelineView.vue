@@ -15,6 +15,7 @@ import PipelineMiniStepNode from '@/components/PipelineMiniStepNode.vue'
 import SkeletonRows from '@/components/SkeletonRows.vue'
 import { useAsyncData } from '@/composables/useAsyncData'
 import { projectLocation } from '@/lib/links'
+import { END_NODE_ID, buildViewEdges, endNodePosition, viewPositions } from '@/lib/pipelineGraphView'
 
 const props = defineProps<{ project: string; slug: string }>()
 const project = toRef(props, 'project')
@@ -42,31 +43,13 @@ async function confirmDelete() {
   }
 }
 
-const END_NODE_ID = 'end'
-const STEP_SPACING = 220
-
-// Pipelines created before the canvas builder (or saved without dragging any node) have every
-// step at (0,0) - same convention as PipelineBuilderView's applyLegacyAutoLayoutIfNeeded. Spread
-// them out left-to-right instead of stacking every node on top of the others.
-const stepPositions = computed(() => {
-  const steps = pipeline.value?.steps ?? []
-  const allAtOrigin = steps.length > 0 && steps.every((s) => s.positionX === 0 && s.positionY === 0)
-  const positions = new Map<number, { x: number; y: number }>()
-  steps.forEach((step, index) => {
-    positions.set(step.orderIndex, allAtOrigin ? { x: index * STEP_SPACING, y: 0 } : { x: step.positionX, y: step.positionY })
-  })
-  return positions
-})
-
 // Read-only views draw compact GitLab-CI-style status nodes (PipelineMiniStepNode), not the
 // full editable cards - the board is where step contents are inspected and edited.
 const flowNodes = computed(() => {
   if (!pipeline.value) return []
-  const steps = pipeline.value.steps
-  const positions = stepPositions.value
-  const maxX = steps.length > 0 ? Math.max(...steps.map((s) => positions.get(s.orderIndex)!.x)) : 0
+  const positions = viewPositions(pipeline.value)
   return [
-    ...steps.map((step) => ({
+    ...pipeline.value.steps.map((step) => ({
       id: String(step.orderIndex),
       type: 'pipelineStep',
       position: positions.get(step.orderIndex)!,
@@ -79,55 +62,13 @@ const flowNodes = computed(() => {
     {
       id: END_NODE_ID,
       type: 'pipelineStep',
-      position: { x: maxX + 240, y: 0 },
+      position: endNodePosition(pipeline.value, positions),
       data: { label: 'Конец', status: 'end' },
     },
   ]
 })
 
-// A route-less pipeline (linear/legacy - the backward-compatible default) has an empty `routes`
-// array on every step. The backend treats that as an implicit orderIndex -> orderIndex+1 chain
-// (see PipelineRunService.resolveNextOrderIndex's allRoutes.isEmpty() branch); mirror that here so
-// the graph isn't drawn as disconnected nodes. Only one or the other - never mix implicit chaining
-// with real routes.
-const flowEdges = computed(() => {
-  if (!pipeline.value) return []
-  const steps = pipeline.value.steps
-  const hasAnyRoutes = steps.some((step) => step.routes.length > 0)
-  // Data-link edges are intentionally NOT drawn here: the compact GitLab-style view shows only
-  // control flow (statuses); data wiring is inspected on the board.
-  const dataLinkEdges: never[] = []
-  if (!hasAnyRoutes) {
-    return [
-      ...steps.map((step, index) => {
-        const nextStep = steps[index + 1]
-        const target = nextStep ? String(nextStep.orderIndex) : END_NODE_ID
-        return {
-          id: `${step.orderIndex}-implicit-${target}`,
-          source: String(step.orderIndex),
-          sourceHandle: 'route',
-          target,
-          targetHandle: 'data-in',
-          label: undefined as string | undefined,
-        }
-      }),
-      ...dataLinkEdges,
-    ]
-  }
-  return [
-    ...steps.flatMap((step) =>
-      step.routes.map((route) => ({
-        id: `${step.orderIndex}-${route.outcomeKey ?? 'default'}-${route.targetStepOrderIndex ?? END_NODE_ID}`,
-        source: String(step.orderIndex),
-        sourceHandle: step.contentType === 'CONDITION' ? `route-${route.outcomeKey}` : 'route',
-        target: route.targetStepOrderIndex === null ? END_NODE_ID : String(route.targetStepOrderIndex),
-        targetHandle: 'data-in',
-        label: route.outcomeKey ?? '(по умолчанию)' as string | undefined,
-      })),
-    ),
-    ...dataLinkEdges,
-  ]
-})
+const flowEdges = computed(() => (pipeline.value ? buildViewEdges(pipeline.value) : []))
 
 const STATUS_LABEL: Record<string, string> = {
   RUNNING: 'Выполняется',
@@ -172,7 +113,7 @@ const STATUS_LABEL: Record<string, string> = {
       <section v-else-if="pipeline" class="mb-9">
         <h2 class="mb-3 text-[13px] font-semibold tracking-wide text-content uppercase">Шаги</h2>
         <div class="h-[360px] overflow-hidden rounded-xl border border-border bg-elevated">
-          <VueFlow :nodes="flowNodes" :edges="flowEdges" :node-types="{ pipelineStep: PipelineMiniStepNode }" :nodes-draggable="false" :edges-updatable="false" fit-view-on-init />
+          <VueFlow :nodes="flowNodes" :edges="flowEdges" :node-types="{ pipelineStep: PipelineMiniStepNode }" :nodes-draggable="false" :nodes-connectable="false" :edges-updatable="false" :zoom-on-scroll="false" fit-view-on-init class="pl-flow-readonly" />
         </div>
       </section>
 

@@ -2,62 +2,106 @@
 import '@vue-flow/core/dist/style.css'
 import '@vue-flow/node-resizer/dist/style.css'
 
-import { VueFlow, type EdgeMouseEvent, type NodeDragEvent, type NodeMouseEvent } from '@vue-flow/core'
-import { computed, ref, toRef, watch } from 'vue'
+import {
+  ConnectionMode,
+  MarkerType,
+  VueFlow,
+  useVueFlow,
+  type Connection,
+  type EdgeMouseEvent,
+  type NodeDragEvent,
+  type NodeMouseEvent,
+} from '@vue-flow/core'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, toRef, watch } from 'vue'
+import { onBeforeRouteLeave } from 'vue-router'
 
 import { fetchPipeline, updatePipeline, uploadPipelineAsset } from '@/api/client'
-import type {
-  PipelineConditionOperator,
-  PipelineStepContentType,
-  PipelineUpsertDataLink,
-  PipelineUpsertOutput,
-  PipelineUpsertParameter,
-  PipelineUpsertRoute,
-  PipelineUpsertStep,
-} from '@/api/types'
+import type { PipelineStepContentType, PipelineUpsertParameter } from '@/api/types'
+import AppIcon from '@/components/AppIcon.vue'
 import ErrorState from '@/components/ErrorState.vue'
-import PipelineStepNode from '@/components/PipelineStepNode.vue'
+import PipelineEndNode from '@/components/PipelineEndNode.vue'
+import PipelineStepNode, { type StepNodeActions, type WiredInput } from '@/components/PipelineStepNode.vue'
+import {
+  BLOCK_KINDS,
+  WIRE_COLORS,
+  analyzeGraph,
+  collectIssues,
+  fromDetail,
+  isAncestor,
+  newBoardStep,
+  removeStepAt,
+  stepDisplayTitle,
+  stripDataToken,
+  toUpsertSteps,
+  wouldCreateCycle,
+  type BoardStep,
+} from '@/lib/pipelineBoard'
 
-// Unlike PipelineBuilderView (the metadata screen), the board always operates on an already-created
-// pipeline - there is no "new" mode here, a slug is required to have anything to draw.
+// The board always operates on an already-created pipeline - metadata (name, parameters) lives on
+// the separate settings screen (PipelineBuilderView); here only the step graph is edited.
 const props = defineProps<{ project: string; slug: string }>()
 const project = toRef(props, 'project')
 const slug = toRef(props, 'slug')
 
+const { screenToFlowCoordinate, fitView, zoomIn, zoomOut, vueFlowRef, viewport } = useVueFlow()
+
 const name = ref('')
-// Metadata fields the board doesn't edit but must round-trip unchanged on save, since
-// updatePipeline replaces the whole pipeline definition in one request.
 const description = ref<string | null>(null)
 const parameters = ref<PipelineUpsertParameter[]>([])
-const steps = ref<PipelineUpsertStep[]>([])
+const steps = ref<BoardStep[]>([])
 const loading = ref(true)
 const loadError = ref<string | null>(null)
 const saving = ref(false)
 const saveError = ref<string | null>(null)
+const savedSnapshot = ref('')
+const savedToastVisible = ref(false)
 
 const END_NODE_ID = 'end'
-const endPosition = ref({ x: 480, y: 120 })
-const DEFAULT_SIZE = { width: 280, height: 220 }
-// Card sizes are session-local, not persisted - resizing here is purely a canvas-editing
-// convenience, no backend field exists to round-trip it across reloads yet.
+const CARD_WIDTH = 320
+const endPosition = ref({ x: 0, y: 0 })
+// Card sizes are session-local: the API has no field for them, only for positions.
 const nodeSizes = ref<Record<number, { width: number; height: number }>>({})
 
 const selectedStepIndex = ref<number | null>(null)
-const selectedEdge = ref<{ stepIndex: number; routeIndex: number } | null>(null)
+const selectedEdgeId = ref<string | null>(null)
+const issuesOpen = ref(false)
+const contextMenu = ref<{ x: number; y: number; flowX: number; flowY: number } | null>(null)
+const menuQuery = ref('')
+const menuInput = ref<HTMLInputElement | null>(null)
 
-const boardHint = ref<string | null>(null)
+const hint = ref<string | null>(null)
 let hintTimer: ReturnType<typeof setTimeout> | null = null
 function showHint(text: string) {
-  boardHint.value = text
+  hint.value = text
   if (hintTimer) clearTimeout(hintTimer)
-  hintTimer = setTimeout(() => {
-    boardHint.value = null
-  }, 4000)
+  hintTimer = setTimeout(() => (hint.value = null), 4500)
 }
 
-function edgeId(stepIndex: number, route: PipelineUpsertRoute): string {
-  const targetId = route.targetStepIndex === null ? END_NODE_ID : String(route.targetStepIndex)
-  return `${stepIndex}-${route.outcomeKey ?? 'default'}-${targetId}`
+// ------------------------------------------------------------------------------------------
+// Load / save
+// ------------------------------------------------------------------------------------------
+
+function buildRequest() {
+  return {
+    slug: slug.value,
+    name: name.value,
+    description: description.value,
+    projectScope: project.value,
+    parameters: parameters.value,
+    steps: toUpsertSteps(steps.value),
+  }
+}
+
+const dirty = computed(() => !loading.value && JSON.stringify(buildRequest()) !== savedSnapshot.value)
+
+function placeEndNode() {
+  if (steps.value.length === 0) {
+    endPosition.value = { x: CARD_WIDTH + 120, y: 40 }
+    return
+  }
+  const maxX = Math.max(...steps.value.map((s) => s.positionX))
+  const ys = steps.value.filter((s) => s.positionX === maxX).map((s) => s.positionY)
+  endPosition.value = { x: maxX + CARD_WIDTH + 100, y: Math.min(...ys) + 24 }
 }
 
 async function load() {
@@ -74,21 +118,11 @@ async function load() {
       required: p.required,
       defaultValue: p.defaultValue,
     }))
-    steps.value = pipeline.steps.map((s) => ({
-      title: s.title,
-      contentType: s.contentType,
-      promptText: s.promptText,
-      assetId: s.assetId,
-      referenceAssetId: s.referenceAssetId,
-      positionX: s.positionX,
-      positionY: s.positionY,
-      routes: s.routes.map((r) => ({ outcomeKey: r.outcomeKey, targetStepIndex: r.targetStepOrderIndex })),
-      outputs: s.outputs.map((o) => ({ name: o.name })),
-      dataLinksOut: s.dataLinksOut.map((l) => ({ token: l.token, sourceOutputName: l.sourceOutputName, targetStepIndex: l.targetStepOrderIndex })),
-      conditionOperator: s.conditionOperator,
-      conditionValue: s.conditionValue,
-    }))
-    applyLegacyAutoLayoutIfNeeded()
+    steps.value = fromDetail(pipeline)
+    placeEndNode()
+    savedSnapshot.value = JSON.stringify(buildRequest())
+    selectedStepIndex.value = null
+    selectedEdgeId.value = null
   } catch (cause) {
     loadError.value = cause instanceof Error ? cause.message : String(cause)
   } finally {
@@ -96,70 +130,137 @@ async function load() {
   }
 }
 
-function applyLegacyAutoLayoutIfNeeded() {
-  const allAtOrigin = steps.value.length > 0 && steps.value.every((s) => s.positionX === 0 && s.positionY === 0)
-  if (!allAtOrigin) return
-  steps.value.forEach((step, index) => {
-    step.positionX = index * 300
-    step.positionY = 0
-  })
-  endPosition.value = { x: steps.value.length * 300, y: 0 }
-}
-
 watch(slug, load, { immediate: true })
 
-function addStep(kind: PipelineStepContentType) {
-  const offset = steps.value.length * 300
-  const base = {
-    title: '',
-    contentType: kind,
-    promptText: '',
-    assetId: null,
-    referenceAssetId: null,
-    positionX: offset,
-    positionY: 220,
-    routes: [] as PipelineUpsertRoute[],
-    outputs: [] as PipelineUpsertOutput[],
-    dataLinksOut: [] as PipelineUpsertDataLink[],
-    conditionOperator: null as PipelineConditionOperator | null,
-    conditionValue: null as string | null,
+const issues = computed(() => collectIssues(steps.value))
+const errorCount = computed(() => issues.value.filter((i) => i.severity === 'error').length)
+const warningCount = computed(() => issues.value.filter((i) => i.severity === 'warning').length)
+
+async function save() {
+  if (saving.value) return
+  if (errorCount.value > 0) {
+    issuesOpen.value = true
+    saveError.value = 'Сначала исправьте ошибки в списке — иначе сервер отклонит схему.'
+    return
   }
-  if (kind === 'CONDITION') {
-    base.routes = [
-      { outcomeKey: 'true', targetStepIndex: null },
-      { outcomeKey: 'false', targetStepIndex: null },
-    ]
-    base.conditionOperator = 'EQUALS'
-    base.conditionValue = ''
-  } else if (kind === 'VARIABLE') {
-    base.outputs = [{ name: 'value' }]
+  saving.value = true
+  saveError.value = null
+  try {
+    const request = buildRequest()
+    await updatePipeline(slug.value, request)
+    savedSnapshot.value = JSON.stringify(request)
+    savedToastVisible.value = true
+    setTimeout(() => (savedToastVisible.value = false), 2000)
+  } catch (cause) {
+    saveError.value = cause instanceof Error ? cause.message : String(cause)
+  } finally {
+    saving.value = false
   }
-  steps.value.push(base)
+}
+
+onBeforeRouteLeave(() => {
+  if (!dirty.value) return true
+  return window.confirm('На доске есть несохранённые изменения. Уйти без сохранения?')
+})
+
+function onBeforeUnload(event: BeforeUnloadEvent) {
+  if (dirty.value) event.preventDefault()
+}
+
+function onKeydown(event: KeyboardEvent) {
+  const target = event.target as HTMLElement | null
+  const typing = !!target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT' || target.isContentEditable)
+  if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 's') {
+    event.preventDefault()
+    void save()
+    return
+  }
+  if (event.key === 'Escape') {
+    contextMenu.value = null
+    issuesOpen.value = false
+    selectedEdgeId.value = null
+    return
+  }
+  if (typing) return
+  if ((event.key === 'Delete' || event.key === 'Backspace') && selectedEdgeId.value) {
+    event.preventDefault()
+    removeEdge(selectedEdgeId.value)
+  }
+}
+
+onMounted(() => {
+  window.addEventListener('beforeunload', onBeforeUnload)
+  window.addEventListener('keydown', onKeydown)
+})
+onBeforeUnmount(() => {
+  window.removeEventListener('beforeunload', onBeforeUnload)
+  window.removeEventListener('keydown', onKeydown)
+})
+
+// ------------------------------------------------------------------------------------------
+// Step editing
+// ------------------------------------------------------------------------------------------
+
+function viewportCenter(): { x: number; y: number } {
+  const rect = vueFlowRef.value?.getBoundingClientRect()
+  if (!rect) return { x: 0, y: 0 }
+  return screenToFlowCoordinate({ x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 })
+}
+
+/**
+ * A block added from the palette lands to the right of the current rightmost block (same row),
+ * never on top of another card; the end node steps aside if it would be covered. The first block
+ * goes to the middle of the viewport. A context-menu add uses the click position as is.
+ */
+function nextFreePosition(): { x: number; y: number } {
+  if (steps.value.length === 0) {
+    const center = viewportCenter()
+    return { x: center.x - CARD_WIDTH / 2, y: center.y - 160 }
+  }
+  const rightmost = steps.value.reduce((best, s) => (s.positionX > best.positionX ? s : best), steps.value[0])
+  return { x: rightmost.positionX + CARD_WIDTH + 80, y: rightmost.positionY }
+}
+
+function addStep(kind: PipelineStepContentType, at?: { x: number; y: number }) {
+  const position = at ?? nextFreePosition()
+  const x = Math.round(position.x)
+  const y = Math.round(position.y)
+  steps.value.push(newBoardStep(kind, { x, y }))
+  if (!at && endPosition.value.x < x + CARD_WIDTH + 60 && Math.abs(endPosition.value.y - y) < 420) {
+    endPosition.value = { x: x + CARD_WIDTH + 100, y: y + 24 }
+  }
+  const id = String(steps.value.length - 1)
+  selectedStepIndex.value = steps.value.length - 1
+  selectedEdgeId.value = null
+  contextMenu.value = null
+  if (!at) {
+    // Pan (keep the zoom) so the new block is on screen.
+    const zoom = viewport.value.zoom
+    void nextTick(() => fitView({ nodes: [id, END_NODE_ID], duration: 300, minZoom: zoom, maxZoom: zoom, padding: 0.3 }))
+  }
 }
 
 function removeStep(index: number) {
-  steps.value.splice(index, 1)
-  delete nodeSizes.value[index]
-  // Routes AND data links referencing this step by index are now stale (indices shifted) - drop
-  // anything that pointed at the removed step, and shift down everything that pointed past it, so
-  // a save can't silently rewire to the wrong node (or get rejected by the backend's ancestor
-  // check because a stale targetStepIndex points past the end of the shrunk steps array).
-  steps.value.forEach((step) => {
-    step.routes = step.routes
-      .filter((r) => r.targetStepIndex !== index)
-      .map((r) => ({
-        ...r,
-        targetStepIndex: r.targetStepIndex !== null && r.targetStepIndex > index ? r.targetStepIndex - 1 : r.targetStepIndex,
-      }))
-    step.dataLinksOut = step.dataLinksOut
-      .filter((l) => l.targetStepIndex !== index)
-      .map((l) => ({
-        ...l,
-        targetStepIndex: l.targetStepIndex !== null && l.targetStepIndex > index ? l.targetStepIndex - 1 : l.targetStepIndex,
-      }))
+  const step = steps.value[index]
+  // Tokens wired INTO the removed step disappear with it; strip them from nothing. Tokens the
+  // removed step wired OUT still sit in other steps' prompts - clean those up so no dangling
+  // {{data:...}} is left behind.
+  step.dataLinksOut.forEach((link) => {
+    if (link.targetStepIndex !== null && link.targetStepIndex !== index) {
+      const target = steps.value[link.targetStepIndex]
+      target.promptText = stripDataToken(target.promptText, link.token)
+    }
   })
+  removeStepAt(steps.value, index)
+  const sizes: Record<number, { width: number; height: number }> = {}
+  Object.entries(nodeSizes.value).forEach(([key, size]) => {
+    const i = Number(key)
+    if (i < index) sizes[i] = size
+    else if (i > index) sizes[i - 1] = size
+  })
+  nodeSizes.value = sizes
   selectedStepIndex.value = null
-  selectedEdge.value = null
+  selectedEdgeId.value = null
 }
 
 function addOutput(stepIndex: number) {
@@ -170,31 +271,61 @@ function renameOutput(stepIndex: number, outputIndex: number, newName: string) {
   const step = steps.value[stepIndex]
   const oldName = step.outputs[outputIndex].name
   step.outputs[outputIndex].name = newName
-  // Data links reference outputs by NAME. Without this remap a rename leaves links pointing at
-  // the old name and the backend rejects the save with "wires an output it never declared".
+  // Data links reference outputs by name - keep them pointing at the renamed pin.
   step.dataLinksOut.forEach((link) => {
-    if (link.sourceOutputName === oldName) {
-      link.sourceOutputName = newName
-    }
+    if (link.sourceOutputName === oldName) link.sourceOutputName = newName
   })
 }
 
 function removeOutput(stepIndex: number, outputIndex: number) {
-  const removedName = steps.value[stepIndex].outputs[outputIndex].name
-  steps.value[stepIndex].outputs.splice(outputIndex, 1)
-  // A data link wiring the removed output would silently point at nothing - drop it rather than
-  // leave a dangling {{data:...}} token with no declared pin behind it.
-  steps.value[stepIndex].dataLinksOut = steps.value[stepIndex].dataLinksOut.filter(
-    (link) => link.sourceOutputName !== removedName,
-  )
+  const step = steps.value[stepIndex]
+  const removedName = step.outputs[outputIndex].name
+  step.outputs.splice(outputIndex, 1)
+  step.dataLinksOut
+    .filter((link) => link.sourceOutputName === removedName)
+    .forEach((link) => unwireDataLink(stepIndex, link.token))
 }
 
-function wiredInputsFor(stepIndex: number): { token: string; sourceStepTitle: string; sourceOutputName: string }[] {
-  const result: { token: string; sourceStepTitle: string; sourceOutputName: string }[] = []
+function addBranch(stepIndex: number) {
+  const step = steps.value[stepIndex]
+  // The default "далее" port stays last; named branches go above it.
+  step.routes.splice(step.routes.length - 1, 0, { outcomeKey: '', target: null })
+}
+
+function removeBranch(stepIndex: number, routeIndex: number) {
+  steps.value[stepIndex].routes.splice(routeIndex, 1)
+  selectedEdgeId.value = null
+}
+
+function unwireRoute(stepIndex: number, routeIndex: number) {
+  steps.value[stepIndex].routes[routeIndex].target = null
+  selectedEdgeId.value = null
+}
+
+function unwireDataLink(sourceIndex: number, token: string) {
+  const source = steps.value[sourceIndex]
+  const link = source.dataLinksOut.find((l) => l.token === token)
+  if (!link) return
+  if (link.targetStepIndex !== null) {
+    const target = steps.value[link.targetStepIndex]
+    target.promptText = stripDataToken(target.promptText, token)
+  }
+  source.dataLinksOut = source.dataLinksOut.filter((l) => l.token !== token)
+  selectedEdgeId.value = null
+}
+
+function unwireInputByToken(token: string) {
+  steps.value.forEach((step, sourceIndex) => {
+    if (step.dataLinksOut.some((l) => l.token === token)) unwireDataLink(sourceIndex, token)
+  })
+}
+
+function wiredInputsFor(stepIndex: number): WiredInput[] {
+  const result: WiredInput[] = []
   steps.value.forEach((step, sourceIndex) => {
     step.dataLinksOut.forEach((link) => {
       if (link.targetStepIndex === stepIndex) {
-        result.push({ token: link.token, sourceStepTitle: step.title || `Шаг ${sourceIndex + 1}`, sourceOutputName: link.sourceOutputName })
+        result.push({ token: link.token, sourceStepTitle: stepDisplayTitle(step, sourceIndex), sourceOutputName: link.sourceOutputName })
       }
     })
   })
@@ -204,305 +335,483 @@ function wiredInputsFor(stepIndex: number): { token: string; sourceStepTitle: st
 async function onMdFileChosen(index: number, event: Event) {
   const file = (event.target as HTMLInputElement).files?.[0]
   if (!file) return
-  const asset = await uploadPipelineAsset(file)
-  steps.value[index].assetId = asset.id
+  try {
+    const asset = await uploadPipelineAsset(file)
+    steps.value[index].assetId = asset.id
+  } catch (cause) {
+    showHint(`Не удалось загрузить файл: ${cause instanceof Error ? cause.message : String(cause)}`)
+  }
 }
 
 async function onReferenceFileChosen(index: number, event: Event) {
   const file = (event.target as HTMLInputElement).files?.[0]
   if (!file) return
-  const asset = await uploadPipelineAsset(file)
-  steps.value[index].referenceAssetId = asset.id
+  try {
+    const asset = await uploadPipelineAsset(file)
+    steps.value[index].referenceAssetId = asset.id
+  } catch (cause) {
+    showHint(`Не удалось загрузить файл: ${cause instanceof Error ? cause.message : String(cause)}`)
+  }
+}
+
+// ------------------------------------------------------------------------------------------
+// Graph -> vue-flow nodes / edges
+// ------------------------------------------------------------------------------------------
+
+const graph = computed(() => analyzeGraph(steps.value))
+
+function routeTargetLabel(target: BoardStep['routes'][number]['target']): string | null {
+  if (target === null) return null
+  if (target === 'end') return 'конец рана'
+  const step = steps.value[target]
+  return step ? stepDisplayTitle(step, target) : null
+}
+
+const flowInWired = computed(() => {
+  const wired = new Set<number | 'end'>()
+  steps.value.forEach((step) => step.routes.forEach((r) => {
+    if (r.target !== null) wired.add(r.target)
+  }))
+  return wired
+})
+
+function actionsFor(index: number): StepNodeActions {
+  return {
+    remove: () => removeStep(index),
+    addOutput: () => addOutput(index),
+    removeOutput: (outputIndex) => removeOutput(index, outputIndex),
+    renameOutput: (outputIndex, value) => renameOutput(index, outputIndex, value),
+    addBranch: () => addBranch(index),
+    removeBranch: (routeIndex) => removeBranch(index, routeIndex),
+    unwireRoute: (routeIndex) => unwireRoute(index, routeIndex),
+    unwireInput: (token) => unwireInputByToken(token),
+    mdFileChosen: (event) => onMdFileChosen(index, event),
+    referenceFileChosen: (event) => onReferenceFileChosen(index, event),
+    resize: (size) => {
+      nodeSizes.value[index] = size
+    },
+  }
 }
 
 const flowNodes = computed(() => [
   ...steps.value.map((step, index) => {
-    const size = nodeSizes.value[index] ?? DEFAULT_SIZE
+    const size = nodeSizes.value[index]
+    const { roots, reachable } = graph.value
     return {
       id: String(index),
-      type: 'pipelineStep',
+      type: 'step',
       position: { x: step.positionX, y: step.positionY },
-      style: { width: `${size.width}px`, height: `${size.height}px` },
-      class: selectedStepIndex.value === index ? 'pipeline-node pipeline-node-selected' : 'pipeline-node',
+      style: size ? { width: `${size.width}px`, height: `${size.height}px` } : { width: `${CARD_WIDTH}px` },
+      class: ['pl-node', { 'pl-node-selected': selectedStepIndex.value === index }],
       data: {
         step,
-        isEnd: false,
+        index,
+        isStart: roots.length > 0 && roots[0] === index && steps.value.length > 1,
+        unreachable: steps.value.length > 1 && roots.length > 0 && !reachable.has(index),
+        flowInWired: flowInWired.value.has(index),
         wiredInputs: wiredInputsFor(index),
-        onRemove: () => removeStep(index),
-        onAddOutput: () => addOutput(index),
-        onRemoveOutput: (outputIndex: number) => removeOutput(index, outputIndex),
-        onRenameOutput: (outputIndex: number, value: string) => renameOutput(index, outputIndex, value),
-        onMdFileChosen: (event: Event) => onMdFileChosen(index, event),
-        onReferenceFileChosen: (event: Event) => onReferenceFileChosen(index, event),
-        onResize: (nextSize: { width: number; height: number }) => {
-          nodeSizes.value[index] = nextSize
-        },
+        routeTargets: step.routes.map((r) => routeTargetLabel(r.target)),
+        on: actionsFor(index),
       },
     }
   }),
   {
     id: END_NODE_ID,
-    type: 'pipelineStep',
+    type: 'end',
     position: endPosition.value,
-    class: 'pipeline-node pipeline-node-end',
-    data: { step: null, label: 'Конец рана', isEnd: true },
+    class: 'pl-node pl-node-end',
+    data: { wired: flowInWired.value.has('end') },
   },
 ])
 
-const flowEdges = computed(() => [
-  ...steps.value.flatMap((step, index) =>
-    step.routes.map((route) => ({
-      id: edgeId(index, route),
-      source: String(index),
-      sourceHandle: step.contentType === 'CONDITION' ? `route-${route.outcomeKey}` : 'route',
-      target: route.targetStepIndex === null ? END_NODE_ID : String(route.targetStepIndex),
-      targetHandle: 'data-in',
-      label: route.outcomeKey ?? '(по умолчанию)',
-    })),
-  ),
-  ...steps.value.flatMap((step, index) =>
+function flowEdgeId(stepIndex: number, routeIndex: number) {
+  return `flow-${stepIndex}-${routeIndex}`
+}
+
+const flowEdges = computed(() => {
+  const selected = selectedEdgeId.value
+  const transitions = steps.value.flatMap((step, index) =>
+    step.routes.flatMap((route, routeIndex) => {
+      if (route.target === null) return []
+      const id = flowEdgeId(index, routeIndex)
+      const isCondition = step.contentType === 'CONDITION'
+      const color =
+        isCondition && route.outcomeKey === 'true' ? WIRE_COLORS.trueBranch
+        : isCondition && route.outcomeKey === 'false' ? WIRE_COLORS.falseBranch
+        : WIRE_COLORS.flow
+      const isSelected = selected === id
+      return [{
+        id,
+        source: String(index),
+        sourceHandle: `flow-out-${routeIndex}`,
+        target: route.target === 'end' ? END_NODE_ID : String(route.target),
+        targetHandle: 'flow-in',
+        label: route.outcomeKey ?? undefined,
+        class: ['pl-edge pl-edge-flow', { 'pl-edge-selected': isSelected }],
+        style: { stroke: isSelected ? WIRE_COLORS.flowSelected : color, strokeWidth: isSelected ? 2.5 : 2 },
+        markerEnd: { type: MarkerType.ArrowClosed, color: isSelected ? 'var(--color-accent)' : color, width: 16, height: 16 },
+        labelBgPadding: [6, 3] as [number, number],
+        labelBgBorderRadius: 6,
+      }]
+    }),
+  )
+  const dataWires = steps.value.flatMap((step, index) =>
     step.dataLinksOut
       .map((link) => ({ link, outputIndex: step.outputs.findIndex((o) => o.name === link.sourceOutputName) }))
-      .filter(({ outputIndex }) => outputIndex >= 0)
-      .map(({ link, outputIndex }) => ({
-        id: `data-${link.token}`,
-        source: String(index),
-        sourceHandle: `output-idx-${outputIndex}`,
-        target: String(link.targetStepIndex),
-        targetHandle: 'data-in',
-        class: 'pipeline-data-edge',
-        style: { strokeDasharray: '4 4', stroke: '#10b981' },
-      })),
-  ),
-])
+      .filter(({ link, outputIndex }) => outputIndex >= 0 && link.targetStepIndex !== null)
+      .map(({ link, outputIndex }) => {
+        const id = `data-${link.token}`
+        const isSelected = selected === id
+        return {
+          id,
+          source: String(index),
+          sourceHandle: `data-out-${outputIndex}`,
+          target: String(link.targetStepIndex),
+          targetHandle: 'data-in',
+          class: ['pl-edge pl-edge-data', { 'pl-edge-selected': isSelected }],
+          style: { stroke: isSelected ? WIRE_COLORS.flowSelected : WIRE_COLORS.data, strokeWidth: isSelected ? 2.5 : 1.75, strokeDasharray: '6 4' },
+        }
+      }),
+  )
+  return [...transitions, ...dataWires]
+})
+
+// ------------------------------------------------------------------------------------------
+// Canvas interactions
+// ------------------------------------------------------------------------------------------
 
 function onNodeDragStop({ node }: NodeDragEvent) {
   if (node.id === END_NODE_ID) {
     endPosition.value = { x: node.position.x, y: node.position.y }
     return
   }
-  const index = Number(node.id)
-  steps.value[index].positionX = node.position.x
-  steps.value[index].positionY = node.position.y
+  const step = steps.value[Number(node.id)]
+  step.positionX = Math.round(node.position.x)
+  step.positionY = Math.round(node.position.y)
 }
 
 function onNodeClick({ node }: NodeMouseEvent) {
-  selectedEdge.value = null
+  selectedEdgeId.value = null
+  contextMenu.value = null
   selectedStepIndex.value = node.id === END_NODE_ID ? null : Number(node.id)
 }
 
 function onEdgeClick({ edge }: EdgeMouseEvent) {
   selectedStepIndex.value = null
-  const stepIndex = Number(edge.source)
-  const routeIndex = steps.value[stepIndex].routes.findIndex((r) => edgeId(stepIndex, r) === edge.id)
-  selectedEdge.value = routeIndex >= 0 ? { stepIndex, routeIndex } : null
+  contextMenu.value = null
+  selectedEdgeId.value = edge.id
 }
 
-function onConnect(connection: { source: string; target: string; sourceHandle?: string | null; targetHandle?: string | null }) {
-  // NOTE: per the backend's graph-validation rule, once ANY step has an explicit route, every
-  // step's execution edges come only from its own explicit routes. So wiring a data link into a
-  // CONDITION step from a source step that has no route of its own will pass here but fail
-  // validation on save (ancestor-reachability check). We don't auto-create that connecting route -
-  // out of scope for this task; the backend's error message is expected to guide the author.
+function onPaneClick() {
+  selectedStepIndex.value = null
+  selectedEdgeId.value = null
+  contextMenu.value = null
+  issuesOpen.value = false
+}
+
+function onPaneContextMenu(event: MouseEvent) {
+  event.preventDefault()
+  const rect = vueFlowRef.value?.getBoundingClientRect()
+  if (!rect) return
+  const flow = screenToFlowCoordinate({ x: event.clientX, y: event.clientY })
+  contextMenu.value = { x: event.clientX - rect.left, y: event.clientY - rect.top, flowX: flow.x, flowY: flow.y }
+  menuQuery.value = ''
+  requestAnimationFrame(() => menuInput.value?.focus())
+}
+
+const menuKinds = computed(() => {
+  const q = menuQuery.value.trim().toLowerCase()
+  if (!q) return BLOCK_KINDS
+  return BLOCK_KINDS.filter((k) => k.label.toLowerCase().includes(q) || k.description.toLowerCase().includes(q))
+})
+
+function onConnect(connection: Connection) {
+  const sourceHandle = connection.sourceHandle ?? ''
+  const targetHandle = connection.targetHandle ?? ''
   const sourceIndex = Number(connection.source)
   const sourceStep = steps.value[sourceIndex]
+  if (!sourceStep) return
 
-  if (connection.sourceHandle && connection.sourceHandle.startsWith('output-idx-')) {
-    if (connection.target === END_NODE_ID) {
-      // The End node has no promptText/step to attach a {{data:...}} token to - a data link
-      // into it would crash on `Number('end')` (NaN) below, and it's meaningless anyway.
+  if (sourceHandle.startsWith('flow-out-')) {
+    if (targetHandle !== 'flow-in') {
+      showHint('Переход можно подключить только ко входу перехода (порт в шапке блока).')
       return
     }
-    // The handle carries the output's INDEX (stable across renames - vue-flow caches handle ids
-    // at mount, so a name-based id would report the pre-rename name here). Resolve the CURRENT
-    // name at connect time instead.
-    const outputIndex = Number(connection.sourceHandle.slice('output-idx-'.length))
+    const routeIndex = Number(sourceHandle.slice('flow-out-'.length))
+    const route = sourceStep.routes[routeIndex]
+    if (!route) return
+    if (connection.target === END_NODE_ID) {
+      route.target = 'end'
+    } else {
+      const targetIndex = Number(connection.target)
+      if (targetIndex === sourceIndex) {
+        showHint('Блок нельзя соединить с самим собой.')
+        return
+      }
+      if (wouldCreateCycle(steps.value, sourceIndex, targetIndex)) {
+        showHint('Так получится цикл — пайплайн выполняется только вперёд.')
+        return
+      }
+      route.target = targetIndex
+    }
+    selectedStepIndex.value = null
+    selectedEdgeId.value = flowEdgeId(sourceIndex, routeIndex)
+    return
+  }
+
+  if (sourceHandle.startsWith('data-out-')) {
+    if (targetHandle !== 'data-in') {
+      showHint('Выход данных подключается ко входу данных (зелёный порт).')
+      return
+    }
+    if (connection.target === END_NODE_ID) return
+    const targetIndex = Number(connection.target)
+    if (targetIndex === sourceIndex) {
+      showHint('Блок нельзя соединить с самим собой.')
+      return
+    }
+    const outputIndex = Number(sourceHandle.slice('data-out-'.length))
     const sourceOutputName = sourceStep.outputs[outputIndex]?.name ?? ''
     if (!sourceOutputName.trim()) {
-      showHint('Сначала дайте выходу имя — потом тяните от него связь.')
+      showHint('Сначала дайте выходу имя, потом тяните от него провод.')
       return
     }
-    const targetIndex = Number(connection.target)
+    const target = steps.value[targetIndex]
+    if (sourceStep.dataLinksOut.some((l) => l.sourceOutputName === sourceOutputName && l.targetStepIndex === targetIndex)) {
+      showHint('Этот выход уже подключён к этому блоку.')
+      return
+    }
+    if (target.contentType === 'CONDITION' && wiredInputsFor(targetIndex).length > 0) {
+      showHint('У условия ровно один вход — сначала отвяжите текущий.')
+      return
+    }
+    if (!isAncestor(steps.value, sourceIndex, targetIndex)) {
+      showHint('Данные идут только по ходу выполнения: соедините блоки переходом, иначе схема не сохранится.')
+    }
     const token = crypto.randomUUID()
     sourceStep.dataLinksOut.push({ token, sourceOutputName, targetStepIndex: targetIndex })
-    const target = steps.value[targetIndex]
-    target.promptText = `${target.promptText ?? ''}\n{{data:${token}}}`
+    if (target.contentType !== 'CONDITION') {
+      target.promptText = `${target.promptText ?? ''}\n{{data:${token}}}`
+    }
     selectedStepIndex.value = null
-    selectedEdge.value = null
-    return
+    selectedEdgeId.value = `data-${token}`
   }
-
-  const targetIndex = connection.target === END_NODE_ID ? null : Number(connection.target)
-
-  // A Condition step's two routes are fixed at creation time (outcomeKey 'true'/'false', see
-  // addStep) - dragging from its `route-true`/`route-false` handle rewires that EXISTING route's
-  // target rather than appending a new one, since the graph-shape validation requires exactly
-  // those two keys and no more.
-  if (sourceStep.contentType === 'CONDITION' && connection.sourceHandle?.startsWith('route-')) {
-    const outcomeKey = connection.sourceHandle.slice('route-'.length)
-    const routeIndex = sourceStep.routes.findIndex((r) => r.outcomeKey === outcomeKey)
-    if (routeIndex >= 0) {
-      sourceStep.routes[routeIndex].targetStepIndex = targetIndex
-      selectedStepIndex.value = null
-      selectedEdge.value = { stepIndex: sourceIndex, routeIndex }
-    }
-    return
-  }
-
-  sourceStep.routes.push({ outcomeKey: null, targetStepIndex: targetIndex })
-  selectedStepIndex.value = null
-  selectedEdge.value = { stepIndex: sourceIndex, routeIndex: sourceStep.routes.length - 1 }
 }
 
-function removeSelectedRoute() {
-  if (!selectedEdge.value) return
-  const { stepIndex, routeIndex } = selectedEdge.value
-  const step = steps.value[stepIndex]
-  if (step.contentType === 'CONDITION') {
-    // A Condition step must always keep exactly its two true/false routes - "removing" one here
-    // just clears its target back to unwired rather than deleting the route entry itself.
-    step.routes[routeIndex].targetStepIndex = null
-  } else {
-    step.routes.splice(routeIndex, 1)
+function removeEdge(id: string) {
+  if (id.startsWith('flow-')) {
+    const [, stepIndex, routeIndex] = id.split('-').map(Number)
+    unwireRoute(stepIndex, routeIndex)
+  } else if (id.startsWith('data-')) {
+    unwireInputByToken(id.slice('data-'.length))
   }
-  selectedEdge.value = null
 }
 
-const selectedRoute = computed(() =>
-  selectedEdge.value ? steps.value[selectedEdge.value.stepIndex].routes[selectedEdge.value.routeIndex] : null,
-)
-const selectedRouteIsConditionBranch = computed(() =>
-  selectedEdge.value ? steps.value[selectedEdge.value.stepIndex].contentType === 'CONDITION' : false,
-)
-
-// A text <input v-model="route.outcomeKey"> that the user types into and clears yields "" rather
-// than null. The backend's default-route matching checks outcomeKey() == null specifically, so an
-// empty string would silently break the "empty = default route" fallback the UI advertises.
-function normalizedSteps(): PipelineUpsertStep[] {
-  return steps.value.map((step) => {
-    // Defensive: a link whose output no longer exists (state saved by an older UI build before
-    // rename-sync existed) would be rejected by the backend - drop it instead of blocking the save.
-    const declaredOutputs = new Set(step.outputs.map((o) => o.name))
+const selectedEdgeSummary = computed(() => {
+  const id = selectedEdgeId.value
+  if (!id) return null
+  if (id.startsWith('flow-')) {
+    const [, stepIndex, routeIndex] = id.split('-').map(Number)
+    const step = steps.value[stepIndex]
+    const route = step?.routes[routeIndex]
+    if (!step || !route) return null
+    const key = route.outcomeKey ?? 'далее'
     return {
-      ...step,
-      routes: step.routes.map((route) => ({
-        ...route,
-        outcomeKey: route.outcomeKey && route.outcomeKey.trim() !== '' ? route.outcomeKey : null,
-      })),
-      dataLinksOut: step.dataLinksOut.filter((link) => declaredOutputs.has(link.sourceOutputName)),
+      kind: 'flow' as const,
+      title: 'Переход',
+      text: `${stepDisplayTitle(step, stepIndex)} → ${routeTargetLabel(route.target) ?? '—'}`,
+      detail: step.contentType === 'CONDITION'
+        ? `Ветка «${key}» условия.`
+        : route.outcomeKey === null
+          ? 'Срабатывает, если Claude не вернул outcome или он не совпал ни с одной веткой.'
+          : `Срабатывает, когда Claude возвращает outcome «${key}» в pipeline_run_step_update.`,
     }
-  })
-}
+  }
+  const token = id.slice('data-'.length)
+  for (const [sourceIndex, step] of steps.value.entries()) {
+    const link = step.dataLinksOut.find((l) => l.token === token)
+    if (link && link.targetStepIndex !== null) {
+      const target = steps.value[link.targetStepIndex]
+      return {
+        kind: 'data' as const,
+        title: 'Провод данных',
+        text: `${stepDisplayTitle(step, sourceIndex)} · ${link.sourceOutputName} → ${stepDisplayTitle(target, link.targetStepIndex)}`,
+        detail: target.contentType === 'CONDITION'
+          ? 'Это значение условие сравнивает с заданным.'
+          : `В инструкцию вставлен маркер {{data:${token.slice(0, 8)}…}} — при запуске он заменится значением выхода.`,
+      }
+    }
+  }
+  return null
+})
 
-async function save() {
-  const unnamedIndex = steps.value.findIndex((step) => step.outputs.some((o) => !o.name.trim()))
-  if (unnamedIndex >= 0) {
-    saveError.value = `У шага «${steps.value[unnamedIndex].title || `Шаг ${unnamedIndex + 1}`}» есть выход без имени — назовите его перед сохранением.`
-    return
-  }
-  saving.value = true
-  saveError.value = null
-  try {
-    const request = {
-      slug: slug.value,
-      name: name.value,
-      description: description.value,
-      projectScope: project.value,
-      parameters: parameters.value,
-      steps: normalizedSteps(),
-    }
-    await updatePipeline(slug.value, request)
-  } catch (cause) {
-    saveError.value = cause instanceof Error ? cause.message : String(cause)
-  } finally {
-    saving.value = false
-  }
+function focusIssue(stepIndex: number | null) {
+  issuesOpen.value = false
+  if (stepIndex === null) return
+  selectedStepIndex.value = stepIndex
+  selectedEdgeId.value = null
+  void fitView({ nodes: [String(stepIndex)], duration: 350, maxZoom: 1, padding: 0.4 })
 }
 </script>
 
 <template>
-  <div class="flex h-screen flex-col bg-elevated">
-    <header class="flex shrink-0 items-center justify-between gap-3 border-b border-border bg-panel px-4 py-2.5">
-      <div class="flex min-w-0 items-center gap-3">
-        <RouterLink
-          :to="{ name: 'pipeline', params: { project, slug } }"
-          class="flex items-center justify-center rounded-lg border border-border p-1.5 text-faint transition hover:border-accent/40 hover:text-accent"
-          title="Назад к пайплайну"
-        >
-          ←
+  <div class="pl-board">
+    <header class="pl-topbar">
+      <div class="pl-topbar-left">
+        <RouterLink :to="{ name: 'pipeline', params: { project, slug } }" class="pl-topbar-back" title="К пайплайну">
+          <AppIcon name="arrowLeft" class="size-4" />
         </RouterLink>
         <div class="min-w-0">
-          <p class="truncate text-[13px] font-semibold text-content">{{ name || slug }}</p>
-          <p class="truncate text-[11px] text-faint">{{ slug }}</p>
+          <p class="pl-topbar-title">{{ name || slug }}</p>
+          <p class="pl-topbar-sub">
+            <span>{{ slug }}</span>
+            <span v-if="dirty" class="pl-dirty">не сохранено</span>
+            <span v-else-if="!loading" class="pl-clean">сохранено</span>
+          </p>
         </div>
       </div>
-      <div class="flex shrink-0 items-center gap-2">
-        <button type="button" class="text-[12.5px] font-medium text-accent" @click="addStep('PROMPT')">+ Prompt</button>
-        <button type="button" class="text-[12.5px] font-medium text-accent" @click="addStep('CONDITION')">+ Condition</button>
-        <button type="button" class="text-[12.5px] font-medium text-accent" @click="addStep('VARIABLE')">+ Variable</button>
-        <RouterLink
-          :to="{ name: 'pipeline-edit', params: { project, slug } }"
-          class="rounded-lg border border-border bg-panel px-3 py-1.5 text-[12.5px] font-medium text-content transition hover:border-accent/40 hover:text-accent"
-        >
-          Настройки
-        </RouterLink>
+
+      <div class="pl-palette" aria-label="Добавить блок">
+        <span class="pl-palette-caption">Добавить</span>
         <button
+          v-for="kind in BLOCK_KINDS"
+          :key="kind.kind"
           type="button"
-          :disabled="saving"
-          class="rounded-lg bg-accent px-3 py-1.5 text-[12.5px] font-medium text-accent-fg transition hover:bg-accent-hover disabled:opacity-50"
-          @click="save"
+          class="pl-palette-item"
+          :style="{ '--kind': kind.color }"
+          :title="kind.description"
+          :disabled="loading"
+          @click="addStep(kind.kind)"
         >
-          {{ saving ? 'Сохранение…' : 'Сохранить' }}
+          <span class="pl-palette-tile"><AppIcon :name="kind.icon" class="size-3.5" /></span>
+          <span class="pl-palette-label">{{ kind.label }}</span>
+        </button>
+      </div>
+
+      <div class="pl-topbar-right">
+        <div class="relative">
+          <button
+            v-if="issues.length"
+            type="button"
+            class="pl-issues-btn"
+            :class="errorCount ? 'pl-issues-btn-error' : 'pl-issues-btn-warn'"
+            @click="issuesOpen = !issuesOpen"
+          >
+            <AppIcon name="warning" class="size-3.5" />
+            <span v-if="errorCount">{{ errorCount }} ошиб.</span>
+            <span v-if="warningCount">{{ warningCount }} предупр.</span>
+          </button>
+          <div v-if="issuesOpen && issues.length" class="pl-issues-pop">
+            <button
+              v-for="(issue, i) in issues"
+              :key="i"
+              type="button"
+              class="pl-issue"
+              :class="`pl-issue-${issue.severity}`"
+              @click="focusIssue(issue.stepIndex)"
+            >
+              <span class="pl-issue-dot" />
+              <span>{{ issue.text }}</span>
+            </button>
+          </div>
+        </div>
+        <RouterLink :to="{ name: 'pipeline-edit', params: { project, slug } }" class="pl-btn">
+          <AppIcon name="cog" class="size-3.5" />
+          Параметры
+        </RouterLink>
+        <button type="button" :disabled="saving || loading" class="pl-btn pl-btn-primary" title="⌘S / Ctrl+S" @click="save">
+          {{ saving ? 'Сохраняю…' : 'Сохранить' }}
         </button>
       </div>
     </header>
 
     <ErrorState v-if="loadError || saveError" :message="(loadError || saveError)!" class="m-3 shrink-0" />
 
-    <div v-if="!loading" class="relative min-h-0 flex-1">
+    <div v-if="!loading" class="pl-canvas-wrap">
       <VueFlow
         :nodes="flowNodes"
         :edges="flowEdges"
-        :node-types="{ pipelineStep: PipelineStepNode }"
-        :nodes-connectable="true"
+        :node-types="{ step: PipelineStepNode, end: PipelineEndNode }"
+        :connection-mode="ConnectionMode.Strict"
+        :connection-line-style="{ stroke: 'var(--color-accent)', strokeWidth: 2 }"
+        :delete-key-code="null"
+        :min-zoom="0.2"
+        :max-zoom="1.6"
+        :snap-to-grid="true"
+        :snap-grid="[8, 8]"
         fit-view-on-init
+        class="pl-flow"
         @node-drag-stop="onNodeDragStop"
         @node-click="onNodeClick"
         @edge-click="onEdgeClick"
+        @pane-click="onPaneClick"
+        @pane-context-menu="onPaneContextMenu"
         @connect="onConnect"
-      />
-
-      <div
-        v-if="boardHint"
-        class="absolute bottom-4 left-1/2 -translate-x-1/2 rounded-lg border border-border bg-panel px-4 py-2 text-[12.5px] text-content shadow-lg"
       >
-        {{ boardHint }}
+        <svg class="pl-bg">
+          <pattern
+            id="pl-dots"
+            :x="viewport.x"
+            :y="viewport.y"
+            :width="24 * viewport.zoom"
+            :height="24 * viewport.zoom"
+            patternUnits="userSpaceOnUse"
+          >
+            <circle :cx="viewport.zoom" :cy="viewport.zoom" :r="Math.max(0.6, viewport.zoom)" fill="currentColor" />
+          </pattern>
+          <rect width="100%" height="100%" fill="url(#pl-dots)" />
+        </svg>
+      </VueFlow>
+
+      <div class="pl-controls">
+        <button type="button" class="pl-control" title="Приблизить" @click="zoomIn()"><AppIcon name="plus" class="size-3.5" /></button>
+        <button type="button" class="pl-control" title="Отдалить" @click="zoomOut()"><AppIcon name="minus" class="size-3.5" /></button>
+        <button type="button" class="pl-control" title="Показать всё" @click="fitView({ duration: 300, padding: 0.2 })"><AppIcon name="fit" class="size-3.5" /></button>
       </div>
 
-      <!-- The only editing surface still outside the node itself: a free-form route's outcome key
-           (branching on an arbitrary Claude-reported outcome), floated over the canvas instead of
-           a permanently-docked side panel so the board stays full-bleed the rest of the time. -->
-      <div v-if="selectedRoute" class="absolute right-4 bottom-4 w-72 rounded-xl border border-border bg-panel p-4 shadow-lg">
-        <div class="mb-2 flex items-center justify-between">
-          <span class="text-[12px] font-semibold text-content">Маршрут</span>
-          <button type="button" class="text-faint hover:text-red-600" @click="removeSelectedRoute">✕</button>
+      <div v-if="steps.length === 0" class="pl-empty">
+        <p class="pl-empty-title">Доска пуста</p>
+        <p>Добавьте первый блок из палитры слева или правым кликом по холсту.</p>
+      </div>
+
+      <div class="pl-legend" aria-hidden="true">
+        <span><i class="pl-legend-flow" />переход</span>
+        <span><i class="pl-legend-data" />данные</span>
+      </div>
+
+      <div v-if="hint" class="pl-toast">{{ hint }}</div>
+      <div v-else-if="savedToastVisible" class="pl-toast pl-toast-ok"><AppIcon name="check" class="size-3.5" />Сохранено</div>
+
+      <div v-if="selectedEdgeSummary" class="pl-edge-card">
+        <div class="pl-edge-card-head">
+          <span class="pl-edge-card-title">{{ selectedEdgeSummary.title }}</span>
+          <button type="button" class="pl-btn pl-btn-danger" @click="removeEdge(selectedEdgeId!)">
+            <AppIcon name="unlink" class="size-3.5" />
+            Отсоединить
+          </button>
         </div>
-        <template v-if="!selectedRouteIsConditionBranch">
-          <label class="mb-1 block text-[11.5px] font-medium text-muted">Ключ outcome</label>
-          <input
-            v-model="selectedRoute.outcomeKey"
-            placeholder="пусто = маршрут по умолчанию"
-            class="w-full rounded-lg border border-border bg-elevated px-2 py-1.5 text-[12.5px] text-content"
-          />
-          <p class="mt-2 text-[11px] text-faint">
-            Claude должен вернуть это значение как outcome в pipeline_run_step_update. Пустое значение — маршрут
-            по умолчанию (если outcome не передан или не совпал ни с одним другим маршрутом).
-          </p>
-        </template>
-        <p v-else class="text-[11.5px] text-faint">
-          Ветка "{{ selectedRoute.outcomeKey }}" условия — целевой шаг выбирается перетаскиванием провода на
-          канвасе, ключ фиксирован.
-        </p>
+        <p class="pl-edge-card-text">{{ selectedEdgeSummary.text }}</p>
+        <p class="pl-edge-card-detail">{{ selectedEdgeSummary.detail }}</p>
+        <p class="pl-edge-card-key">Delete — отсоединить, Esc — снять выделение</p>
+      </div>
+
+      <div v-if="contextMenu" class="pl-menu" :style="{ left: `${contextMenu.x}px`, top: `${contextMenu.y}px` }" @click.stop>
+        <input ref="menuInput" v-model="menuQuery" placeholder="Какой блок добавить?" class="pl-menu-search" @keydown.enter="menuKinds[0] && addStep(menuKinds[0].kind, { x: contextMenu.flowX, y: contextMenu.flowY })" />
+        <button
+          v-for="kind in menuKinds"
+          :key="kind.kind"
+          type="button"
+          class="pl-menu-item"
+          :style="{ '--kind': kind.color }"
+          @click="addStep(kind.kind, { x: contextMenu!.flowX, y: contextMenu!.flowY })"
+        >
+          <span class="pl-palette-tile"><AppIcon :name="kind.icon" class="size-3.5" /></span>
+          <span class="pl-menu-item-text">
+            <span class="pl-menu-item-label">{{ kind.label }}</span>
+            <span class="pl-menu-item-desc">{{ kind.description }}</span>
+          </span>
+        </button>
+        <p v-if="menuKinds.length === 0" class="pl-menu-empty">Ничего не найдено</p>
       </div>
     </div>
   </div>
