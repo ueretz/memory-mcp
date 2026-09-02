@@ -8,5 +8,6 @@ import java.util.List;
 public interface PipelineDataLinkRepository extends JpaRepository<PipelineDataLink, Long> {
     List<PipelineDataLink> findBySourceStepIdIn(List<Long> stepIds);
     List<PipelineDataLink> findByTargetStepIdIn(List<Long> targetStepIds);
-    void deleteBySourceStepIdIn(List<Long> stepIds);
+    /** Every link points at a step, so deleting by target covers step-sourced AND parameter-sourced links. */
+    void deleteByTargetStepIdIn(List<Long> targetStepIds);
 }

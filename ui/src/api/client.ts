@@ -222,8 +222,9 @@ export function updateSetting(key: string, value: string): Promise<SettingSummar
   return putJson(`/api/settings/${encodeURIComponent(key)}`, { value })
 }
 
-export function fetchPipelines(projectScope: string): Promise<PipelineSummary[]> {
-  return getJson('/api/pipelines', { projectScope })
+/** Pipelines are shared across projects - the list is the same whichever project is open. */
+export function fetchPipelines(): Promise<PipelineSummary[]> {
+  return getJson('/api/pipelines')
 }
 
 export function fetchPipeline(slug: string): Promise<PipelineDetail> {

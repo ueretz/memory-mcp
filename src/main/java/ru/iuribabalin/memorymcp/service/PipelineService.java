@@ -25,6 +25,7 @@ import java.time.Instant;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -62,8 +63,13 @@ public class PipelineService {
     }
 
     @Transactional(readOnly = true)
+    /**
+     * Pipelines are shared across projects: every pipeline is listed regardless of the project the
+     * caller is working in. {@code projectScope} is accepted for backward compatibility with older
+     * callers and only records where a pipeline was authored - it never filters.
+     */
     public List<PipelineSummary> list(String projectScope) {
-        return pipelineRepository.findByProjectScopeOrderByUpdatedAtDesc(projectScope).stream()
+        return pipelineRepository.findAllByOrderByUpdatedAtDesc().stream()
                 .map(this::toSummary)
                 .toList();
     }
@@ -78,7 +84,8 @@ public class PipelineService {
         validateSteps(request.steps());
         validateGraph(request.steps());
         validateDataLinks(request.steps());
-        validateStepKinds(request.steps());
+        validateParameterLinks(request);
+        validateStepKinds(request.steps(), request.parameterLinks());
         if (pipelineRepository.findBySlug(request.slug()).isPresent()) {
             throw new PipelineSlugTakenException(request.slug());
         }
@@ -98,7 +105,8 @@ public class PipelineService {
         validateSteps(request.steps());
         validateGraph(request.steps());
         validateDataLinks(request.steps());
-        validateStepKinds(request.steps());
+        validateParameterLinks(request);
+        validateStepKinds(request.steps(), request.parameterLinks());
         Pipeline pipeline = resolve(slug);
         applyFields(pipeline, request, Instant.now());
         pipelineRepository.save(pipeline);
@@ -111,8 +119,8 @@ public class PipelineService {
         return pipelineRepository.findBySlug(slug)
                 .map(pipeline -> {
                     List<Long> stepIds = stepIdsOf(pipeline.getId());
+                    pipelineDataLinkRepository.deleteByTargetStepIdIn(stepIds);
                     pipelineParameterRepository.deleteByPipelineId(pipeline.getId());
-                    pipelineDataLinkRepository.deleteBySourceStepIdIn(stepIds);
                     pipelineStepOutputRepository.deleteByStepIdIn(stepIds);
                     pipelineStepRouteRepository.deleteByStepIdIn(stepIds);
                     pipelineStepRepository.deleteByPipelineId(pipeline.getId());
@@ -345,7 +353,43 @@ public class PipelineService {
         }
     }
 
-    private void validateStepKinds(List<PipelineUpsertRequest.StepRequest> steps) {
+    /**
+     * Parameter links: the parameter must exist in this same request, the target must be a real
+     * step, and tokens are unique across BOTH kinds of link (they share one unique index and one
+     * {@code {{data:token}}} namespace inside prompts).
+     */
+    private void validateParameterLinks(PipelineUpsertRequest request) {
+        Set<String> parameterNames = request.parameters().stream()
+                .map(PipelineUpsertRequest.ParameterRequest::name)
+                .collect(Collectors.toSet());
+        Set<String> tokens = new HashSet<>();
+        for (PipelineUpsertRequest.StepRequest step : request.steps()) {
+            for (PipelineUpsertRequest.StepRequest.DataLinkRequest link : step.dataLinksOut()) {
+                if (!tokens.add(link.token())) {
+                    throw new PipelineInvalidGraphException("Data link token '" + link.token() + "' is used more than once");
+                }
+            }
+        }
+        int n = request.steps().size();
+        for (PipelineUpsertRequest.ParameterLinkRequest link : request.parameterLinks()) {
+            if (!parameterNames.contains(link.parameterName())) {
+                throw new PipelineInvalidGraphException(
+                        "Parameter link wires a parameter '" + link.parameterName() + "' the pipeline does not declare");
+            }
+            Integer target = link.targetStepIndex();
+            if (target == null || target < 0 || target >= n) {
+                throw new PipelineInvalidGraphException(
+                        "Parameter '" + link.parameterName() + "' is wired to step index " + target
+                                + ", but the pipeline only has " + n + " steps");
+            }
+            if (link.token() == null || link.token().isBlank() || !tokens.add(link.token())) {
+                throw new PipelineInvalidGraphException("Data link token '" + link.token() + "' is used more than once");
+            }
+        }
+    }
+
+    private void validateStepKinds(List<PipelineUpsertRequest.StepRequest> steps,
+                                   List<PipelineUpsertRequest.ParameterLinkRequest> parameterLinks) {
         int n = steps.size();
         int[] incomingDataLinkCount = new int[n];
         for (PipelineUpsertRequest.StepRequest step : steps) {
@@ -353,6 +397,11 @@ public class PipelineService {
                 if (link.targetStepIndex() != null) {
                     incomingDataLinkCount[link.targetStepIndex()]++;
                 }
+            }
+        }
+        for (PipelineUpsertRequest.ParameterLinkRequest link : parameterLinks) {
+            if (link.targetStepIndex() != null && link.targetStepIndex() >= 0 && link.targetStepIndex() < n) {
+                incomingDataLinkCount[link.targetStepIndex()]++;
             }
         }
         for (int i = 0; i < n; i++) {
@@ -426,7 +475,11 @@ public class PipelineService {
     }
 
     private void replaceParametersAndSteps(Long pipelineId, PipelineUpsertRequest request) {
+        List<Long> existingStepIds = stepIdsOf(pipelineId);
+        // Links first: parameter-sourced links reference parameters, which are replaced next.
+        pipelineDataLinkRepository.deleteByTargetStepIdIn(existingStepIds);
         pipelineParameterRepository.deleteByPipelineId(pipelineId);
+        Map<String, Long> parameterIdByName = new HashMap<>();
         int paramIndex = 0;
         for (PipelineUpsertRequest.ParameterRequest parameterRequest : request.parameters()) {
             PipelineParameter parameter = new PipelineParameter();
@@ -437,11 +490,9 @@ public class PipelineService {
             parameter.setRequired(parameterRequest.required());
             parameter.setDefaultValue(parameterRequest.defaultValue());
             parameter.setOrderIndex(paramIndex++);
-            pipelineParameterRepository.save(parameter);
+            parameterIdByName.put(parameter.getName(), pipelineParameterRepository.save(parameter).getId());
         }
 
-        List<Long> existingStepIds = stepIdsOf(pipelineId);
-        pipelineDataLinkRepository.deleteBySourceStepIdIn(existingStepIds);
         pipelineStepOutputRepository.deleteByStepIdIn(existingStepIds);
         pipelineStepRouteRepository.deleteByStepIdIn(existingStepIds);
         pipelineStepRepository.deleteByPipelineId(pipelineId);
@@ -503,6 +554,13 @@ public class PipelineService {
                 pipelineDataLinkRepository.save(link);
             }
         }
+        for (PipelineUpsertRequest.ParameterLinkRequest linkRequest : request.parameterLinks()) {
+            PipelineDataLink link = new PipelineDataLink();
+            link.setToken(linkRequest.token());
+            link.setSourceParameterId(parameterIdByName.get(linkRequest.parameterName()));
+            link.setTargetStepId(savedSteps.get(linkRequest.targetStepIndex()).getId());
+            pipelineDataLinkRepository.save(link);
+        }
     }
 
     private PipelineSummary toSummary(Pipeline pipeline) {
@@ -546,7 +604,16 @@ public class PipelineService {
                             s.getConditionOperator(), s.getConditionValue());
                 })
                 .toList();
+        Map<Long, String> parameterNameById = parameters.stream()
+                .collect(Collectors.toMap(PipelineDetail.PipelineParameterView::id, PipelineDetail.PipelineParameterView::name));
+        List<PipelineDetail.PipelineParameterLinkView> parameterLinks = pipelineDataLinkRepository
+                .findByTargetStepIdIn(pipelineSteps.stream().map(PipelineStep::getId).toList()).stream()
+                .filter(PipelineDataLink::isParameterSourced)
+                .map(link -> new PipelineDetail.PipelineParameterLinkView(
+                        link.getId(), link.getToken(), parameterNameById.get(link.getSourceParameterId()),
+                        orderIndexById.get(link.getTargetStepId()), titleById.get(link.getTargetStepId())))
+                .toList();
         return new PipelineDetail(pipeline.getId(), pipeline.getSlug(), pipeline.getName(), pipeline.getDescription(),
-                pipeline.getProjectScope(), parameters, steps, pipeline.getCreatedBy(), pipeline.getCreatedAt(), pipeline.getUpdatedAt());
+                pipeline.getProjectScope(), parameters, steps, parameterLinks, pipeline.getCreatedBy(), pipeline.getCreatedAt(), pipeline.getUpdatedAt());
     }
 }

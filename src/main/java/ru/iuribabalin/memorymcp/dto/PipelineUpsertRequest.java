@@ -11,9 +11,27 @@ public record PipelineUpsertRequest(
         String description,
         String projectScope,
         List<ParameterRequest> parameters,
-        List<StepRequest> steps
+        List<StepRequest> steps,
+        /**
+         * Wires from a pipeline parameter into a step's {@code {{data:token}}}. They live at the
+         * top level (not inside a step) because their source is a parameter, not a step.
+         */
+        List<ParameterLinkRequest> parameterLinks
 ) {
+    public PipelineUpsertRequest {
+        parameterLinks = parameterLinks == null ? List.of() : parameterLinks;
+    }
+
+    /** Pre-V17 shape: no parameter links. */
+    public PipelineUpsertRequest(String slug, String name, String description, String projectScope,
+                                 List<ParameterRequest> parameters, List<StepRequest> steps) {
+        this(slug, name, description, projectScope, parameters, steps, List.of());
+    }
+
     public record ParameterRequest(String name, String label, PipelineParameter.Type type, boolean required, String defaultValue) {
+    }
+
+    public record ParameterLinkRequest(String token, String parameterName, Integer targetStepIndex) {
     }
 
     public record StepRequest(

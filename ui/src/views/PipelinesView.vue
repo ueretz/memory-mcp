@@ -14,15 +14,12 @@ const props = defineProps<{ project: string }>()
 const project = toRef(props, 'project')
 
 const { data: settings } = useAsyncData(fetchSettings, [dataVersion])
-const { data: pipelines, error, loading, reload } = useAsyncData(
-  () => fetchPipelines(project.value),
-  [project],
-)
+const { data: pipelines, error, loading, reload } = useAsyncData(fetchPipelines, [dataVersion])
 </script>
 
 <template>
   <div>
-    <PageHeader eyebrow="Pipelines" title="Пайплайны" subtitle="Именованные цепочки шагов, собранные вручную.">
+    <PageHeader eyebrow="Pipelines" title="Пайплайны" subtitle="Общие для всех проектов: любой пайплайн можно запустить из любого репозитория.">
       <template #actions>
         <RouterLink
           :to="{ name: 'pipeline-new', params: { project } }"

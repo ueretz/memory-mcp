@@ -410,4 +410,54 @@ class PipelineRunServiceTest {
         assertThat(run.steps().get(0).status()).isEqualTo(PipelineRunStep.Status.DONE);
         assertThat(run.steps().get(1).status()).isEqualTo(PipelineRunStep.Status.DONE);
     }
+
+    private void createParameterLinkPipeline(String slug) {
+        pipelineService.create(new PipelineUpsertRequest(
+                slug, "Param link pipeline", "desc", "pipeline-run-svc-test-project",
+                List.of(new PipelineUpsertRequest.ParameterRequest("folder", "Folder", PipelineParameter.Type.STRING, false, "src")),
+                List.of(new PipelineUpsertRequest.StepRequest("Scan", PipelineStep.ContentType.PROMPT, "Scan {{data:ptok-1}} now",
+                        null, null, 0, 0, List.of(), List.of(), List.of(), null, null)),
+                List.of(new PipelineUpsertRequest.ParameterLinkRequest("ptok-1", "folder", 0))
+        ), "Tester");
+    }
+
+    @Test
+    void resolvedInstructionTextSubstitutesAParameterValueTheRunWasStartedWith() {
+        createParameterLinkPipeline("param-run-1");
+
+        PipelineRunDetail run = pipelineRunService.start("param-run-1", "{\"folder\":\"lib\"}", "Tester");
+
+        assertThat(run.steps().get(0).resolvedInstructionText()).isEqualTo("Scan lib now");
+    }
+
+    @Test
+    void resolvedInstructionTextFallsBackToTheParameterDefault() {
+        createParameterLinkPipeline("param-run-2");
+
+        PipelineRunDetail run = pipelineRunService.start("param-run-2", "{}", "Tester");
+
+        assertThat(run.steps().get(0).resolvedInstructionText()).isEqualTo("Scan src now");
+    }
+
+    @Test
+    void conditionFedByAParameterIsEvaluatedAtStart() {
+        pipelineService.create(new PipelineUpsertRequest(
+                "param-cond-1", "Param condition", "desc", "pipeline-run-svc-test-project",
+                List.of(new PipelineUpsertRequest.ParameterRequest("count", "Count", PipelineParameter.Type.NUMBER, true, null)),
+                List.of(
+                        new PipelineUpsertRequest.StepRequest("Many?", PipelineStep.ContentType.CONDITION, null,
+                                null, null, 0, 0,
+                                List.of(new PipelineUpsertRequest.StepRequest.RouteRequest("true", 1),
+                                        new PipelineUpsertRequest.StepRequest.RouteRequest("false", 2)),
+                                List.of(), List.of(), PipelineStep.ConditionOperator.GREATER_THAN, "10"),
+                        new PipelineUpsertRequest.StepRequest("Big", PipelineStep.ContentType.PROMPT, "big",
+                                null, null, 0, 0, List.of(), List.of(), List.of(), null, null),
+                        new PipelineUpsertRequest.StepRequest("Small", PipelineStep.ContentType.PROMPT, "small",
+                                null, null, 0, 0, List.of(), List.of(), List.of(), null, null)),
+                List.of(new PipelineUpsertRequest.ParameterLinkRequest("ptok-c", "count", 0))
+        ), "Tester");
+
+        assertThat(pipelineRunService.start("param-cond-1", "{\"count\":\"20\"}", "Tester").currentStepOrderIndex()).isEqualTo(1);
+        assertThat(pipelineRunService.start("param-cond-1", "{\"count\":5}", "Tester").currentStepOrderIndex()).isEqualTo(2);
+    }
 }

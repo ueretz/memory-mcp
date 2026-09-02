@@ -3,7 +3,7 @@ import { ref, toRef, watch, computed } from 'vue'
 import { useRouter } from 'vue-router'
 
 import { createPipeline, fetchPipeline, updatePipeline } from '@/api/client'
-import type { PipelineParameterType, PipelineUpsertParameter, PipelineUpsertStep } from '@/api/types'
+import type { PipelineParameterType, PipelineUpsertParameter, PipelineUpsertParameterLink, PipelineUpsertStep } from '@/api/types'
 import AppIcon from '@/components/AppIcon.vue'
 import ErrorState from '@/components/ErrorState.vue'
 import PageHeader from '@/components/PageHeader.vue'
@@ -24,6 +24,10 @@ const parameters = ref<PipelineUpsertParameter[]>([])
 // updatePipeline replaces the whole pipeline definition - submitting an empty list here would
 // silently wipe out every step the author already built on the board.
 const steps = ref<PipelineUpsertStep[]>([])
+// Parameter -> step wires are drawn on the board; round-trip them here, dropping any whose
+// parameter was renamed or removed on this screen (the backend rejects links to unknown names).
+const parameterLinks = ref<PipelineUpsertParameterLink[]>([])
+const existingProjectScope = ref<string | null>(null)
 const saving = ref(false)
 const saveError = ref<string | null>(null)
 
@@ -31,6 +35,8 @@ async function loadForEdit() {
   if (!editingSlug.value) return
   const pipeline = await fetchPipeline(editingSlug.value)
   slug.value = pipeline.slug
+  existingProjectScope.value = pipeline.projectScope
+  parameterLinks.value = pipeline.parameterLinks.map((l) => ({ token: l.token, parameterName: l.parameterName, targetStepIndex: l.targetStepOrderIndex }))
   name.value = pipeline.name
   description.value = pipeline.description ?? ''
   parameters.value = pipeline.parameters.map((p) => ({
@@ -74,9 +80,12 @@ async function save() {
       slug: slug.value,
       name: name.value,
       description: description.value || null,
-      projectScope: project.value,
+      // Pipelines are shared across projects; a new one is saved without a scope, an existing one
+      // keeps whatever scope it was created with (informational only, never used for filtering).
+      projectScope: isEditing.value ? existingProjectScope.value : null,
       parameters: parameters.value,
       steps: steps.value,
+      parameterLinks: parameterLinks.value.filter((link) => parameters.value.some((p) => p.name === link.parameterName)),
     }
     const result = isEditing.value ? await updatePipeline(editingSlug.value!, request) : await createPipeline(request)
     // Both creating a new pipeline and editing an existing one's metadata land on the board next -

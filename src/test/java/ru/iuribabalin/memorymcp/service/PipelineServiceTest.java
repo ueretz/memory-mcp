@@ -522,4 +522,62 @@ class PipelineServiceTest {
         assertThatThrownBy(() -> pipelineService.create(request, "Tester"))
                 .isInstanceOf(PipelineInvalidGraphException.class);
     }
+
+    private PipelineUpsertRequest parameterLinkRequest(String slug) {
+        return new PipelineUpsertRequest(
+                slug, "Param link pipeline", "desc", "pipeline-svc-test-project",
+                List.of(new PipelineUpsertRequest.ParameterRequest("folder", "Folder", PipelineParameter.Type.STRING, true, null)),
+                List.of(new PipelineUpsertRequest.StepRequest("Report", PipelineStep.ContentType.PROMPT, "scan {{data:ptok-1}}",
+                        null, null, 0, 0, List.of(), List.of(), List.of(), null, null)),
+                List.of(new PipelineUpsertRequest.ParameterLinkRequest("ptok-1", "folder", 0)));
+    }
+
+    @Test
+    void savesAndReadsBackParameterLinksAcrossResaves() {
+        pipelineService.create(parameterLinkRequest("param-link-1"), "Tester");
+
+        PipelineDetail detail = pipelineService.update("param-link-1", parameterLinkRequest("param-link-1"));
+
+        assertThat(detail.parameterLinks()).hasSize(1);
+        PipelineDetail.PipelineParameterLinkView link = detail.parameterLinks().get(0);
+        assertThat(link.token()).isEqualTo("ptok-1");
+        assertThat(link.parameterName()).isEqualTo("folder");
+        assertThat(link.targetStepOrderIndex()).isEqualTo(0);
+        assertThat(link.targetStepTitle()).isEqualTo("Report");
+        assertThat(detail.steps().get(0).dataLinksOut()).isEmpty();
+    }
+
+    @Test
+    void rejectsAParameterLinkToAnUndeclaredParameter() {
+        PipelineUpsertRequest request = new PipelineUpsertRequest(
+                "param-link-2", "Param link pipeline", "desc", "pipeline-svc-test-project",
+                List.of(),
+                List.of(new PipelineUpsertRequest.StepRequest("Report", PipelineStep.ContentType.PROMPT, "scan",
+                        null, null, 0, 0, List.of(), List.of(), List.of(), null, null)),
+                List.of(new PipelineUpsertRequest.ParameterLinkRequest("ptok-2", "missing", 0)));
+
+        assertThatThrownBy(() -> pipelineService.create(request, "Tester"))
+                .isInstanceOf(PipelineInvalidGraphException.class)
+                .hasMessageContaining("missing");
+    }
+
+    @Test
+    void aParameterLinkCountsAsTheConditionStepsSingleInput() {
+        PipelineUpsertRequest request = new PipelineUpsertRequest(
+                "param-link-3", "Param link pipeline", "desc", "pipeline-svc-test-project",
+                List.of(new PipelineUpsertRequest.ParameterRequest("count", "Count", PipelineParameter.Type.NUMBER, true, null)),
+                List.of(
+                        new PipelineUpsertRequest.StepRequest("Many?", PipelineStep.ContentType.CONDITION, null,
+                                null, null, 0, 0,
+                                List.of(new PipelineUpsertRequest.StepRequest.RouteRequest("true", 1),
+                                        new PipelineUpsertRequest.StepRequest.RouteRequest("false", null)),
+                                List.of(), List.of(), PipelineStep.ConditionOperator.GREATER_THAN, "10"),
+                        new PipelineUpsertRequest.StepRequest("Deploy", PipelineStep.ContentType.PROMPT, "deploy",
+                                null, null, 0, 0, List.of(), List.of(), List.of(), null, null)),
+                List.of(new PipelineUpsertRequest.ParameterLinkRequest("ptok-3", "count", 0)));
+
+        PipelineDetail detail = pipelineService.create(request, "Tester");
+
+        assertThat(detail.parameterLinks()).extracting(PipelineDetail.PipelineParameterLinkView::parameterName).containsExactly("count");
+    }
 }

@@ -1,6 +1,7 @@
 import type {
   PipelineConditionOperator,
   PipelineDetail,
+  PipelineParameterType,
   PipelineStepContentType,
   PipelineUpsertDataLink,
   PipelineUpsertOutput,
@@ -38,6 +39,23 @@ export interface BoardStep {
   conditionOperator: PipelineConditionOperator | null
   conditionValue: string | null
 }
+
+/** A wire from the board's "input parameters" node into a step's data input. */
+export interface BoardParamLink {
+  token: string
+  parameterName: string
+  targetStepIndex: number
+}
+
+/** Parameter pins are colored by type (the spec's PIN_COLORS); step outputs stay untyped/emerald. */
+export const PARAM_PIN_COLORS: Record<PipelineParameterType, string> = {
+  STRING: '#eab308',
+  NUMBER: '#3b82f6',
+  BOOLEAN: '#a855f7',
+}
+
+export const PARAMS_NODE_ID = 'params'
+export const PARAMS_SOURCE_TITLE = 'Параметры'
 
 export interface BlockKindMeta {
   kind: PipelineStepContentType
@@ -186,6 +204,12 @@ export function applyLegacyAutoLayoutIfNeeded(steps: BoardStep[]): void {
   })
 }
 
+export function paramLinksFromDetail(pipeline: PipelineDetail): BoardParamLink[] {
+  return pipeline.parameterLinks
+    .filter((l) => l.targetStepOrderIndex !== null)
+    .map((l) => ({ token: l.token, parameterName: l.parameterName, targetStepIndex: l.targetStepOrderIndex as number }))
+}
+
 export function toUpsertSteps(steps: BoardStep[]): PipelineUpsertStep[] {
   return steps.map((step) => {
     const declaredOutputs = new Set(step.outputs.map((o) => o.name))
@@ -215,8 +239,12 @@ export function toUpsertSteps(steps: BoardStep[]): PipelineUpsertStep[] {
 }
 
 /** Remove step `index` and re-point every route / data link that referenced steps by index. */
-export function removeStepAt(steps: BoardStep[], index: number): void {
+export function removeStepAt(steps: BoardStep[], index: number, paramLinks: BoardParamLink[] = []): void {
   steps.splice(index, 1)
+  const survivingParamLinks = paramLinks
+    .filter((l) => l.targetStepIndex !== index)
+    .map((l) => ({ ...l, targetStepIndex: l.targetStepIndex > index ? l.targetStepIndex - 1 : l.targetStepIndex }))
+  paramLinks.splice(0, paramLinks.length, ...survivingParamLinks)
   steps.forEach((step) => {
     step.routes = step.routes.map((r) => {
       if (r.target === index) return { ...r, target: null }
@@ -337,9 +365,15 @@ export interface BoardIssue {
   text: string
 }
 
-export function collectIssues(steps: BoardStep[]): BoardIssue[] {
+export function collectIssues(steps: BoardStep[], paramLinks: BoardParamLink[] = [], parameterNames: string[] = []): BoardIssue[] {
   const issues: BoardIssue[] = []
   if (steps.length === 0) return issues
+  const knownParameters = new Set(parameterNames)
+  paramLinks.forEach((link) => {
+    if (!knownParameters.has(link.parameterName)) {
+      issues.push({ stepIndex: link.targetStepIndex, severity: 'error', text: `Параметр «${link.parameterName}» больше не существует — отсоедините его провод` })
+    }
+  })
   const { roots, reachable, isolated } = analyzeGraph(steps)
   if (roots.length === 0 && steps.length > 0 && isolated.size < steps.length) {
     issues.push({ stepIndex: null, severity: 'error', text: 'Нет стартового блока: у каждого блока есть входящий переход' })
@@ -355,6 +389,9 @@ export function collectIssues(steps: BoardStep[]): BoardIssue[] {
   steps.forEach((step) => step.dataLinksOut.forEach((l) => {
     if (l.targetStepIndex !== null) incomingData[l.targetStepIndex]++
   }))
+  paramLinks.forEach((l) => {
+    if (l.targetStepIndex >= 0 && l.targetStepIndex < steps.length) incomingData[l.targetStepIndex]++
+  })
   steps.forEach((step, i) => {
     const title = stepDisplayTitle(step, i)
     if (!reachable.has(i) && roots.length > 0 && steps.length > 1) {

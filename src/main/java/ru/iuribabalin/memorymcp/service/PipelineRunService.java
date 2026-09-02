@@ -13,6 +13,7 @@ import ru.iuribabalin.memorymcp.entity.PipelineStep;
 import ru.iuribabalin.memorymcp.entity.PipelineStepOutput;
 import ru.iuribabalin.memorymcp.entity.PipelineStepRoute;
 import ru.iuribabalin.memorymcp.repository.PipelineDataLinkRepository;
+import ru.iuribabalin.memorymcp.repository.PipelineParameterRepository;
 import ru.iuribabalin.memorymcp.repository.PipelineRepository;
 import ru.iuribabalin.memorymcp.repository.PipelineRunRepository;
 import ru.iuribabalin.memorymcp.repository.PipelineRunStepOutputRepository;
@@ -24,6 +25,7 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
 import java.time.Instant;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -42,6 +44,7 @@ public class PipelineRunService {
     private final PipelineStepOutputRepository pipelineStepOutputRepository;
     private final PipelineDataLinkRepository pipelineDataLinkRepository;
     private final PipelineRunStepOutputRepository pipelineRunStepOutputRepository;
+    private final PipelineParameterRepository pipelineParameterRepository;
     private final ObjectMapper objectMapper;
 
     public PipelineRunService(PipelineRunRepository pipelineRunRepository,
@@ -52,6 +55,7 @@ public class PipelineRunService {
                                PipelineStepOutputRepository pipelineStepOutputRepository,
                                PipelineDataLinkRepository pipelineDataLinkRepository,
                                PipelineRunStepOutputRepository pipelineRunStepOutputRepository,
+                               PipelineParameterRepository pipelineParameterRepository,
                                ObjectMapper objectMapper) {
         this.pipelineRunRepository = pipelineRunRepository;
         this.pipelineRunStepRepository = pipelineRunStepRepository;
@@ -61,6 +65,7 @@ public class PipelineRunService {
         this.pipelineStepOutputRepository = pipelineStepOutputRepository;
         this.pipelineDataLinkRepository = pipelineDataLinkRepository;
         this.pipelineRunStepOutputRepository = pipelineRunStepOutputRepository;
+        this.pipelineParameterRepository = pipelineParameterRepository;
         this.objectMapper = objectMapper;
     }
 
@@ -306,9 +311,46 @@ public class PipelineRunService {
             return "";
         }
         PipelineDataLink link = incoming.get(0);
+        if (link.isParameterSourced()) {
+            return resolveParameterValue(run, link.getSourceParameterId(), parameterValues(run));
+        }
         return pipelineRunStepRepository.findByRunIdAndPipelineStepId(run.getId(), link.getSourceStepId())
                 .flatMap(sourceRunStep -> pipelineRunStepOutputRepository.findByRunStepIdAndOutputId(sourceRunStep.getId(), link.getSourceOutputId()))
                 .map(PipelineRunStepOutput::getValue)
+                .orElse("");
+    }
+
+    /** The values the run was started with, keyed by parameter name (empty when none were given). */
+    private Map<String, String> parameterValues(PipelineRun run) {
+        Map<String, String> values = new HashMap<>();
+        if (run.getParametersJson() == null || run.getParametersJson().isBlank()) {
+            return values;
+        }
+        JsonNode node;
+        try {
+            node = objectMapper.readTree(run.getParametersJson());
+        } catch (Exception ex) {
+            return values;
+        }
+        for (String name : node.propertyNames()) {
+            JsonNode value = node.get(name);
+            if (value != null && !value.isNull()) {
+                values.put(name, value.asString());
+            }
+        }
+        return values;
+    }
+
+    /** Given value, else the parameter's default, else "" - the same soft fallback unreported outputs get. */
+    private String resolveParameterValue(PipelineRun run, Long parameterId, Map<String, String> given) {
+        return pipelineParameterRepository.findById(parameterId)
+                .map(parameter -> {
+                    String value = given.get(parameter.getName());
+                    if (value != null) {
+                        return value;
+                    }
+                    return parameter.getDefaultValue() != null ? parameter.getDefaultValue() : "";
+                })
                 .orElse("");
     }
 
@@ -378,16 +420,24 @@ public class PipelineRunService {
                 .collect(Collectors.toMap(PipelineRunStep::getPipelineStepId, PipelineRunStep::getId));
         List<PipelineDataLink> incomingLinks = pipelineDataLinkRepository.findByTargetStepIdIn(pipelineStepIds);
         List<Long> sourceRunStepIds = incomingLinks.stream()
+                .filter(link -> !link.isParameterSourced())
                 .map(link -> runStepIdByPipelineStepId.get(link.getSourceStepId()))
                 .filter(Objects::nonNull)
                 .toList();
         Map<String, String> reportedValues = pipelineRunStepOutputRepository.findByRunStepIdIn(sourceRunStepIds).stream()
                 .collect(Collectors.toMap(o -> o.getRunStepId() + ":" + o.getOutputId(), PipelineRunStepOutput::getValue));
+        Map<String, String> givenParameters = parameterValues(run);
+        Map<String, String> parameterValueByToken = new HashMap<>();
+        for (PipelineDataLink link : incomingLinks) {
+            if (link.isParameterSourced()) {
+                parameterValueByToken.put(link.getToken(), resolveParameterValue(run, link.getSourceParameterId(), givenParameters));
+            }
+        }
 
         List<PipelineRunDetail.PipelineRunStepView> steps = runSteps.stream()
                 .map(s -> new PipelineRunDetail.PipelineRunStepView(s.getId(), s.getOrderIndex(), s.getTitle(),
                         s.getContentType(), s.getStatus(), s.getNote(), s.getStartedAt(), s.getFinishedAt(),
-                        resolveInstructionText(s, stepById, incomingLinks, runStepIdByPipelineStepId, reportedValues)))
+                        resolveInstructionText(s, stepById, incomingLinks, runStepIdByPipelineStepId, reportedValues, parameterValueByToken)))
                 .toList();
         return new PipelineRunDetail(run.getId(), run.getPipelineId(), pipelineSlug, run.getStatus(),
                 run.getParametersJson(), run.getStartedAt(), run.getFinishedAt(), run.getStartedBy(),
@@ -397,7 +447,8 @@ public class PipelineRunService {
     private String resolveInstructionText(PipelineRunStep runStep, Map<Long, PipelineStep> stepById,
                                            List<PipelineDataLink> allIncomingLinks,
                                            Map<Long, Long> runStepIdByPipelineStepId,
-                                           Map<String, String> reportedValues) {
+                                           Map<String, String> reportedValues,
+                                           Map<String, String> parameterValueByToken) {
         if (runStep.getPipelineStepId() == null) {
             return null;
         }
@@ -410,10 +461,15 @@ public class PipelineRunService {
             if (!link.getTargetStepId().equals(runStep.getPipelineStepId())) {
                 continue;
             }
-            Long sourceRunStepId = runStepIdByPipelineStepId.get(link.getSourceStepId());
-            String value = sourceRunStepId != null
-                    ? reportedValues.getOrDefault(sourceRunStepId + ":" + link.getSourceOutputId(), "")
-                    : "";
+            String value;
+            if (link.isParameterSourced()) {
+                value = parameterValueByToken.getOrDefault(link.getToken(), "");
+            } else {
+                Long sourceRunStepId = runStepIdByPipelineStepId.get(link.getSourceStepId());
+                value = sourceRunStepId != null
+                        ? reportedValues.getOrDefault(sourceRunStepId + ":" + link.getSourceOutputId(), "")
+                        : "";
+            }
             text = text.replace("{{data:" + link.getToken() + "}}", value);
         }
         return text;

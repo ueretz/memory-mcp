@@ -20,20 +20,26 @@ import type { PipelineStepContentType, PipelineUpsertParameter } from '@/api/typ
 import AppIcon from '@/components/AppIcon.vue'
 import ErrorState from '@/components/ErrorState.vue'
 import PipelineEndNode from '@/components/PipelineEndNode.vue'
+import PipelineParamsNode from '@/components/PipelineParamsNode.vue'
 import PipelineStepNode, { type StepNodeActions, type WiredInput } from '@/components/PipelineStepNode.vue'
 import {
   BLOCK_KINDS,
+  PARAMS_NODE_ID,
+  PARAMS_SOURCE_TITLE,
+  PARAM_PIN_COLORS,
   WIRE_COLORS,
   analyzeGraph,
   collectIssues,
   fromDetail,
   isAncestor,
   newBoardStep,
+  paramLinksFromDetail,
   removeStepAt,
   stepDisplayTitle,
   stripDataToken,
   toUpsertSteps,
   wouldCreateCycle,
+  type BoardParamLink,
   type BoardStep,
 } from '@/lib/pipelineBoard'
 
@@ -49,6 +55,7 @@ const name = ref('')
 const description = ref<string | null>(null)
 const parameters = ref<PipelineUpsertParameter[]>([])
 const steps = ref<BoardStep[]>([])
+const paramLinks = ref<BoardParamLink[]>([])
 const loading = ref(true)
 const loadError = ref<string | null>(null)
 const saving = ref(false)
@@ -59,6 +66,8 @@ const savedToastVisible = ref(false)
 const END_NODE_ID = 'end'
 const CARD_WIDTH = 320
 const endPosition = ref({ x: 0, y: 0 })
+// The parameters node sits left of the leftmost block; its position is session-local like the end node's.
+const paramsPosition = ref({ x: 0, y: 0 })
 // Card sizes are session-local: the API has no field for them, only for positions.
 const nodeSizes = ref<Record<number, { width: number; height: number }>>({})
 
@@ -89,10 +98,21 @@ function buildRequest() {
     projectScope: project.value,
     parameters: parameters.value,
     steps: toUpsertSteps(steps.value),
+    parameterLinks: paramLinks.value.map((l) => ({ token: l.token, parameterName: l.parameterName, targetStepIndex: l.targetStepIndex })),
   }
 }
 
 const dirty = computed(() => !loading.value && JSON.stringify(buildRequest()) !== savedSnapshot.value)
+
+function placeParamsNode() {
+  if (steps.value.length === 0) {
+    paramsPosition.value = { x: -320, y: 40 }
+    return
+  }
+  const minX = Math.min(...steps.value.map((s) => s.positionX))
+  const ys = steps.value.filter((s) => s.positionX === minX).map((s) => s.positionY)
+  paramsPosition.value = { x: minX - 340, y: Math.min(...ys) }
+}
 
 function placeEndNode() {
   if (steps.value.length === 0) {
@@ -119,6 +139,8 @@ async function load() {
       defaultValue: p.defaultValue,
     }))
     steps.value = fromDetail(pipeline)
+    paramLinks.value = paramLinksFromDetail(pipeline)
+    placeParamsNode()
     placeEndNode()
     savedSnapshot.value = JSON.stringify(buildRequest())
     selectedStepIndex.value = null
@@ -132,7 +154,7 @@ async function load() {
 
 watch(slug, load, { immediate: true })
 
-const issues = computed(() => collectIssues(steps.value))
+const issues = computed(() => collectIssues(steps.value, paramLinks.value, parameters.value.map((p) => p.name)))
 const errorCount = computed(() => issues.value.filter((i) => i.severity === 'error').length)
 const warningCount = computed(() => issues.value.filter((i) => i.severity === 'warning').length)
 
@@ -251,7 +273,7 @@ function removeStep(index: number) {
       target.promptText = stripDataToken(target.promptText, link.token)
     }
   })
-  removeStepAt(steps.value, index)
+  removeStepAt(steps.value, index, paramLinks.value)
   const sizes: Record<number, { width: number; height: number }> = {}
   Object.entries(nodeSizes.value).forEach(([key, size]) => {
     const i = Number(key)
@@ -314,14 +336,29 @@ function unwireDataLink(sourceIndex: number, token: string) {
   selectedEdgeId.value = null
 }
 
+function unwireParamLink(token: string) {
+  const link = paramLinks.value.find((l) => l.token === token)
+  if (!link) return
+  const target = steps.value[link.targetStepIndex]
+  if (target) target.promptText = stripDataToken(target.promptText, token)
+  paramLinks.value = paramLinks.value.filter((l) => l.token !== token)
+  selectedEdgeId.value = null
+}
+
 function unwireInputByToken(token: string) {
   steps.value.forEach((step, sourceIndex) => {
     if (step.dataLinksOut.some((l) => l.token === token)) unwireDataLink(sourceIndex, token)
   })
+  unwireParamLink(token)
 }
 
 function wiredInputsFor(stepIndex: number): WiredInput[] {
   const result: WiredInput[] = []
+  paramLinks.value.forEach((link) => {
+    if (link.targetStepIndex === stepIndex) {
+      result.push({ token: link.token, sourceStepTitle: PARAMS_SOURCE_TITLE, sourceOutputName: link.parameterName })
+    }
+  })
   steps.value.forEach((step, sourceIndex) => {
     step.dataLinksOut.forEach((link) => {
       if (link.targetStepIndex === stepIndex) {
@@ -394,6 +431,17 @@ function actionsFor(index: number): StepNodeActions {
 }
 
 const flowNodes = computed(() => [
+  {
+    id: PARAMS_NODE_ID,
+    type: 'params',
+    position: paramsPosition.value,
+    class: 'pl-node pl-node-params',
+    data: {
+      parameters: parameters.value,
+      wiredNames: paramLinks.value.map((l) => l.parameterName),
+      settingsTo: { name: 'pipeline-edit', params: { project: project.value, slug: slug.value } },
+    },
+  },
   ...steps.value.map((step, index) => {
     const size = nodeSizes.value[index]
     const { roots, reachable } = graph.value
@@ -473,7 +521,23 @@ const flowEdges = computed(() => {
         }
       }),
   )
-  return [...transitions, ...dataWires]
+  const paramWires = paramLinks.value.flatMap((link) => {
+    const parameterIndex = parameters.value.findIndex((p) => p.name === link.parameterName)
+    if (parameterIndex < 0 || !steps.value[link.targetStepIndex]) return []
+    const id = `plink-${link.token}`
+    const isSelected = selected === id
+    const color = PARAM_PIN_COLORS[parameters.value[parameterIndex].type]
+    return [{
+      id,
+      source: PARAMS_NODE_ID,
+      sourceHandle: `param-out-${parameterIndex}`,
+      target: String(link.targetStepIndex),
+      targetHandle: 'data-in',
+      class: ['pl-edge pl-edge-data', { 'pl-edge-selected': isSelected }],
+      style: { stroke: isSelected ? WIRE_COLORS.flowSelected : color, strokeWidth: isSelected ? 2.5 : 1.75, strokeDasharray: '6 4' },
+    }]
+  })
+  return [...transitions, ...dataWires, ...paramWires]
 })
 
 // ------------------------------------------------------------------------------------------
@@ -485,6 +549,10 @@ function onNodeDragStop({ node }: NodeDragEvent) {
     endPosition.value = { x: node.position.x, y: node.position.y }
     return
   }
+  if (node.id === PARAMS_NODE_ID) {
+    paramsPosition.value = { x: node.position.x, y: node.position.y }
+    return
+  }
   const step = steps.value[Number(node.id)]
   step.positionX = Math.round(node.position.x)
   step.positionY = Math.round(node.position.y)
@@ -493,7 +561,7 @@ function onNodeDragStop({ node }: NodeDragEvent) {
 function onNodeClick({ node }: NodeMouseEvent) {
   selectedEdgeId.value = null
   contextMenu.value = null
-  selectedStepIndex.value = node.id === END_NODE_ID ? null : Number(node.id)
+  selectedStepIndex.value = node.id === END_NODE_ID || node.id === PARAMS_NODE_ID ? null : Number(node.id)
 }
 
 function onEdgeClick({ edge }: EdgeMouseEvent) {
@@ -528,6 +596,34 @@ const menuKinds = computed(() => {
 function onConnect(connection: Connection) {
   const sourceHandle = connection.sourceHandle ?? ''
   const targetHandle = connection.targetHandle ?? ''
+
+  if (connection.source === PARAMS_NODE_ID) {
+    if (targetHandle !== 'data-in' || connection.target === END_NODE_ID) {
+      showHint('Параметр подключается ко входу данных блока (зелёный порт).')
+      return
+    }
+    const parameter = parameters.value[Number(sourceHandle.slice('param-out-'.length))]
+    const targetIndex = Number(connection.target)
+    const target = steps.value[targetIndex]
+    if (!parameter || !target) return
+    if (paramLinks.value.some((l) => l.parameterName === parameter.name && l.targetStepIndex === targetIndex)) {
+      showHint('Этот параметр уже подключён к этому блоку.')
+      return
+    }
+    if (target.contentType === 'CONDITION' && wiredInputsFor(targetIndex).length > 0) {
+      showHint('У условия ровно один вход — сначала отвяжите текущий.')
+      return
+    }
+    const token = crypto.randomUUID()
+    paramLinks.value.push({ token, parameterName: parameter.name, targetStepIndex: targetIndex })
+    if (target.contentType !== 'CONDITION') {
+      target.promptText = `${target.promptText ?? ''}\n{{data:${token}}}`
+    }
+    selectedStepIndex.value = null
+    selectedEdgeId.value = `plink-${token}`
+    return
+  }
+
   const sourceIndex = Number(connection.source)
   const sourceStep = steps.value[sourceIndex]
   if (!sourceStep) return
@@ -604,6 +700,8 @@ function removeEdge(id: string) {
     unwireRoute(stepIndex, routeIndex)
   } else if (id.startsWith('data-')) {
     unwireInputByToken(id.slice('data-'.length))
+  } else if (id.startsWith('plink-')) {
+    unwireParamLink(id.slice('plink-'.length))
   }
 }
 
@@ -625,6 +723,20 @@ const selectedEdgeSummary = computed(() => {
         : route.outcomeKey === null
           ? 'Срабатывает, если Claude не вернул outcome или он не совпал ни с одной веткой.'
           : `Срабатывает, когда Claude возвращает outcome «${key}» в pipeline_run_step_update.`,
+    }
+  }
+  if (id.startsWith('plink-')) {
+    const token = id.slice('plink-'.length)
+    const link = paramLinks.value.find((l) => l.token === token)
+    const target = link ? steps.value[link.targetStepIndex] : undefined
+    if (!link || !target) return null
+    return {
+      kind: 'data' as const,
+      title: 'Провод параметра',
+      text: `${PARAMS_SOURCE_TITLE} · ${link.parameterName} → ${stepDisplayTitle(target, link.targetStepIndex)}`,
+      detail: target.contentType === 'CONDITION'
+        ? 'Условие сравнит значение параметра с заданным.'
+        : `В инструкцию вставлен маркер {{data:${token.slice(0, 8)}…}} — при запуске он заменится значением параметра (или его значением по умолчанию).`,
     }
   }
   const token = id.slice('data-'.length)
@@ -731,7 +843,7 @@ function focusIssue(stepIndex: number | null) {
       <VueFlow
         :nodes="flowNodes"
         :edges="flowEdges"
-        :node-types="{ step: PipelineStepNode, end: PipelineEndNode }"
+        :node-types="{ step: PipelineStepNode, end: PipelineEndNode, params: PipelineParamsNode }"
         :connection-mode="ConnectionMode.Strict"
         :connection-line-style="{ stroke: 'var(--color-accent)', strokeWidth: 2 }"
         :delete-key-code="null"
@@ -777,6 +889,7 @@ function focusIssue(stepIndex: number | null) {
       <div class="pl-legend" aria-hidden="true">
         <span><i class="pl-legend-flow" />переход</span>
         <span><i class="pl-legend-data" />данные</span>
+        <span><i class="pl-legend-param" />параметр</span>
       </div>
 
       <div v-if="hint" class="pl-toast">{{ hint }}</div>

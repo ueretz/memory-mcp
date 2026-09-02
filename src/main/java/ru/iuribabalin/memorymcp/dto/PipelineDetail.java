@@ -14,6 +14,7 @@ public record PipelineDetail(
         String projectScope,
         List<PipelineParameterView> parameters,
         List<PipelineStepView> steps,
+        List<PipelineParameterLinkView> parameterLinks,
         String createdBy,
         Instant createdAt,
         Instant updatedAt
@@ -21,6 +22,10 @@ public record PipelineDetail(
     public record PipelineParameterView(
             Long id, String name, String label, PipelineParameter.Type type,
             boolean required, String defaultValue, int orderIndex) {
+    }
+
+    public record PipelineParameterLinkView(Long id, String token, String parameterName,
+                                            Integer targetStepOrderIndex, String targetStepTitle) {
     }
 
     public record PipelineStepView(

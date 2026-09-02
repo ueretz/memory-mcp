@@ -568,6 +568,12 @@
 .pl-legend-data {
   border-top: 2px dashed #10b981;
 }
+.pl-legend-param {
+  display: inline-block;
+  width: 18px;
+  height: 0;
+  border-top: 2px dashed #eab308;
+}
 
 .pl-empty {
   position: absolute;
@@ -1294,4 +1300,104 @@
   min-height: 0;
   border: none;
   background: var(--color-border-strong);
+}
+
+/* ---- Input parameters node --------------------------------------------------------------- */
+
+.pl-params {
+  position: relative;
+  display: flex;
+  width: 280px;
+  flex-direction: column;
+  border-radius: 12px;
+  border: 1px solid var(--color-border);
+  background: var(--color-panel);
+  color: var(--color-content);
+  font-size: 12px;
+  box-shadow: var(--shadow-panel);
+}
+.pl-params-head {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 9px 10px 9px 12px;
+  border-bottom: 1px solid var(--color-border);
+  border-radius: 12px 12px 0 0;
+  background: linear-gradient(90deg, color-mix(in srgb, #eab308 14%, var(--color-panel)), var(--color-panel) 70%);
+}
+.pl-params-tile {
+  background: color-mix(in srgb, #eab308 18%, transparent);
+  color: #b45309;
+}
+.dark .pl-params-tile {
+  color: #fbbf24;
+}
+.pl-params-title {
+  font-size: 13px;
+  font-weight: 600;
+}
+.pl-icon-btn-neutral:hover {
+  color: var(--color-accent);
+  background: var(--color-accent-soft);
+}
+.pl-params-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  padding: 10px 12px;
+  color: var(--color-muted);
+}
+.pl-params-rows {
+  display: flex;
+  flex-direction: column;
+  padding: 6px 0;
+  background: var(--color-elevated);
+}
+.pl-params-row {
+  justify-content: space-between;
+  gap: 8px;
+  padding-right: 14px;
+}
+.pl-params-row-text {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+}
+.pl-params-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  font-weight: 600;
+}
+.pl-params-required {
+  margin-left: 2px;
+  color: #dc2626;
+}
+.pl-params-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 10.5px;
+  color: var(--color-faint);
+}
+.pl-params-type {
+  flex-shrink: 0;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 500;
+}
+.pl-params-hint {
+  padding: 8px 12px 10px;
+  border-top: 1px solid var(--color-border);
+  font-size: 10.5px;
+  line-height: 1.45;
+  color: var(--color-faint);
+}
+.vue-flow__handle.pl-pin-param {
+  width: 11px;
+  height: 11px;
 }

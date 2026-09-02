@@ -218,6 +218,20 @@ export interface PipelineSummary {
   updatedAt: string
 }
 
+export interface PipelineParameterLinkView {
+  id: number
+  token: string
+  parameterName: string
+  targetStepOrderIndex: number | null
+  targetStepTitle: string | null
+}
+
+export interface PipelineUpsertParameterLink {
+  token: string
+  parameterName: string
+  targetStepIndex: number | null
+}
+
 export interface PipelineDetail {
   id: number
   slug: string
@@ -226,6 +240,7 @@ export interface PipelineDetail {
   projectScope: string | null
   parameters: PipelineParameterView[]
   steps: PipelineStepView[]
+  parameterLinks: PipelineParameterLinkView[]
   createdBy: string | null
   createdAt: string
   updatedAt: string
@@ -261,6 +276,7 @@ export interface PipelineUpsertRequest {
   projectScope: string | null
   parameters: PipelineUpsertParameter[]
   steps: PipelineUpsertStep[]
+  parameterLinks: PipelineUpsertParameterLink[]
 }
 
 export interface PipelineRunSummary {

@@ -5,7 +5,8 @@ description: Use when the user asks to run/execute a named pipeline built in the
 
 # Running a memory-mcp pipeline
 
-A pipeline is a named, linear sequence of steps a human hand-built in the memory-mcp dashboard
+A pipeline is a named graph of steps a human hand-built in the memory-mcp dashboard; pipelines are
+shared across projects, so any of them can be run from any repo
 (behind the "Pipelines" experimental flag). memory-mcp only stores the definition and tracks run
 state - **you** are the execution engine. Each step's "work" is bounded by whatever tools you
 already have (Bash, Read, Grep, WebFetch, other MCP tools) - there is no separate sandbox or
@@ -15,7 +16,7 @@ the only new part is checking state back into memory-mcp as you go.
 ## Steps
 
 1. **Resolve the pipeline.** If the user gave an exact slug, call `pipeline_get(slug)` directly.
-   Otherwise call `pipeline_list(projectScope)` first and match by name.
+   Otherwise call `pipeline_list()` first and match by name (the list is the same for every project).
    - If `pipeline_get`/`pipeline_list` errors because the feature flag is off, tell the user
      plainly (don't retry) - point them at Settings in the dashboard.
 2. **Collect parameters.** `pipeline_get` returns `parameters` (name/label/type/required/defaultValue).

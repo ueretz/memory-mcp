@@ -9,4 +9,5 @@ import java.util.Optional;
 public interface PipelineRepository extends JpaRepository<Pipeline, Long> {
     Optional<Pipeline> findBySlug(String slug);
     List<Pipeline> findByProjectScopeOrderByUpdatedAtDesc(String projectScope);
+    List<Pipeline> findAllByOrderByUpdatedAtDesc();
 }

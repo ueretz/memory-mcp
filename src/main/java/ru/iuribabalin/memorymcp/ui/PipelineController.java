@@ -27,7 +27,7 @@ public class PipelineController {
     }
 
     @GetMapping("/api/pipelines")
-    public List<PipelineSummary> list(@RequestParam String projectScope) {
+    public List<PipelineSummary> list(@RequestParam(required = false) String projectScope) {
         return pipelineService.list(projectScope);
     }
 

@@ -34,12 +34,13 @@ public class PipelineMcpTools {
     }
 
     @McpTool(name = "pipeline_list",
-            description = "List hand-authored pipelines available for a project - each is a named, linear sequence " +
-                    "of steps built in the memory-mcp dashboard. Call this to resolve a pipeline name the user " +
-                    "mentioned into its exact slug before pipeline_get/pipeline_run_start. Disabled unless the " +
-                    "'Pipelines' experimental feature is turned on in dashboard Settings.")
+            description = "List hand-authored pipelines - each is a named graph of steps built in the memory-mcp " +
+                    "dashboard. Pipelines are shared across every project, so the same list comes back whichever " +
+                    "repo you are in. Call this to resolve a pipeline name the user mentioned into its exact slug " +
+                    "before pipeline_get/pipeline_run_start. Disabled unless the 'Pipelines' experimental feature " +
+                    "is turned on in dashboard Settings.")
     public List<PipelineSummary> pipelineList(
-            @McpToolParam(description = "Project identifier, auto-derived from the git repo name", required = true) String projectScope) {
+            @McpToolParam(description = "Optional, ignored for filtering - pipelines are shared across projects", required = false) String projectScope) {
         requireEnabled();
         return pipelineService.list(projectScope);
     }
