@@ -20,8 +20,12 @@ the only new part is checking state back into memory-mcp as you go.
    - If `pipeline_get`/`pipeline_list` errors because the feature flag is off, tell the user
      plainly (don't retry) - point them at Settings in the dashboard.
 2. **Collect parameters.** `pipeline_get` returns `parameters` (name/label/type/required/defaultValue).
-   If the user's message already supplied values for every required parameter, use those.
-   Otherwise ask for the missing ones before starting - don't guess.
+   Take any values the user's message already supplied. For every **required** parameter the
+   user did not give a value for, ask via the **`AskUserQuestion` tool** - never as a plain-text
+   question in chat, and never guess; a `defaultValue` does not exempt a required parameter from
+   the question, it just becomes the first option. See "Asking for parameters" below for how to
+   build the questions. Optional parameters are not asked about: those with a `defaultValue` get
+   the default, those without one are left out of the JSON.
 3. **Start the run:** `pipeline_run_start(slug, parametersJson)` with parameters as a JSON object
    string, e.g. `{"folder": "src/config"}`. This returns `runId`, `currentStepOrderIndex` (which
    step to work on next), and the full step list with each step's `orderIndex`, `title`,
@@ -69,6 +73,39 @@ the only new part is checking state back into memory-mcp as you go.
    summary with a link to the dashboard's read-only run view:
    `{dashboardBaseUrl}/p/{projectScope}/pipelines/{slug}/runs/{runId}` (derive `dashboardBaseUrl`
    from the MCP server URL the user connected to, typically `http://localhost:8080`).
+
+## Asking for parameters
+
+Use one `AskUserQuestion` call for up to 4 missing required parameters (more than 4 - several calls
+in a row, in `orderIndex` order). One question per parameter:
+
+- `header` - the parameter `name` (trim to 12 chars).
+- `question` - the parameter `label` followed by the pipeline name, e.g.
+  `Какую папку проверять? (пайплайн «Проверка конфигов»)`. Mention the type when it matters:
+  `(число)` for NUMBER.
+- `options` - 2-4 concrete candidates the user can pick with one keystroke; the built-in "Other"
+  entry covers free-text input, so you do not need an option like "Другое":
+  - **BOOLEAN** - exactly two options, `Да` and `Нет`; if the user picks anything else via "Other",
+    map it to `true`/`false` yourself or ask again.
+  - **STRING / NUMBER** - suggest values you can actually justify from context: the current repo
+    (branch name, changed folders, a file the user just mentioned), the previous run of the same
+    pipeline (`pipeline_run_get` on the `lastRunId` that `pipeline_list` returns for it - its
+    `parametersJson` holds the values used last time), or a value the user's message hinted at.
+    Put the most likely candidate first; if the parameter has a
+    `defaultValue`, that is the first option, with `(по умолчанию)` in its label. Each option's
+    `description` says in a few words why it is a candidate.
+    If you cannot find at least two sensible candidates, still ask with two options: the best
+    guess you have and a clearly labelled placeholder such as `Ввести вручную` whose description
+    tells the user to choose "Other" and type the value.
+- `multiSelect` - always `false`; a parameter has one value.
+
+After the answers come back, coerce them to the declared type (NUMBER must parse as a number,
+BOOLEAN becomes `true`/`false`) and, if a value doesn't fit, ask that one parameter again with the
+same tool. Then echo the final parameter set in one line before starting the run, e.g.
+`Параметры: folder=src/config, strict=true`.
+
+If the user's message already covers every required parameter, skip the tool entirely - don't
+re-confirm values they just typed.
 
 ## Parallel branches (several active steps at once)
 
