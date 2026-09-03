@@ -12,6 +12,7 @@ import java.util.Optional;
 
 public interface PipelineRunRepository extends JpaRepository<PipelineRun, Long> {
     List<PipelineRun> findByPipelineIdOrderByStartedAtDesc(Long pipelineId);
+    Optional<PipelineRun> findFirstByPipelineIdOrderByStartedAtDesc(Long pipelineId);
 
     /**
      * Row-locked read for step updates: parallel branches finish concurrently and each update

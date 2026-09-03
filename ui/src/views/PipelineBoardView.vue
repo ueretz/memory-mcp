@@ -45,14 +45,15 @@ import {
 
 // The board always operates on an already-created pipeline - metadata (name, parameters) lives on
 // the separate settings screen (PipelineBuilderView); here only the step graph is edited.
-const props = defineProps<{ project: string; slug: string }>()
-const project = toRef(props, 'project')
+const props = defineProps<{ slug: string }>()
 const slug = toRef(props, 'slug')
 
 const { screenToFlowCoordinate, fitView, zoomIn, zoomOut, vueFlowRef, viewport } = useVueFlow()
 
 const name = ref('')
 const description = ref<string | null>(null)
+// Informational only (pipelines are shared); round-tripped unchanged.
+const projectScope = ref<string | null>(null)
 const parameters = ref<PipelineUpsertParameter[]>([])
 const steps = ref<BoardStep[]>([])
 const paramLinks = ref<BoardParamLink[]>([])
@@ -95,7 +96,7 @@ function buildRequest() {
     slug: slug.value,
     name: name.value,
     description: description.value,
-    projectScope: project.value,
+    projectScope: projectScope.value,
     parameters: parameters.value,
     steps: toUpsertSteps(steps.value),
     parameterLinks: paramLinks.value.map((l) => ({ token: l.token, parameterName: l.parameterName, targetStepIndex: l.targetStepIndex })),
@@ -131,6 +132,7 @@ async function load() {
     const pipeline = await fetchPipeline(slug.value)
     name.value = pipeline.name
     description.value = pipeline.description
+    projectScope.value = pipeline.projectScope
     parameters.value = pipeline.parameters.map((p) => ({
       name: p.name,
       label: p.label,
@@ -443,7 +445,7 @@ const flowNodes = computed(() => [
     data: {
       parameters: parameters.value,
       wiredNames: paramLinks.value.map((l) => l.parameterName),
-      settingsTo: { name: 'pipeline-edit', params: { project: project.value, slug: slug.value } },
+      settingsTo: { name: 'pipeline-edit', params: { slug: slug.value } },
     },
   },
   ...steps.value.map((step, index) => {
@@ -774,7 +776,7 @@ function focusIssue(stepIndex: number | null) {
   <div class="pl-board">
     <header class="pl-topbar">
       <div class="pl-topbar-left">
-        <RouterLink :to="{ name: 'pipeline', params: { project, slug } }" class="pl-topbar-back" title="К пайплайну">
+        <RouterLink :to="{ name: 'pipeline', params: { slug } }" class="pl-topbar-back" title="К пайплайну">
           <AppIcon name="arrowLeft" class="size-4" />
         </RouterLink>
         <div class="min-w-0">
@@ -831,7 +833,7 @@ function focusIssue(stepIndex: number | null) {
             </button>
           </div>
         </div>
-        <RouterLink :to="{ name: 'pipeline-edit', params: { project, slug } }" class="pl-btn">
+        <RouterLink :to="{ name: 'pipeline-edit', params: { slug } }" class="pl-btn">
           <AppIcon name="cog" class="size-3.5" />
           Параметры
         </RouterLink>

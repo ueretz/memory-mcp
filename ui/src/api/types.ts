@@ -216,6 +216,9 @@ export interface PipelineSummary {
   stepCount: number
   createdBy: string | null
   updatedAt: string
+  lastRunId: number | null
+  lastRunStatus: PipelineRunStatus | null
+  lastRunStartedAt: string | null
 }
 
 export interface PipelineParameterLinkView {

@@ -8,8 +8,7 @@ import AppIcon from '@/components/AppIcon.vue'
 import ErrorState from '@/components/ErrorState.vue'
 import PageHeader from '@/components/PageHeader.vue'
 
-const props = defineProps<{ project: string; slug?: string }>()
-const project = toRef(props, 'project')
+const props = defineProps<{ slug?: string }>()
 const editingSlug = toRef(props, 'slug')
 const isEditing = computed(() => !!editingSlug.value)
 
@@ -90,7 +89,7 @@ async function save() {
     const result = isEditing.value ? await updatePipeline(editingSlug.value!, request) : await createPipeline(request)
     // Both creating a new pipeline and editing an existing one's metadata land on the board next -
     // metadata here is just the setup step, the board is where the pipeline actually gets built.
-    await router.push({ name: 'pipeline-board', params: { project: project.value, slug: result.slug } })
+    await router.push({ name: 'pipeline-board', params: { slug: result.slug } })
   } catch (cause) {
     saveError.value = cause instanceof Error ? cause.message : String(cause)
   } finally {

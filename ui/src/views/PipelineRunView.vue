@@ -1,23 +1,19 @@
 <script setup lang="ts">
-import '@vue-flow/core/dist/style.css'
-
-import { VueFlow } from '@vue-flow/core'
 import { computed, onBeforeUnmount, onMounted, ref, toRef } from 'vue'
 
 import { fetchPipeline, fetchPipelineRun } from '@/api/client'
 import AppIcon from '@/components/AppIcon.vue'
 import ErrorState from '@/components/ErrorState.vue'
 import PageHeader from '@/components/PageHeader.vue'
-import PipelineMiniStepNode from '@/components/PipelineMiniStepNode.vue'
 import PipelineRunStatusBadge from '@/components/PipelineRunStatusBadge.vue'
+import PipelineStageGraph from '@/components/PipelineStageGraph.vue'
 import SkeletonRows from '@/components/SkeletonRows.vue'
 import { useAsyncData } from '@/composables/useAsyncData'
 import { usePolling } from '@/composables/usePolling'
 import { BLOCK_KIND_BY_TYPE } from '@/lib/pipelineBoard'
-import { buildStatusNodes, buildViewEdges, takenEdgePredicate } from '@/lib/pipelineGraphView'
 import { STEP_STATUS_LABEL, activeSteps, formatClock, formatDuration, parseRunParameters, stageStatusFor } from '@/lib/pipelineRuns'
 
-const props = defineProps<{ project: string; slug: string; runId: string }>()
+const props = defineProps<{ slug: string; runId: string }>()
 const slug = toRef(props, 'slug')
 const runId = toRef(props, 'runId')
 
@@ -42,9 +38,6 @@ const parameters = computed(() => parseRunParameters(run.value?.parametersJson ?
 const doneCount = computed(() => run.value?.steps.filter((s) => s.status === 'DONE' || s.status === 'SKIPPED').length ?? 0)
 const currentSteps = computed(() => (run.value ? activeSteps(run.value) : []))
 
-const flowNodes = computed(() => (pipeline.value && run.value ? buildStatusNodes(pipeline.value, run.value) : []))
-const flowEdges = computed(() => (pipeline.value && run.value ? buildViewEdges(pipeline.value, takenEdgePredicate(run.value)) : []))
-
 function kindLabel(contentType: string): string {
   return BLOCK_KIND_BY_TYPE[contentType as keyof typeof BLOCK_KIND_BY_TYPE]?.label ?? contentType
 }
@@ -56,7 +49,7 @@ function kindLabel(contentType: string): string {
       <template #actions>
         <PipelineRunStatusBadge v-if="run" :status="run.status" class="pl-run-badge-lg" />
         <RouterLink
-          :to="{ name: 'pipeline', params: { project, slug } }"
+          :to="{ name: 'pipeline', params: { slug } }"
           class="inline-flex items-center gap-2 rounded-lg border border-border bg-panel px-3 py-2 text-[13px] font-medium text-content transition hover:border-accent/40 hover:text-accent"
         >
           <AppIcon name="arrowLeft" class="size-4" />
@@ -107,20 +100,7 @@ function kindLabel(contentType: string): string {
           <h2 class="pl-section-title">Путь по схеме</h2>
           <p v-if="running" class="pl-section-note pl-live"><AppIcon name="refresh" class="pl-spin size-3.5" />обновляется каждые 3 секунды</p>
         </div>
-        <div class="pl-graph-frame">
-          <VueFlow
-            :nodes="flowNodes"
-            :edges="flowEdges"
-            :node-types="{ pipelineStep: PipelineMiniStepNode }"
-            :nodes-draggable="false"
-            :nodes-connectable="false"
-            :edges-updatable="false"
-            :zoom-on-scroll="false"
-            :min-zoom="0.15"
-            fit-view-on-init
-            class="pl-flow-readonly"
-          />
-        </div>
+        <PipelineStageGraph :pipeline="pipeline" :run="run" />
       </section>
 
       <section>

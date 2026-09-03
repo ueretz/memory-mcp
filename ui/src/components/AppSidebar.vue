@@ -2,7 +2,7 @@
 import { computed, watch } from 'vue'
 import { useRoute } from 'vue-router'
 
-import { fetchProjects } from '@/api/client'
+import { fetchProjects, fetchSettings } from '@/api/client'
 import { useAsyncData } from '@/composables/useAsyncData'
 import { dataVersion } from '@/lib/dataVersion'
 import { projectLocation } from '@/lib/links'
@@ -14,6 +14,11 @@ const emit = defineEmits<{ close: [] }>()
 
 const route = useRoute()
 const { data: projects, loading } = useAsyncData(fetchProjects, [dataVersion])
+const { data: settings } = useAsyncData(fetchSettings, [dataVersion])
+// Pipelines are an experimental feature behind a settings flag; hide the entry until it is on.
+const pipelinesEnabled = computed(
+  () => settings.value?.some((s) => s.key === 'feature.pipelines.enabled' && s.value === 'true') ?? false,
+)
 
 const activeProject = computed(() => route.params.project as string | undefined)
 
@@ -63,6 +68,15 @@ const drawerClass = computed(() =>
       >
         <AppIcon name="folder" class="size-4" />
         All projects
+      </RouterLink>
+      <RouterLink
+        v-if="pipelinesEnabled"
+        :to="{ name: 'pipelines' }"
+        class="flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-[13px] font-medium text-muted transition hover:bg-elevated hover:text-content"
+        active-class="!bg-accent-soft !text-accent"
+      >
+        <AppIcon name="pipeline" class="size-4" />
+        Pipelines
       </RouterLink>
       <RouterLink
         :to="{ name: 'stats' }"

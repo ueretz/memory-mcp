@@ -1,7 +1,4 @@
 <script setup lang="ts">
-import '@vue-flow/core/dist/style.css'
-
-import { VueFlow } from '@vue-flow/core'
 import { computed, onBeforeUnmount, onMounted, ref, toRef, watch } from 'vue'
 import { useRouter } from 'vue-router'
 
@@ -12,17 +9,14 @@ import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import EmptyState from '@/components/EmptyState.vue'
 import ErrorState from '@/components/ErrorState.vue'
 import PageHeader from '@/components/PageHeader.vue'
-import PipelineMiniStepNode from '@/components/PipelineMiniStepNode.vue'
 import PipelineRunStatusBadge from '@/components/PipelineRunStatusBadge.vue'
+import PipelineStageGraph from '@/components/PipelineStageGraph.vue'
 import SkeletonRows from '@/components/SkeletonRows.vue'
 import { useAsyncData } from '@/composables/useAsyncData'
 import { usePolling } from '@/composables/usePolling'
-import { projectLocation } from '@/lib/links'
-import { buildStatusNodes, buildViewEdges, takenEdgePredicate } from '@/lib/pipelineGraphView'
 import { formatClock, formatDuration } from '@/lib/pipelineRuns'
 
-const props = defineProps<{ project: string; slug: string }>()
-const project = toRef(props, 'project')
+const props = defineProps<{ slug: string }>()
 const slug = toRef(props, 'slug')
 
 const { data: pipeline, error, loading } = useAsyncData(() => fetchPipeline(slug.value), [slug])
@@ -63,11 +57,6 @@ onBeforeUnmount(() => {
   if (clock) clearInterval(clock)
 })
 
-const flowNodes = computed(() => (pipeline.value ? buildStatusNodes(pipeline.value, selectedRun.value) : []))
-const flowEdges = computed(() =>
-  pipeline.value ? buildViewEdges(pipeline.value, selectedRun.value ? takenEdgePredicate(selectedRun.value) : undefined) : [],
-)
-
 const selectedSummary = computed(() => runs.value?.find((r) => r.id === selectedRunId.value) ?? null)
 
 function progressPercent(run: PipelineRunSummary): number {
@@ -86,7 +75,7 @@ async function confirmDelete() {
   deleteError.value = null
   try {
     await deletePipeline(slug.value)
-    await router.push({ name: 'pipelines', params: { project: project.value } })
+    await router.push({ name: 'pipelines' })
   } catch (cause) {
     deleteError.value = cause instanceof Error ? cause.message : String(cause)
   } finally {
@@ -103,7 +92,7 @@ async function confirmDelete() {
       <PageHeader eyebrow="Pipeline" :title="pipeline?.name ?? slug" :subtitle="pipeline?.description ?? undefined">
         <template #actions>
           <RouterLink
-            :to="{ name: 'pipeline-board', params: { project, slug } }"
+            :to="{ name: 'pipeline-board', params: { slug } }"
             class="inline-flex items-center gap-2 rounded-lg bg-accent px-3 py-2 text-[13px] font-medium text-accent-fg transition hover:bg-accent-hover"
           >
             <AppIcon name="graph" class="size-4" />
@@ -118,11 +107,11 @@ async function confirmDelete() {
             Удалить
           </button>
           <RouterLink
-            :to="projectLocation(project)"
+            :to="{ name: 'pipeline-edit', params: { slug } }"
             class="inline-flex items-center gap-2 rounded-lg border border-border bg-panel px-3 py-2 text-[13px] font-medium text-content transition hover:border-accent/40 hover:text-accent"
           >
-            <AppIcon name="arrowLeft" class="size-4" />
-            Назад
+            <AppIcon name="cog" class="size-4" />
+            Параметры
           </RouterLink>
         </template>
       </PageHeader>
@@ -134,25 +123,17 @@ async function confirmDelete() {
           <h2 class="pl-section-title">Схема</h2>
           <div v-if="selectedSummary" class="pl-section-note">
             <span>Показан запуск</span>
-            <RouterLink :to="{ name: 'pipeline-run', params: { project, slug, runId: selectedSummary.id } }" class="pl-link">#{{ selectedSummary.id }}</RouterLink>
+            <RouterLink :to="{ name: 'pipeline-run', params: { slug, runId: selectedSummary.id } }" class="pl-link">#{{ selectedSummary.id }}</RouterLink>
             <PipelineRunStatusBadge :status="selectedSummary.status" />
             <button type="button" class="pl-link-muted" @click="selectedRunId = null">схема без запуска</button>
           </div>
           <p v-else class="pl-section-note pl-section-note-faint">Выберите запуск в истории, чтобы увидеть его путь по схеме.</p>
         </div>
-        <div class="pl-graph-frame">
-          <VueFlow
-            :nodes="flowNodes"
-            :edges="flowEdges"
-            :node-types="{ pipelineStep: PipelineMiniStepNode }"
-            :nodes-draggable="false"
-            :nodes-connectable="false"
-            :edges-updatable="false"
-            :zoom-on-scroll="false"
-            :min-zoom="0.15"
-            fit-view-on-init
-            class="pl-flow-readonly"
-          />
+        <PipelineStageGraph :pipeline="pipeline" :run="selectedRun" />
+        <div v-if="pipeline.parameters.length" class="pl-chips mt-3">
+          <span v-for="p in pipeline.parameters" :key="p.id" class="pl-chip-param" :title="p.label">
+            <b>{{ p.name }}</b> · {{ p.type.toLowerCase() }}<span v-if="p.required" class="pl-params-required">*</span><span v-if="p.defaultValue" class="pl-runs-muted"> = {{ p.defaultValue }}</span>
+          </span>
         </div>
       </section>
 
@@ -212,7 +193,7 @@ async function confirmDelete() {
                 <td class="pl-runs-time">{{ formatClock(run.startedAt) }}</td>
                 <td class="pl-runs-time">{{ formatDuration(run.startedAt, run.finishedAt, now) }}</td>
                 <td class="pl-runs-open">
-                  <RouterLink :to="{ name: 'pipeline-run', params: { project, slug, runId: run.id } }" class="pl-icon-btn pl-icon-btn-neutral" title="Открыть запуск" @click.stop>
+                  <RouterLink :to="{ name: 'pipeline-run', params: { slug, runId: run.id } }" class="pl-icon-btn pl-icon-btn-neutral" title="Открыть запуск" @click.stop>
                     <AppIcon name="chevron" class="size-3.5" />
                   </RouterLink>
                 </td>

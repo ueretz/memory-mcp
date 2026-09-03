@@ -81,3 +81,19 @@ export function parseRunParameters(json: string | null): { name: string; value: 
     return []
   }
 }
+
+/**
+ * For the run view: an edge counts as walked when its source step finished (DONE) and its target
+ * was reached - i.e. the target step is no longer PENDING, or the target is the end node and the
+ * run has nowhere left to go.
+ */
+export function takenEdgePredicate(run: PipelineRunDetail) {
+  const statusByOrderIndex = new Map(run.steps.map((s) => [s.orderIndex, s.status]))
+  return ({ sourceOrderIndex, targetOrderIndex }: { sourceOrderIndex: number; targetOrderIndex: number | null }) => {
+    const sourceStatus = statusByOrderIndex.get(sourceOrderIndex)
+    if (sourceStatus !== 'DONE' && sourceStatus !== 'SKIPPED') return false
+    if (targetOrderIndex === null) return run.currentStepOrderIndex === null
+    const targetStatus = statusByOrderIndex.get(targetOrderIndex)
+    return (targetStatus !== undefined && targetStatus !== 'PENDING') || isActiveStep(run, targetOrderIndex)
+  }
+}

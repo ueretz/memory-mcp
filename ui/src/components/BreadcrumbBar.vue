@@ -23,6 +23,18 @@ const crumbs = computed<Crumb[]>(() => {
   if (route.name === 'setup') {
     return [items[0], { label: 'Setup' }]
   }
+  if (typeof route.name === 'string' && route.name.startsWith('pipeline')) {
+    const slug = route.params.slug as string | undefined
+    const runId = route.params.runId as string | undefined
+    const trail: Crumb[] = [{ label: 'Pipelines', to: { name: 'pipelines' } }]
+    if (route.name === 'pipeline-new') trail.push({ label: 'Новый' })
+    if (slug) trail.push({ label: slug, to: { name: 'pipeline', params: { slug } } })
+    if (route.name === 'pipeline-edit') trail.push({ label: 'Параметры' })
+    if (runId) trail.push({ label: `Запуск #${runId}` })
+    const tail = trail[trail.length - 1]
+    if (tail) delete tail.to
+    return trail
+  }
   if (project) {
     items.push({ label: project, to: projectLocation(project) })
   }

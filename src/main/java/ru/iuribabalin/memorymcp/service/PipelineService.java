@@ -9,12 +9,14 @@ import ru.iuribabalin.memorymcp.dto.PipelineUpsertRequest;
 import ru.iuribabalin.memorymcp.entity.Pipeline;
 import ru.iuribabalin.memorymcp.entity.PipelineDataLink;
 import ru.iuribabalin.memorymcp.entity.PipelineParameter;
+import ru.iuribabalin.memorymcp.entity.PipelineRun;
 import ru.iuribabalin.memorymcp.entity.PipelineStep;
 import ru.iuribabalin.memorymcp.entity.PipelineStepOutput;
 import ru.iuribabalin.memorymcp.entity.PipelineStepRoute;
 import ru.iuribabalin.memorymcp.repository.PipelineDataLinkRepository;
 import ru.iuribabalin.memorymcp.repository.PipelineParameterRepository;
 import ru.iuribabalin.memorymcp.repository.PipelineRepository;
+import ru.iuribabalin.memorymcp.repository.PipelineRunRepository;
 import ru.iuribabalin.memorymcp.repository.PipelineStepOutputRepository;
 import ru.iuribabalin.memorymcp.repository.PipelineStepRepository;
 import ru.iuribabalin.memorymcp.repository.PipelineStepRouteRepository;
@@ -42,6 +44,7 @@ public class PipelineService {
     private final PipelineStepOutputRepository pipelineStepOutputRepository;
     private final PipelineDataLinkRepository pipelineDataLinkRepository;
     private final PipelineAssetService pipelineAssetService;
+    private final PipelineRunRepository pipelineRunRepository;
     private final ObjectMapper objectMapper;
 
     public PipelineService(PipelineRepository pipelineRepository,
@@ -51,6 +54,7 @@ public class PipelineService {
                             PipelineStepOutputRepository pipelineStepOutputRepository,
                             PipelineDataLinkRepository pipelineDataLinkRepository,
                             PipelineAssetService pipelineAssetService,
+                           PipelineRunRepository pipelineRunRepository,
                             ObjectMapper objectMapper) {
         this.pipelineRepository = pipelineRepository;
         this.pipelineParameterRepository = pipelineParameterRepository;
@@ -59,6 +63,7 @@ public class PipelineService {
         this.pipelineStepOutputRepository = pipelineStepOutputRepository;
         this.pipelineDataLinkRepository = pipelineDataLinkRepository;
         this.pipelineAssetService = pipelineAssetService;
+        this.pipelineRunRepository = pipelineRunRepository;
         this.objectMapper = objectMapper;
     }
 
@@ -599,8 +604,12 @@ public class PipelineService {
     private PipelineSummary toSummary(Pipeline pipeline) {
         int parameterCount = pipelineParameterRepository.findByPipelineIdOrderByOrderIndexAsc(pipeline.getId()).size();
         int stepCount = pipelineStepRepository.findByPipelineIdOrderByOrderIndexAsc(pipeline.getId()).size();
+        PipelineRun lastRun = pipelineRunRepository.findFirstByPipelineIdOrderByStartedAtDesc(pipeline.getId()).orElse(null);
         return new PipelineSummary(pipeline.getId(), pipeline.getSlug(), pipeline.getName(), pipeline.getDescription(),
-                pipeline.getProjectScope(), parameterCount, stepCount, pipeline.getCreatedBy(), pipeline.getUpdatedAt());
+                pipeline.getProjectScope(), parameterCount, stepCount, pipeline.getCreatedBy(), pipeline.getUpdatedAt(),
+                lastRun == null ? null : lastRun.getId(),
+                lastRun == null ? null : lastRun.getStatus(),
+                lastRun == null ? null : lastRun.getStartedAt());
     }
 
     private PipelineDetail toDetail(Pipeline pipeline) {
