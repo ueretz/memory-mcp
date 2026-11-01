@@ -58,6 +58,8 @@ async function loadForEdit() {
     dataLinksOut: s.dataLinksOut.map((l) => ({ token: l.token, sourceOutputName: l.sourceOutputName, targetStepIndex: l.targetStepOrderIndex })),
     conditionOperator: s.conditionOperator,
     conditionValue: s.conditionValue,
+    conditionMode: s.conditionMode,
+    maxIterations: s.maxIterations,
   }))
 }
 

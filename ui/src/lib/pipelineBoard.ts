@@ -1,4 +1,5 @@
 import type {
+  PipelineConditionMode,
   PipelineConditionOperator,
   PipelineDetail,
   PipelineParameterType,
@@ -38,6 +39,8 @@ export interface BoardStep {
   dataLinksOut: PipelineUpsertDataLink[]
   conditionOperator: PipelineConditionOperator | null
   conditionValue: string | null
+  conditionMode: PipelineConditionMode
+  maxIterations: number | null
 }
 
 /** A wire from the board's "input parameters" node into a step's data input. */
@@ -73,6 +76,7 @@ export const BLOCK_KINDS: BlockKindMeta[] = [
   { kind: 'VARIABLE', label: 'Переменная', description: 'Фиксированное значение как выход', icon: 'variable', color: '#0d9488' },
   { kind: 'PARALLEL', label: 'Параллельно', description: 'Запускает все ветки одновременно, каждую — суб-агентом', icon: 'fanout', color: '#0ea5e9' },
   { kind: 'JOIN', label: 'Ожидать все', description: 'Продолжает, когда все ветки завершились', icon: 'join', color: '#6366f1' },
+  { kind: 'LOOP', label: 'Цикл', description: 'Повторяет блоки по обратному переходу, не больше заданного числа раз', icon: 'refresh', color: '#c026d3' },
 ]
 
 export const BLOCK_KIND_BY_TYPE: Record<PipelineStepContentType, BlockKindMeta> = Object.fromEntries(
@@ -97,12 +101,12 @@ export function supportsNamedBranches(kind: PipelineStepContentType): boolean {
 
 /** Does this kind of step take a data input wire? */
 export function acceptsDataInput(kind: PipelineStepContentType): boolean {
-  return kind !== 'VARIABLE' && kind !== 'PARALLEL' && kind !== 'JOIN'
+  return kind !== 'VARIABLE' && kind !== 'PARALLEL' && kind !== 'JOIN' && kind !== 'LOOP'
 }
 
 /** Does this kind of step publish data outputs at all? */
 export function hasOutputs(kind: PipelineStepContentType): boolean {
-  return kind !== 'CONDITION' && kind !== 'PARALLEL' && kind !== 'JOIN'
+  return kind !== 'CONDITION' && kind !== 'PARALLEL' && kind !== 'JOIN' && kind !== 'LOOP'
 }
 
 /** Can the author add/remove transition ports? (PROMPT/MD_FILE add keyed branches, PARALLEL adds unkeyed ones.) */
@@ -133,6 +137,8 @@ export function newBoardStep(kind: PipelineStepContentType, position: { x: numbe
     dataLinksOut: [],
     conditionOperator: null,
     conditionValue: null,
+    conditionMode: 'VALUE',
+    maxIterations: kind === 'LOOP' ? 5 : null,
   }
   if (kind === 'CONDITION') {
     step.conditionOperator = 'EQUALS'
@@ -147,7 +153,7 @@ export function newBoardStep(kind: PipelineStepContentType, position: { x: numbe
 /**
  * Every card shows the transition ports its kind requires, wired or not:
  * - PROMPT / MD_FILE / VARIABLE: exactly one default port ("далее"), kept last.
- * - CONDITION: exactly `true` and `false`.
+ * - CONDITION: exactly `true` and `false`; LOOP: body and `done`.
  * Named ports on PROMPT / MD_FILE are author-added and left untouched here.
  */
 export function ensureFixedPorts(step: BoardStep): void {
@@ -156,6 +162,13 @@ export function ensureFixedPorts(step: BoardStep): void {
     step.routes = [
       byKey.get('true') ?? { outcomeKey: 'true', target: null },
       byKey.get('false') ?? { outcomeKey: 'false', target: null },
+    ]
+    return
+  }
+  if (step.contentType === 'LOOP') {
+    step.routes = [
+      step.routes.find((r) => r.outcomeKey === null) ?? { outcomeKey: null, target: null },
+      step.routes.find((r) => r.outcomeKey === 'done') ?? { outcomeKey: 'done', target: null },
     ]
     return
   }
@@ -192,6 +205,8 @@ export function fromDetail(pipeline: PipelineDetail): BoardStep[] {
     })),
     conditionOperator: s.conditionOperator,
     conditionValue: s.conditionValue,
+    conditionMode: s.conditionMode,
+    maxIterations: s.maxIterations,
   }))
   materializeLegacyChain(steps)
   steps.forEach(ensureFixedPorts)
@@ -240,10 +255,9 @@ export function toUpsertSteps(steps: BoardStep[]): PipelineUpsertStep[] {
       positionX: step.positionX,
       positionY: step.positionY,
       routes: step.routes
-        // Unwired ports are a board-only affordance - the API has no representation for them.
-        // A CONDITION branch is the exception: the backend insists on both keys being present,
-        // so an unwired branch is sent as "end of run" rather than omitted.
-        .filter((r) => r.target !== null || step.contentType === 'CONDITION')
+        // Unwired ports are board-only, except fixed branches that the backend requires even when
+        // they end the run: CONDITION's true/false and LOOP's body/done.
+        .filter((r) => r.target !== null || step.contentType === 'CONDITION' || step.contentType === 'LOOP')
         .map((r) => ({
           outcomeKey: r.outcomeKey && r.outcomeKey.trim() !== '' ? r.outcomeKey.trim() : null,
           targetStepIndex: r.target === 'end' || r.target === null ? null : r.target,
@@ -252,6 +266,8 @@ export function toUpsertSteps(steps: BoardStep[]): PipelineUpsertStep[] {
       dataLinksOut: step.dataLinksOut.filter((link) => declaredOutputs.has(link.sourceOutputName)),
       conditionOperator: step.conditionOperator,
       conditionValue: step.conditionValue,
+      conditionMode: step.conditionMode,
+      maxIterations: step.maxIterations,
     }
   })
 }
@@ -315,11 +331,18 @@ export function analyzeGraph(steps: BoardStep[]): GraphAnalysis {
       if (typeof r.target === 'number' && r.target >= 0 && r.target < n) inDegree[r.target]++
     })
   })
+  const entryInDegree = [...inDegree]
+  steps.forEach((step, i) => step.routes.forEach((route) => {
+    if (typeof route.target !== 'number') return
+    if (steps[route.target]?.contentType === 'LOOP' && isAncestor(steps, route.target, i)) {
+      entryInDegree[route.target]--
+    }
+  }))
   const roots: number[] = []
   const isolated = new Set<number>()
   for (let i = 0; i < n; i++) {
     if (inDegree[i] === 0 && outDegree[i] === 0) isolated.add(i)
-    else if (inDegree[i] === 0) roots.push(i)
+    else if (entryInDegree[i] === 0) roots.push(i)
   }
   const reachable = new Set<number>()
   if (roots.length > 0) {
@@ -416,15 +439,32 @@ export function collectIssues(steps: BoardStep[], paramLinks: BoardParamLink[] =
       issues.push({ stepIndex: i, severity: 'warning', text: `«${title}» недостижим от старта и никогда не выполнится` })
     }
     if (step.contentType === 'CONDITION') {
-      if (incomingData[i] !== 1) {
-        issues.push({ stepIndex: i, severity: 'error', text: `«${title}»: условию нужен ровно один вход данных (сейчас ${incomingData[i]})` })
-      }
-      if (!step.conditionValue || !step.conditionValue.trim()) {
-        issues.push({ stepIndex: i, severity: 'error', text: `«${title}»: не задано значение для сравнения` })
+      if (step.conditionMode === 'PROMPT') {
+        if (!step.promptText || !step.promptText.trim()) {
+          issues.push({ stepIndex: i, severity: 'error', text: `«${title}»: задайте вопрос, на который модель ответит «да» или «нет»` })
+        }
+      } else {
+        if (incomingData[i] !== 1) {
+          issues.push({ stepIndex: i, severity: 'error', text: `«${title}»: условию нужен ровно один вход данных (сейчас ${incomingData[i]})` })
+        }
+        if (!step.conditionValue || !step.conditionValue.trim()) {
+          issues.push({ stepIndex: i, severity: 'error', text: `«${title}»: не задано значение для сравнения` })
+        }
       }
       const unwired = step.routes.filter((r) => r.target === null).map((r) => r.outcomeKey)
       if (unwired.length > 0) {
         issues.push({ stepIndex: i, severity: 'warning', text: `«${title}»: ветка ${unwired.join(' и ')} не подключена — путь завершится` })
+      }
+    }
+    if (step.contentType === 'LOOP') {
+      if (step.maxIterations === null || step.maxIterations < 1 || step.maxIterations > 100) {
+        issues.push({ stepIndex: i, severity: 'error', text: `«${title}»: задайте лимит итераций от 1 до 100` })
+      }
+      if (step.routes.find((r) => r.outcomeKey === null)?.target === null) {
+        issues.push({ stepIndex: i, severity: 'error', text: `«${title}»: подключите первый шаг к переходу «тело цикла»` })
+      }
+      if (step.routes.find((r) => r.outcomeKey === 'done')?.target === null) {
+        issues.push({ stepIndex: i, severity: 'warning', text: `«${title}»: выход при лимите не подключён — этот путь завершится` })
       }
     }
     if (step.contentType === 'PARALLEL' && !step.routes.some((r) => typeof r.target === 'number')) {

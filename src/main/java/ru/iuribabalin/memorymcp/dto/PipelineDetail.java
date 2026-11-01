@@ -33,7 +33,8 @@ public record PipelineDetail(
             String promptText, Long assetId, Long referenceAssetId,
             double positionX, double positionY, List<RouteView> routes,
             List<OutputView> outputs, List<DataLinkView> dataLinksOut,
-            PipelineStep.ConditionOperator conditionOperator, String conditionValue) {
+            PipelineStep.ConditionOperator conditionOperator, String conditionValue,
+            PipelineStep.ConditionMode conditionMode, Integer maxIterations) {
 
         public record RouteView(String outcomeKey, Integer targetStepOrderIndex) {
         }

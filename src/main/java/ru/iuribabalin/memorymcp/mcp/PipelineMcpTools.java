@@ -60,9 +60,10 @@ public class PipelineMcpTools {
 
     @McpTool(name = "pipeline_run_start",
             description = "Start a run of a pipeline: validates required parameters are present, snapshots its " +
-                    "current steps, and returns a runId plus the ordered step list to work through. Call " +
-                    "pipeline_run_step_update after finishing each step, in order, and pipeline_run_complete once " +
-                    "every step is done or the run is being abandoned.")
+                    "current steps, and returns a runId plus the ordered step list and active step indexes. Call " +
+                    "pipeline_run_step_update after finishing each active step; a LOOP may reactivate earlier steps " +
+                    "for another iteration. When no active steps remain, call pipeline_run_complete. Also call it " +
+                    "when the run is being abandoned.")
     public PipelineRunDetail pipelineRunStart(
             @McpToolParam(description = "The pipeline's slug", required = true) String slug,
             @McpToolParam(description = "JSON object of parameter values keyed by parameter name, e.g. {\"folder\": \"src/config\"} - include every required parameter", required = false) String parametersJson) {

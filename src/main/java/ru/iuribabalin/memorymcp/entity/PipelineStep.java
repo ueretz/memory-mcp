@@ -14,11 +14,12 @@ import jakarta.persistence.Table;
 public class PipelineStep {
 
     /**
-     * PROMPT / MD_FILE are worked on by Claude. CONDITION, VARIABLE, PARALLEL and JOIN are executed by
-     * the server: PARALLEL activates every route target at once (branches run concurrently, one
-     * sub-agent each), JOIN waits until each of its incoming branches has arrived.
+     * PROMPT / MD_FILE and PROMPT-mode CONDITION steps are worked on by Claude. VALUE-mode
+     * CONDITION, VARIABLE, PARALLEL, JOIN and LOOP are executed by the server.
      */
-    public enum ContentType { PROMPT, MD_FILE, CONDITION, VARIABLE, PARALLEL, JOIN }
+    public enum ContentType { PROMPT, MD_FILE, CONDITION, VARIABLE, PARALLEL, JOIN, LOOP }
+
+    public enum ConditionMode { VALUE, PROMPT }
 
     public enum ConditionOperator { EQUALS, GREATER_THAN, LESS_THAN, GREATER_OR_EQUAL, LESS_OR_EQUAL }
 
@@ -54,6 +55,13 @@ public class PipelineStep {
 
     @Column(name = "condition_value", length = 500)
     private String conditionValue;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "condition_mode", nullable = false, length = 20)
+    private ConditionMode conditionMode;
+
+    @Column(name = "max_iterations")
+    private Integer maxIterations;
 
     @Column(name = "position_x", nullable = false)
     private double positionX;
@@ -135,6 +143,22 @@ public class PipelineStep {
 
     public void setConditionValue(String conditionValue) {
         this.conditionValue = conditionValue;
+    }
+
+    public ConditionMode getConditionMode() {
+        return conditionMode;
+    }
+
+    public void setConditionMode(ConditionMode conditionMode) {
+        this.conditionMode = conditionMode;
+    }
+
+    public Integer getMaxIterations() {
+        return maxIterations;
+    }
+
+    public void setMaxIterations(Integer maxIterations) {
+        this.maxIterations = maxIterations;
     }
 
     public double getPositionX() {

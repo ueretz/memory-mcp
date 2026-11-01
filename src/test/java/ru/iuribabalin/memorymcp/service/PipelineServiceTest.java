@@ -125,8 +125,8 @@ class PipelineServiceTest {
     @Test
     void rejectsAPipelineWithACycle() {
         // Single root (step 0) so the root-count check passes; steps 1 and 2 route to each
-        // other, forming a 2-cycle reachable from the root. This must be caught by the
-        // topological-sort (Kahn's algorithm) branch in validateGraph, not the root-count check.
+        // other, forming a 2-cycle reachable from the root. Only cycles returning to LOOP are
+        // allowed, so validateGraph must reject this one after the root-count check.
         PipelineUpsertRequest request = new PipelineUpsertRequest(
                 "branch-2", "Cyclic", "desc", "pipeline-svc-test-project",
                 List.of(),
@@ -626,5 +626,50 @@ class PipelineServiceTest {
         PipelineDetail detail = pipelineService.create(request, "Tester");
 
         assertThat(detail.steps().get(0).routes()).hasSize(2);
+    }
+
+    @Test
+    void savesALoopWithItsIterationLimitAndBodyAndDoneRoutes() {
+        PipelineUpsertRequest request = new PipelineUpsertRequest(
+                "loop-1", "Review loop", "desc", "pipeline-svc-test-project", List.of(),
+                List.of(
+                        new PipelineUpsertRequest.StepRequest("Review cycle", PipelineStep.ContentType.LOOP, null,
+                                null, null, 0, 0,
+                                List.of(new PipelineUpsertRequest.StepRequest.RouteRequest(null, 1),
+                                        new PipelineUpsertRequest.StepRequest.RouteRequest("done", 2)),
+                                List.of(), List.of(), null, null, 3),
+                        new PipelineUpsertRequest.StepRequest("Work", PipelineStep.ContentType.PROMPT, "work",
+                                null, null, 0, 0,
+                                List.of(new PipelineUpsertRequest.StepRequest.RouteRequest(null, 0)),
+                                List.of(), List.of(), null, null),
+                        new PipelineUpsertRequest.StepRequest("Finish", PipelineStep.ContentType.PROMPT, "finish",
+                                null, null, 0, 0, List.of(), List.of(), List.of(), null, null)));
+
+        PipelineDetail detail = pipelineService.create(request, "Tester");
+
+        assertThat(detail.steps().get(0).maxIterations()).isEqualTo(3);
+        assertThat(detail.steps().get(0).routes())
+                .extracting(PipelineDetail.PipelineStepView.RouteView::outcomeKey)
+                .containsExactlyInAnyOrder(null, "done");
+    }
+
+    @Test
+    void rejectsALoopWithoutAFiniteIterationLimit() {
+        PipelineUpsertRequest request = new PipelineUpsertRequest(
+                "loop-2", "Invalid loop", "desc", "pipeline-svc-test-project", List.of(),
+                List.of(
+                        new PipelineUpsertRequest.StepRequest("Loop", PipelineStep.ContentType.LOOP, null,
+                                null, null, 0, 0,
+                                List.of(new PipelineUpsertRequest.StepRequest.RouteRequest(null, 1),
+                                        new PipelineUpsertRequest.StepRequest.RouteRequest("done", null)),
+                                List.of(), List.of(), null, null, 0),
+                        new PipelineUpsertRequest.StepRequest("Work", PipelineStep.ContentType.PROMPT, "work",
+                                null, null, 0, 0,
+                                List.of(new PipelineUpsertRequest.StepRequest.RouteRequest(null, 0)),
+                                List.of(), List.of(), null, null)));
+
+        assertThatThrownBy(() -> pipelineService.create(request, "Tester"))
+                .isInstanceOf(PipelineInvalidParametersException.class)
+                .hasMessageContaining("between 1 and 100");
     }
 }

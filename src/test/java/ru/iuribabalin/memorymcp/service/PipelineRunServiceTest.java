@@ -525,4 +525,90 @@ class PipelineRunServiceTest {
         assertThat(summary.doneStepCount()).isEqualTo(2);
         assertThat(summary.totalStepCount()).isEqualTo(6);
     }
+
+    private void createReviewLoopPipeline(String slug, int maxIterations) {
+        pipelineService.create(new PipelineUpsertRequest(
+                slug, "Code review loop", "desc", "pipeline-run-svc-test-project", List.of(),
+                List.of(
+                        new PipelineUpsertRequest.StepRequest("Review cycle", PipelineStep.ContentType.LOOP, null,
+                                null, null, 0, 0,
+                                List.of(new PipelineUpsertRequest.StepRequest.RouteRequest(null, 1),
+                                        new PipelineUpsertRequest.StepRequest.RouteRequest("done", 4)),
+                                List.of(), List.of(), null, null, maxIterations),
+                        prompt("Write code", List.of(new PipelineUpsertRequest.StepRequest.RouteRequest(null, 2))),
+                        new PipelineUpsertRequest.StepRequest("Review", PipelineStep.ContentType.PROMPT, "review",
+                                null, null, 0, 0,
+                                List.of(new PipelineUpsertRequest.StepRequest.RouteRequest("approve", 4),
+                                        new PipelineUpsertRequest.StepRequest.RouteRequest("changes", 3)),
+                                List.of(), List.of(), null, null),
+                        prompt("Fix code", List.of(new PipelineUpsertRequest.StepRequest.RouteRequest(null, 0))),
+                        prompt("Publish", List.of(new PipelineUpsertRequest.StepRequest.RouteRequest(null, null))))
+        ), "Tester");
+    }
+
+    @Test
+    void reviewLoopReactivatesItsBodyUntilReviewApproves() {
+        createReviewLoopPipeline("loop-run-1", 3);
+        PipelineRunDetail run = pipelineRunService.start("loop-run-1", "{}", "Tester");
+        assertThat(run.activeStepOrderIndexes()).containsExactly(1);
+
+        for (int iteration = 0; iteration < 2; iteration++) {
+            pipelineRunService.updateStep(run.id(), 1, PipelineRunStep.Status.DONE, "coded", null, null);
+            pipelineRunService.updateStep(run.id(), 2, PipelineRunStep.Status.DONE, "needs work", "changes", null);
+            run = pipelineRunService.updateStep(run.id(), 3, PipelineRunStep.Status.DONE, "fixed", null, null);
+        }
+
+        assertThat(run.activeStepOrderIndexes()).containsExactly(1);
+        assertThat(run.steps().get(1).executionCount()).isEqualTo(3);
+        assertThat(run.steps().get(1).status()).isEqualTo(PipelineRunStep.Status.PENDING);
+        assertThat(run.steps().get(0).note()).isEqualTo("Итерация 3 из 3");
+
+        pipelineRunService.updateStep(run.id(), 1, PipelineRunStep.Status.DONE, "coded", null, null);
+        run = pipelineRunService.updateStep(run.id(), 2, PipelineRunStep.Status.DONE, "approved", "approve", null);
+
+        assertThat(run.activeStepOrderIndexes()).containsExactly(4);
+        assertThat(run.steps().get(2).executionCount()).isEqualTo(3);
+        assertThat(run.steps().get(3).executionCount()).isEqualTo(2);
+    }
+
+    @Test
+    void reviewLoopTakesDoneRouteWhenItsIterationLimitIsReached() {
+        createReviewLoopPipeline("loop-run-2", 1);
+        PipelineRunDetail run = pipelineRunService.start("loop-run-2", "{}", "Tester");
+        pipelineRunService.updateStep(run.id(), 1, PipelineRunStep.Status.DONE, "coded", null, null);
+        pipelineRunService.updateStep(run.id(), 2, PipelineRunStep.Status.DONE, "needs work", "changes", null);
+
+        run = pipelineRunService.updateStep(run.id(), 3, PipelineRunStep.Status.DONE, "fixed", null, null);
+
+        assertThat(run.activeStepOrderIndexes()).containsExactly(4);
+        assertThat(run.steps().get(1).executionCount()).isEqualTo(1);
+        assertThat(run.steps().get(0).note()).isEqualTo("Лимит итераций: 1 — выход из цикла");
+    }
+
+    @Test
+    void promptConditionWaitsForModelAndRoutesOnTrueOrFalse() {
+        pipelineService.create(new PipelineUpsertRequest(
+                "prompt-condition-1", "Model decision", "desc", "pipeline-run-svc-test-project", List.of(),
+                List.of(
+                        new PipelineUpsertRequest.StepRequest("Ready?", PipelineStep.ContentType.CONDITION,
+                                "Исправлены все замечания ревью? Ответь да или нет.", null, null, 0, 0,
+                                List.of(new PipelineUpsertRequest.StepRequest.RouteRequest("true", 1),
+                                        new PipelineUpsertRequest.StepRequest.RouteRequest("false", 2)),
+                                List.of(), List.of(), null, null, PipelineStep.ConditionMode.PROMPT, null),
+                        prompt("Publish", List.of()),
+                        prompt("Keep working", List.of()))
+        ), "Tester");
+
+        PipelineRunDetail yesRun = pipelineRunService.start("prompt-condition-1", "{}", "Tester");
+        assertThat(yesRun.activeStepOrderIndexes()).containsExactly(0);
+        assertThat(yesRun.steps().get(0).resolvedInstructionText()).contains("Исправлены все замечания ревью?");
+        PipelineRunDetail yes = pipelineRunService.updateStep(
+                yesRun.id(), 0, PipelineRunStep.Status.DONE, "Да", "true", null);
+        assertThat(yes.activeStepOrderIndexes()).containsExactly(1);
+
+        PipelineRunDetail noRun = pipelineRunService.start("prompt-condition-1", "{}", "Tester");
+        PipelineRunDetail no = pipelineRunService.updateStep(
+                noRun.id(), 0, PipelineRunStep.Status.DONE, "Нет", "false", null);
+        assertThat(no.activeStepOrderIndexes()).containsExactly(2);
+    }
 }

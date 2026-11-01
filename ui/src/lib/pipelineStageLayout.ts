@@ -84,18 +84,38 @@ export function layoutStages(pipeline: PipelineDetail, run: PipelineRunDetail | 
   const edges = rawEdges(pipeline)
   const byIndex = new Map(steps.map((s) => [s.orderIndex, s]))
 
-  // Longest path from any source = column. Predecessor lists over wired step->step edges.
+  // Longest path from any source = column. LOOP return edges stay visible but do not affect depth,
+  // so the loop body reads left-to-right instead of pushing the loop behind its own body.
+  const adjacency = new Map<number, number[]>()
+  steps.forEach((s) => adjacency.set(s.orderIndex, []))
+  edges.forEach((e) => {
+    if (e.to !== null && byIndex.has(e.to)) adjacency.get(e.from)!.push(e.to)
+  })
+  function reaches(source: number, target: number): boolean {
+    const queue = [source]
+    const seen = new Set<number>()
+    while (queue.length) {
+      const current = queue.shift()!
+      if (current === target) return true
+      if (seen.has(current)) continue
+      seen.add(current)
+      queue.push(...(adjacency.get(current) ?? []))
+    }
+    return false
+  }
   const preds = new Map<number, number[]>()
   steps.forEach((s) => preds.set(s.orderIndex, []))
   edges.forEach((e) => {
-    if (e.to !== null && byIndex.has(e.to)) preds.get(e.to)!.push(e.from)
+    if (e.to === null || !byIndex.has(e.to)) return
+    const loopReturn = byIndex.get(e.to)!.contentType === 'LOOP' && reaches(e.to, e.from)
+    if (!loopReturn) preds.get(e.to)!.push(e.from)
   })
   const depth = new Map<number, number>()
   const visiting = new Set<number>()
   function depthOf(i: number): number {
     const known = depth.get(i)
     if (known !== undefined) return known
-    if (visiting.has(i)) return 0 // cycles are rejected at save time; guard anyway
+    if (visiting.has(i)) return 0
     visiting.add(i)
     const p = preds.get(i) ?? []
     const d = p.length === 0 ? 0 : 1 + Math.max(...p.map(depthOf))

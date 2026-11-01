@@ -650,8 +650,8 @@ function onConnect(connection: Connection) {
         showHint('Блок нельзя соединить с самим собой.')
         return
       }
-      if (wouldCreateCycle(steps.value, sourceIndex, targetIndex)) {
-        showHint('Так получится цикл — пайплайн выполняется только вперёд.')
+      if (wouldCreateCycle(steps.value, sourceIndex, targetIndex) && steps.value[targetIndex].contentType !== 'LOOP') {
+        showHint('Обратный переход должен вести в блок «Цикл» — у него есть ограничение числа итераций.')
         return
       }
       route.target = targetIndex

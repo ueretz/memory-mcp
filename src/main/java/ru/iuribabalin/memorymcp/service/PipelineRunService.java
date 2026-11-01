@@ -213,8 +213,26 @@ public class PipelineRunService {
         if (allRoutes.isEmpty()) {
             return steps.stream().mapToInt(PipelineStep::getOrderIndex).min().orElseThrow();
         }
-        Set<Long> targeted = allRoutes.stream().map(PipelineStepRoute::getTargetStepId)
-                .filter(Objects::nonNull).collect(Collectors.toSet());
+        Map<Long, Integer> indexById = steps.stream()
+                .collect(Collectors.toMap(PipelineStep::getId, PipelineStep::getOrderIndex));
+        List<List<Integer>> adjacency = steps.stream()
+                .map(step -> allRoutes.stream()
+                        .filter(route -> route.getStepId().equals(step.getId()))
+                        .map(PipelineStepRoute::getTargetStepId)
+                        .map(indexById::get)
+                        .filter(Objects::nonNull)
+                        .toList())
+                .toList();
+        Set<Long> targeted = allRoutes.stream()
+                .filter(route -> route.getTargetStepId() != null)
+                .filter(route -> {
+                    int source = indexById.get(route.getStepId());
+                    int target = indexById.get(route.getTargetStepId());
+                    return steps.get(target).getContentType() != PipelineStep.ContentType.LOOP
+                            || !reaches(adjacency, target, source);
+                })
+                .map(PipelineStepRoute::getTargetStepId)
+                .collect(Collectors.toSet());
         Set<Long> withOutgoing = allRoutes.stream().map(PipelineStepRoute::getStepId).collect(Collectors.toSet());
         return steps.stream()
                 .filter(s -> !targeted.contains(s.getId()))
@@ -319,35 +337,127 @@ public class PipelineRunService {
     }
 
     /**
-     * Walks forward from {@code initial}: server-executed steps (CONDITION, VARIABLE, PARALLEL, JOIN)
-     * run immediately and enqueue whatever they lead to; PROMPT / MD_FILE steps become active and
-     * wait for Claude. Terminates because the route graph is validated acyclic at save time.
+     * Walks forward from {@code initial}: server-executed steps run immediately and enqueue whatever
+     * they lead to; PROMPT / MD_FILE and PROMPT-mode CONDITION steps wait for Claude. Only steps in
+     * a LOOP-bounded cycle may be reactivated, and the loop's iteration limit keeps this walk finite.
      */
     private void activate(PipelineRun run, List<PipelineStep> orderedSteps, List<Integer> initial) {
         List<Integer> active = activeSteps(run);
+        Set<Integer> reactivatable = loopCycleSteps(orderedSteps);
         Deque<Integer> queue = new ArrayDeque<>(initial);
         while (!queue.isEmpty()) {
             int index = queue.poll();
             PipelineStep step = orderedSteps.get(index);
-            if (step.getContentType() != PipelineStep.ContentType.PROMPT && step.getContentType() != PipelineStep.ContentType.MD_FILE) {
+            PipelineRunStep runStep = prepareStepForActivation(run, step, reactivatable.contains(index));
+            boolean promptCondition = step.getContentType() == PipelineStep.ContentType.CONDITION
+                    && step.getConditionMode() == PipelineStep.ConditionMode.PROMPT;
+            if (step.getContentType() != PipelineStep.ContentType.PROMPT
+                    && step.getContentType() != PipelineStep.ContentType.MD_FILE && !promptCondition) {
                 active.remove(Integer.valueOf(index));
             }
             switch (step.getContentType()) {
-                case CONDITION -> enqueue(queue, executeConditionStep(run, step));
+                case CONDITION -> {
+                    if (promptCondition) {
+                        if (runStep.getStatus() == PipelineRunStep.Status.PENDING && !active.contains(index)) {
+                            active.add(index);
+                        }
+                    } else {
+                        enqueue(queue, executeConditionStep(run, step));
+                    }
+                }
                 case VARIABLE -> enqueue(queue, executeVariableStep(run, step));
                 case PARALLEL -> executeParallelStep(run, step, orderedSteps).forEach(queue::add);
                 case JOIN -> enqueue(queue, executeJoinStep(run, step, orderedSteps));
+                case LOOP -> enqueue(queue, executeLoopStep(run, step));
                 default -> {
-                    boolean pending = pipelineRunStepRepository.findByRunIdAndOrderIndex(run.getId(), index)
-                            .map(rs -> rs.getStatus() == PipelineRunStep.Status.PENDING)
-                            .orElse(false);
-                    if (pending && !active.contains(index)) {
+                    if (runStep.getStatus() == PipelineRunStep.Status.PENDING && !active.contains(index)) {
                         active.add(index);
                     }
                 }
             }
         }
         setActiveSteps(run, active);
+    }
+
+    private PipelineRunStep prepareStepForActivation(PipelineRun run, PipelineStep step, boolean mayReactivate) {
+        PipelineRunStep runStep = pipelineRunStepRepository.findByRunIdAndOrderIndex(run.getId(), step.getOrderIndex())
+                .orElseThrow(() -> new PipelineRunStepNotFoundException(run.getId(), step.getOrderIndex()));
+        boolean reactivating = mayReactivate
+                && (runStep.getStatus() == PipelineRunStep.Status.DONE || runStep.getStatus() == PipelineRunStep.Status.SKIPPED);
+        if (reactivating) {
+            runStep.setStatus(PipelineRunStep.Status.PENDING);
+            runStep.setStartedAt(null);
+            runStep.setFinishedAt(null);
+            runStep.setNote(null);
+            if (step.getContentType() != PipelineStep.ContentType.LOOP) {
+                runStep.setArrivedCount(0);
+            }
+        }
+        if (reactivating || runStep.getExecutionCount() == 0) {
+            runStep.setExecutionCount(runStep.getExecutionCount() + 1);
+            pipelineRunStepRepository.save(runStep);
+        }
+        return runStep;
+    }
+
+    private Set<Integer> loopCycleSteps(List<PipelineStep> orderedSteps) {
+        Map<Long, Integer> indexById = orderedSteps.stream()
+                .collect(Collectors.toMap(PipelineStep::getId, PipelineStep::getOrderIndex));
+        List<List<Integer>> adjacency = orderedSteps.stream().map(step -> {
+            List<Integer> targets = pipelineStepRouteRepository.findByStepId(step.getId()).stream()
+                    .map(PipelineStepRoute::getTargetStepId)
+                    .map(indexById::get)
+                    .filter(Objects::nonNull)
+                    .toList();
+            return targets;
+        }).toList();
+        Set<Integer> result = new java.util.HashSet<>();
+        for (PipelineStep loop : orderedSteps) {
+            if (loop.getContentType() != PipelineStep.ContentType.LOOP) {
+                continue;
+            }
+            for (int candidate = 0; candidate < orderedSteps.size(); candidate++) {
+                if (reaches(adjacency, loop.getOrderIndex(), candidate)
+                        && reaches(adjacency, candidate, loop.getOrderIndex())) {
+                    result.add(candidate);
+                }
+            }
+        }
+        return result;
+    }
+
+    private boolean reaches(List<List<Integer>> adjacency, int source, int target) {
+        Deque<Integer> queue = new ArrayDeque<>();
+        Set<Integer> visited = new java.util.HashSet<>();
+        queue.add(source);
+        while (!queue.isEmpty()) {
+            int current = queue.poll();
+            if (current == target) {
+                return true;
+            }
+            if (!visited.add(current)) {
+                continue;
+            }
+            adjacency.get(current).forEach(queue::add);
+        }
+        return false;
+    }
+
+    private Integer executeLoopStep(PipelineRun run, PipelineStep step) {
+        PipelineRunStep runStep = pipelineRunStepRepository.findByRunIdAndOrderIndex(run.getId(), step.getOrderIndex())
+                .orElseThrow(() -> new PipelineRunStepNotFoundException(run.getId(), step.getOrderIndex()));
+        int iteration = runStep.getArrivedCount() + 1;
+        runStep.setArrivedCount(iteration);
+        Instant now = Instant.now();
+        runStep.setStatus(PipelineRunStep.Status.DONE);
+        runStep.setStartedAt(now);
+        runStep.setFinishedAt(now);
+        boolean limitReached = iteration > step.getMaxIterations();
+        runStep.setNote(limitReached
+                ? "Лимит итераций: " + step.getMaxIterations() + " — выход из цикла"
+                : "Итерация " + iteration + " из " + step.getMaxIterations());
+        pipelineRunStepRepository.save(runStep);
+        return resolveNextOrderIndex(run.getPipelineId(), step.getId(), step.getOrderIndex(), limitReached ? "done" : null);
     }
 
     private static void enqueue(Deque<Integer> queue, Integer index) {
@@ -571,7 +681,8 @@ public class PipelineRunService {
         List<PipelineRunDetail.PipelineRunStepView> steps = runSteps.stream()
                 .map(s -> new PipelineRunDetail.PipelineRunStepView(s.getId(), s.getOrderIndex(), s.getTitle(),
                         s.getContentType(), s.getStatus(), s.getNote(), s.getStartedAt(), s.getFinishedAt(),
-                        resolveInstructionText(s, stepById, incomingLinks, runStepIdByPipelineStepId, reportedValues, parameterValueByToken)))
+                        resolveInstructionText(s, stepById, incomingLinks, runStepIdByPipelineStepId, reportedValues, parameterValueByToken),
+                        s.getExecutionCount()))
                 .toList();
         return new PipelineRunDetail(run.getId(), run.getPipelineId(), pipelineSlug, run.getStatus(),
                 run.getParametersJson(), run.getStartedAt(), run.getFinishedAt(), run.getStartedBy(),

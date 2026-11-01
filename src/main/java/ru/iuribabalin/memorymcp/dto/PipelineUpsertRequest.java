@@ -38,7 +38,28 @@ public record PipelineUpsertRequest(
             String title, PipelineStep.ContentType contentType, String promptText,
             Long assetId, Long referenceAssetId, double positionX, double positionY,
             List<RouteRequest> routes, List<OutputRequest> outputs, List<DataLinkRequest> dataLinksOut,
-            PipelineStep.ConditionOperator conditionOperator, String conditionValue) {
+            PipelineStep.ConditionOperator conditionOperator, String conditionValue,
+            PipelineStep.ConditionMode conditionMode, Integer maxIterations) {
+
+        public StepRequest {
+            conditionMode = conditionMode == null ? PipelineStep.ConditionMode.VALUE : conditionMode;
+        }
+
+        public StepRequest(String title, PipelineStep.ContentType contentType, String promptText,
+                           Long assetId, Long referenceAssetId, double positionX, double positionY,
+                           List<RouteRequest> routes, List<OutputRequest> outputs, List<DataLinkRequest> dataLinksOut,
+                           PipelineStep.ConditionOperator conditionOperator, String conditionValue, Integer maxIterations) {
+            this(title, contentType, promptText, assetId, referenceAssetId, positionX, positionY,
+                    routes, outputs, dataLinksOut, conditionOperator, conditionValue, PipelineStep.ConditionMode.VALUE, maxIterations);
+        }
+
+        public StepRequest(String title, PipelineStep.ContentType contentType, String promptText,
+                           Long assetId, Long referenceAssetId, double positionX, double positionY,
+                           List<RouteRequest> routes, List<OutputRequest> outputs, List<DataLinkRequest> dataLinksOut,
+                           PipelineStep.ConditionOperator conditionOperator, String conditionValue) {
+            this(title, contentType, promptText, assetId, referenceAssetId, positionX, positionY,
+                    routes, outputs, dataLinksOut, conditionOperator, conditionValue, null);
+        }
 
         public record RouteRequest(String outcomeKey, Integer targetStepIndex) {
         }

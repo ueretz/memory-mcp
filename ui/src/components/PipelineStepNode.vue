@@ -71,6 +71,7 @@ const showOutputs = computed(() => hasOutputs(props.data.step.contentType))
 const showDataIn = computed(() => acceptsDataInput(props.data.step.contentType))
 const editableOutputs = computed(() => hasEditableOutputs(props.data.step.contentType))
 const isCondition = computed(() => props.data.step.contentType === 'CONDITION')
+const isLoop = computed(() => props.data.step.contentType === 'LOOP')
 
 const OPERATORS: { value: PipelineConditionOperator; label: string }[] = [
   { value: 'EQUALS', label: 'равно' },
@@ -137,14 +138,29 @@ function pinClassForRoute(outcomeKey: string | null): string {
       </template>
 
       <template v-else-if="data.step.contentType === 'CONDITION'">
-        <div class="pl-condition">
-          <span class="pl-condition-lhs">значение</span>
-          <select v-model="data.step.conditionOperator" class="pl-select">
-            <option v-for="op in OPERATORS" :key="op.value" :value="op.value">{{ op.label }}</option>
-          </select>
-          <input v-model="data.step.conditionValue" placeholder="10" class="pl-input" />
-        </div>
-        <p class="pl-hint">Сравнивается значение со входа данных. Ветка выбирается сервером, без Claude.</p>
+        <select v-model="data.step.conditionMode" class="pl-select mb-2">
+          <option value="VALUE">Сравнение значения</option>
+          <option value="PROMPT">Вопрос модели — да / нет</option>
+        </select>
+        <template v-if="data.step.conditionMode === 'PROMPT'">
+          <textarea
+            v-model="data.step.promptText"
+            rows="3"
+            placeholder="Например: исправлены все замечания ревью?"
+            class="pl-textarea"
+          />
+          <p class="pl-hint">Модель отвечает на вопрос и выбирает ветку true («да») или false («нет»).</p>
+        </template>
+        <template v-else>
+          <div class="pl-condition">
+            <span class="pl-condition-lhs">значение</span>
+            <select v-model="data.step.conditionOperator" class="pl-select">
+              <option v-for="op in OPERATORS" :key="op.value" :value="op.value">{{ op.label }}</option>
+            </select>
+            <input v-model="data.step.conditionValue" placeholder="10" class="pl-input" />
+          </div>
+          <p class="pl-hint">Сравнивается значение со входа данных. Ветка выбирается сервером, без модели.</p>
+        </template>
       </template>
 
       <template v-else-if="data.step.contentType === 'VARIABLE'">
@@ -158,6 +174,12 @@ function pinClassForRoute(outcomeKey: string | null): string {
 
       <template v-else-if="data.step.contentType === 'JOIN'">
         <p class="pl-hint">Ждёт, пока завершатся все входящие ветки, и только потом переходит дальше.</p>
+      </template>
+
+      <template v-else-if="data.step.contentType === 'LOOP'">
+        <label class="mb-1 block text-[12px] text-muted">Максимум итераций</label>
+        <input v-model.number="data.step.maxIterations" type="number" min="1" max="100" class="pl-input" />
+        <p class="pl-hint">Соедините «тело цикла» с первым шагом, а последний шаг верните в этот блок. Для досрочного выхода направьте ветку результата мимо цикла.</p>
       </template>
 
       <label v-if="data.step.contentType === 'PROMPT' || data.step.contentType === 'MD_FILE'" class="pl-file pl-file-secondary">
@@ -178,7 +200,7 @@ function pinClassForRoute(outcomeKey: string | null): string {
           title="Вход данных"
         />
         <div class="pl-port-in-body">
-          <span class="pl-port-label">{{ isCondition ? 'Что сравнивать' : 'Входные данные' }}</span>
+          <span class="pl-port-label">{{ isCondition ? (data.step.conditionMode === 'PROMPT' ? 'Контекст вопроса' : 'Что сравнивать') : 'Входные данные' }}</span>
           <ul v-if="data.wiredInputs.length" class="pl-wired-list">
             <li v-for="input in data.wiredInputs" :key="input.token" class="pl-wired-item">
               <span class="pl-wired-name">{{ input.sourceStepTitle }} <b>·</b> {{ input.sourceOutputName }}</span>
@@ -187,7 +209,7 @@ function pinClassForRoute(outcomeKey: string | null): string {
               </button>
             </li>
           </ul>
-          <span v-else class="pl-port-empty">{{ isCondition ? 'подключите выход другого блока' : 'необязательно — выход другого блока' }}</span>
+          <span v-else class="pl-port-empty">{{ isCondition && data.step.conditionMode !== 'PROMPT' ? 'подключите выход другого блока' : 'необязательно — выход другого блока' }}</span>
         </div>
       </div>
 
@@ -206,6 +228,9 @@ function pinClassForRoute(outcomeKey: string | null): string {
         >
           <template v-if="isCondition">
             <span class="pl-branch-key" :class="route.outcomeKey === 'true' ? 'pl-branch-true' : 'pl-branch-false'">{{ route.outcomeKey }}</span>
+          </template>
+          <template v-else-if="isLoop">
+            <span class="pl-branch-default">{{ route.outcomeKey === 'done' ? 'выход при лимите' : 'тело цикла' }}</span>
           </template>
           <template v-else-if="isParallel">
             <span class="pl-branch-default">ветка {{ routeIndex + 1 }}</span>

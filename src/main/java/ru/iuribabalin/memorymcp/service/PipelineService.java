@@ -247,10 +247,19 @@ public class PipelineService {
                 }
             }
         }
+        int[] entryInDegree = inDegree.clone();
+        for (int i = 0; i < n; i++) {
+            for (int target : adjacency.get(i)) {
+                if (steps.get(target).contentType() == PipelineStep.ContentType.LOOP
+                        && reachableFrom(target, adjacency).contains(i)) {
+                    entryInDegree[target]--;
+                }
+            }
+        }
         List<String> roots = new ArrayList<>();
         for (int i = 0; i < n; i++) {
             boolean isolated = inDegree[i] == 0 && outDegree[i] == 0;
-            if (!isolated && inDegree[i] == 0) {
+            if (!isolated && entryInDegree[i] == 0) {
                 roots.add(steps.get(i).title());
             }
         }
@@ -259,7 +268,16 @@ public class PipelineService {
                     ? "Pipeline has no starting step — every step has an incoming route"
                     : "Pipeline has more than one starting step: " + String.join(", ", roots));
         }
-        int[] remaining = inDegree.clone();
+        // Cycles are legal only when they return to a LOOP step. Removing every incoming LOOP edge
+        // must therefore leave an acyclic graph; the loop itself enforces a finite iteration limit.
+        int[] remaining = new int[n];
+        for (int i = 0; i < n; i++) {
+            for (int next : adjacency.get(i)) {
+                if (steps.get(next).contentType() != PipelineStep.ContentType.LOOP) {
+                    remaining[next]++;
+                }
+            }
+        }
         Deque<Integer> queue = new ArrayDeque<>();
         for (int i = 0; i < n; i++) {
             if (remaining[i] == 0) {
@@ -271,13 +289,13 @@ public class PipelineService {
             int current = queue.poll();
             visited++;
             for (int next : adjacency.get(current)) {
-                if (--remaining[next] == 0) {
+                if (steps.get(next).contentType() != PipelineStep.ContentType.LOOP && --remaining[next] == 0) {
                     queue.add(next);
                 }
             }
         }
         if (visited < n) {
-            throw new PipelineInvalidGraphException("Pipeline has a cycle in its step routes");
+            throw new PipelineInvalidGraphException("Pipeline has a cycle that does not return to a LOOP step");
         }
     }
 
@@ -420,7 +438,30 @@ public class PipelineService {
                 validateParallelStep(step, incomingDataLinkCount[i]);
             } else if (step.contentType() == PipelineStep.ContentType.JOIN) {
                 validateJoinStep(step, incomingDataLinkCount[i]);
+            } else if (step.contentType() == PipelineStep.ContentType.LOOP) {
+                validateLoopStep(step, incomingDataLinkCount[i]);
             }
+        }
+    }
+
+    private void validateLoopStep(PipelineUpsertRequest.StepRequest step, int incomingDataLinkCount) {
+        if (step.maxIterations() == null || step.maxIterations() < 1 || step.maxIterations() > 100) {
+            throw new PipelineInvalidParametersException(
+                    "Step '" + step.title() + "' is type LOOP and needs a max iteration count between 1 and 100");
+        }
+        long defaults = step.routes().stream().filter(r -> r.outcomeKey() == null).count();
+        long done = step.routes().stream().filter(r -> "done".equals(r.outcomeKey())).count();
+        if (step.routes().size() != 2 || defaults != 1 || done != 1) {
+            throw new PipelineInvalidGraphException(
+                    "Step '" + step.title() + "' is type LOOP and needs one body route and one 'done' route");
+        }
+        if (step.routes().stream().noneMatch(r -> r.outcomeKey() == null && r.targetStepIndex() != null)) {
+            throw new PipelineInvalidGraphException(
+                    "Step '" + step.title() + "' is type LOOP and needs its body route wired to a step");
+        }
+        if (!step.outputs().isEmpty() || incomingDataLinkCount != 0) {
+            throw new PipelineInvalidGraphException(
+                    "Step '" + step.title() + "' is type LOOP and carries no data - it can have neither outputs nor incoming data links");
         }
     }
 
@@ -453,14 +494,21 @@ public class PipelineService {
     }
 
     private void validateConditionStep(PipelineUpsertRequest.StepRequest step, int incomingDataLinkCount) {
-        if (step.conditionOperator() == null || step.conditionValue() == null || step.conditionValue().isBlank()) {
-            throw new PipelineInvalidParametersException(
-                    "Step '" + step.title() + "' is type CONDITION but is missing a comparison operator/value");
-        }
-        if (incomingDataLinkCount != 1) {
-            throw new PipelineInvalidGraphException(
-                    "Step '" + step.title() + "' is type CONDITION and must have exactly one incoming data link (has "
-                            + incomingDataLinkCount + ")");
+        if (step.conditionMode() == PipelineStep.ConditionMode.PROMPT) {
+            if (step.promptText() == null || step.promptText().isBlank()) {
+                throw new PipelineInvalidParametersException(
+                        "Step '" + step.title() + "' is a PROMPT condition but has no yes/no question");
+            }
+        } else {
+            if (step.conditionOperator() == null || step.conditionValue() == null || step.conditionValue().isBlank()) {
+                throw new PipelineInvalidParametersException(
+                        "Step '" + step.title() + "' is type CONDITION but is missing a comparison operator/value");
+            }
+            if (incomingDataLinkCount != 1) {
+                throw new PipelineInvalidGraphException(
+                        "Step '" + step.title() + "' is a VALUE condition and must have exactly one incoming data link (has "
+                                + incomingDataLinkCount + ")");
+            }
         }
         Set<String> outcomeKeys = step.routes().stream()
                 .map(PipelineUpsertRequest.StepRequest.RouteRequest::outcomeKey)
@@ -553,6 +601,8 @@ public class PipelineService {
             step.setReferenceAssetId(stepRequest.referenceAssetId());
             step.setConditionOperator(stepRequest.conditionOperator());
             step.setConditionValue(stepRequest.conditionValue());
+            step.setConditionMode(stepRequest.conditionMode());
+            step.setMaxIterations(stepRequest.maxIterations());
             step.setPositionX(stepRequest.positionX());
             step.setPositionY(stepRequest.positionY());
             savedSteps.add(pipelineStepRepository.save(step));
@@ -643,7 +693,7 @@ public class PipelineService {
                                             link.getId(), link.getToken(), outputsById.get(link.getSourceOutputId()).getName(),
                                             orderIndexById.get(link.getTargetStepId()), titleById.get(link.getTargetStepId())))
                                     .toList(),
-                            s.getConditionOperator(), s.getConditionValue());
+                            s.getConditionOperator(), s.getConditionValue(), s.getConditionMode(), s.getMaxIterations());
                 })
                 .toList();
         Map<Long, String> parameterNameById = parameters.stream()

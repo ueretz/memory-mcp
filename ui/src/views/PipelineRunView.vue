@@ -127,7 +127,7 @@ function kindLabel(contentType: string): string {
                 <td class="pl-runs-time">{{ step.orderIndex + 1 }}</td>
                 <td>
                   <span class="pl-runs-id">{{ step.title }}</span>
-                  <span class="pl-runs-by">{{ kindLabel(step.contentType) }}</span>
+                  <span class="pl-runs-by">{{ kindLabel(step.contentType) }}<template v-if="step.executionCount > 1"> · выполнение {{ step.executionCount }}</template></span>
                 </td>
                 <td>
                   <span class="pl-step-status" :class="`pl-step-status-${stageStatusFor(run, step.orderIndex)}`">
