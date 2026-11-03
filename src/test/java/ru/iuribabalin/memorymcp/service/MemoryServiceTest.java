@@ -66,4 +66,16 @@ class MemoryServiceTest {
                 "mem-svc-test-project-b", null, "mem-svc-test-a-folder", null, "Tester")))
                 .isInstanceOf(IllegalArgumentException.class);
     }
+
+    @Test
+    void searchMatchesRussianWordFormsViaStemming() {
+        memoryService.save(new SaveMemoryRequest(
+                "mem-svc-test-ru-stemming", MemoryNode.Type.PROJECT,
+                "как проверить конфиг на стендах", "c",
+                "mem-svc-test-ru-project", null, null, null, "Tester"));
+
+        assertThat(memoryService.search("стенд", null, "mem-svc-test-ru-project", null, null, 50))
+                .extracting(s -> s.name())
+                .containsExactly("mem-svc-test-ru-stemming");
+    }
 }
