@@ -57,7 +57,7 @@ public interface MemoryNodeRepository extends JpaRepository<MemoryNode, Long> {
     @Query(value = """
             select n.* from memory_nodes n
             left join folders f on f.id = n.folder_id
-            where n.search_vector @@ plainto_tsquery('english', :query)
+            where n.search_vector @@ (plainto_tsquery('english', :query) || plainto_tsquery('russian', :query))
             and (:type is null or n.type = :type)
             and (:projectScope is null or n.project_scope = :projectScope)
             and (
@@ -70,7 +70,7 @@ public interface MemoryNodeRepository extends JpaRepository<MemoryNode, Long> {
                 or (:folderFilterMode = 'ROOT' and n.folder_id is null)
                 or (:folderFilterMode = 'IN' and f.name = :folderName)
             )
-            order by ts_rank(n.search_vector, plainto_tsquery('english', :query)) desc
+            order by ts_rank(n.search_vector, plainto_tsquery('english', :query) || plainto_tsquery('russian', :query)) desc
             """, nativeQuery = true)
     List<MemoryNode> search(@Param("query") String query,
                             @Param("type") String type,
