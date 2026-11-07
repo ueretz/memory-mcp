@@ -320,6 +320,21 @@ Docker-контейнер) настраивается один раз через
 - **`agent-task-report`** (`~/.claude/skills/agent-task-report/` — распаковать zip) — сборка и
   сохранение HTML-отчёта в стиле дашборда; вызывается из `agent-task-board` или отдельно.
 
+### Дашборд как приложение в Dock (macOS)
+
+```bash
+scripts/macos/install-dock-app.sh                                # http://localhost:8080
+scripts/macos/install-dock-app.sh --url http://localhost:8091    # другой адрес инстанса
+```
+
+Скрипт собирает `~/Applications/Memory MCP.app` с иконкой дашборда (🧠) и закрепляет его в Dock.
+По клику дашборд открывается отдельным окном Chrome (`--app`, без вкладок и адресной строки), а
+если Chrome не установлен — в браузере по умолчанию. Иконка рисуется при сборке через Swift
+(`xcode-select --install`, если тулчейна нет — останется стандартная иконка апплета). Повторный
+запуск пересобирает приложение и не дублирует плитку; `--no-dock` — только собрать приложение,
+`--dest` — другая папка вместо `~/Applications`. Убрать — вытащить иконку из Dock и удалить
+приложение.
+
 ## Структура проекта
 
 ```
@@ -362,6 +377,7 @@ ui/                                — фронтенд-проект (Vue 3 + Vi
 Dockerfile                         — многостадийная сборка: ui (node:24) → jar (25-jdk) → рантайм (25-jre)
 .dockerignore                      — исключает build/.gradle/.git/ui/node_modules из контекста сборки
 docker-compose.yml                 — Postgres (с healthcheck) + сервис app (дашборд + MCP)
+scripts/macos/                     — install-dock-app.sh + dock-icon.swift: дашборд как приложение в Dock
 ```
 
 ## Статус и дальнейшие шаги
