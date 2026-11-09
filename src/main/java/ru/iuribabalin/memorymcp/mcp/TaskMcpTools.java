@@ -56,7 +56,9 @@ public class TaskMcpTools {
             @McpToolParam(description = "Project identifier", required = true) String projectScope,
             @McpToolParam(description = "The task/ticket key", required = true) String taskKey,
             @McpToolParam(description = "Name of the existing memory entry containing the markdown spec", required = true) String entryName) {
-        return taskService.setSpec(projectScope, taskKey, entryName);
+        TaskDetail result = taskService.setSpec(projectScope, taskKey, entryName);
+        usageEventRecorder.record(UsageEvent.Action.TASK_SPEC_SET, entryName, projectScope, taskKey, null);
+        return result;
     }
 
     @McpTool(name = "task_list",
@@ -86,6 +88,7 @@ public class TaskMcpTools {
             @McpToolParam(description = "Project identifier", required = true) String projectScope,
             @McpToolParam(description = "The task/ticket key", required = true) String taskKey) {
         boolean cancelled = taskService.cancel(projectScope, taskKey);
+        usageEventRecorder.record(UsageEvent.Action.TASK_CANCEL, null, projectScope, taskKey, null);
         return Map.of("cancelled", cancelled, "taskKey", taskKey);
     }
 

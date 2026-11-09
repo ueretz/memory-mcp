@@ -58,7 +58,9 @@ public class AgentTaskMcpTools {
             @McpToolParam(description = "The task/ticket key", required = true) String taskKey,
             @McpToolParam(description = "The subtask's id, from agent_task_create or agent_task_list", required = true) Long agentTaskId,
             @McpToolParam(description = "Name of the existing memory entry containing the markdown spec", required = true) String entryName) {
-        return agentTaskService.setSpec(projectScope, taskKey, agentTaskId, entryName);
+        AgentTaskSummary result = agentTaskService.setSpec(projectScope, taskKey, agentTaskId, entryName);
+        usageEventRecorder.record(UsageEvent.Action.AGENT_TASK_SPEC_SET, entryName, projectScope, taskKey, null);
+        return result;
     }
 
     @McpTool(name = "agent_task_list",
