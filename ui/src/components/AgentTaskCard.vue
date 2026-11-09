@@ -7,11 +7,14 @@ import { relativeTime } from '@/lib/format'
 import AgentTaskTypeBadge from './AgentTaskTypeBadge.vue'
 import AppIcon from './AppIcon.vue'
 import MarkdownBody from './MarkdownBody.vue'
+import TaskSpecCard from './TaskSpecCard.vue'
 
 defineProps<{
   agentTask: AgentTaskSummary
   resolveLink?: (name: string) => string | null
   dependsOnTitle?: string | null
+  projectScope: string
+  taskKey: string
 }>()
 
 const expanded = ref(false)
@@ -30,6 +33,13 @@ const expanded = ref(false)
       <AppIcon name="link" class="size-3" />
       Depends on: {{ dependsOnTitle }}
     </p>
+    <TaskSpecCard
+      v-if="agentTask.spec"
+      :spec="agentTask.spec"
+      :project-scope="projectScope"
+      :task-key="taskKey"
+      compact
+    />
     <MarkdownBody
       v-if="expanded && agentTask.description"
       :content="agentTask.description"

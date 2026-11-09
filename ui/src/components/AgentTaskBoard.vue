@@ -62,6 +62,8 @@ function dependencyTitle(agentTask: AgentTaskSummary): string | null {
           :agent-task="agentTask"
           :resolve-link="resolveLink"
           :depends-on-title="dependencyTitle(agentTask)"
+          :project-scope="projectScope"
+          :task-key="taskKey"
         />
       </div>
     </div>
