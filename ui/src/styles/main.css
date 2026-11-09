@@ -911,6 +911,18 @@
 .dark .pl-condition-lhs {
   color: #34d399;
 }
+.pl-runs-watch {
+  display: block;
+  font-size: 11px;
+  color: var(--color-faint);
+}
+.pl-runs-watch-expired {
+  color: #b45309;
+  font-weight: 500;
+}
+.dark .pl-runs-watch-expired {
+  color: #fbbf24;
+}
 .pl-watch-timings {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);

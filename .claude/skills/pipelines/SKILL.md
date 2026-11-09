@@ -135,9 +135,72 @@ just its first entry, kept for compatibility).
 Branches that reach the end of the run on their own simply disappear from the active list; a JOIN
 that is still waiting is not listed either (it is not your step to work on).
 
+## Watcher steps (waiting for something outside the pipeline)
+
+A **Наблюдатель** (`WATCHER`) step waits for an external event and then branches on what happened:
+a merge request's CI pipeline going green or red, a reviewer approving or leaving comments, or any
+probe command succeeding. It is YOUR step to work, like a PROMPT step - the server only stores its
+config and owns its deadline.
+
+**1. Recognise it.** The step's `contentType` is `WATCHER` (in both `pipeline_get` and the run's
+step list). `pipeline_get` gives you its config: `watchSource` (`GITLAB_MR` or `COMMAND`),
+`watchAspect` (`PIPELINE` or `REVIEW`, only for `GITLAB_MR`), `checkIntervalSeconds` and
+`watchTimeoutSeconds`. The thing to watch is this step's `resolvedInstructionText` from the run
+response - a merge request URL, or a probe command line.
+
+**2. Wait in the background, not in the conversation.** Start ONE backgrounded poller that sleeps
+`checkIntervalSeconds` between attempts and exits when the event happens - not a loop of
+checks in chat, which would burn tokens for hours. Two things follow from this:
+
+- The wait costs almost nothing in tokens, but it needs your session to stay open. If the session
+  ends mid-wait, the run just stops where it was; it resumes later via `pipeline_run_get` (see
+  below) and does NOT lose the waiting it had already done, because the deadline only starts at
+  the first check.
+- Ask for the Bash permission up front, while the user is still at the keyboard.
+
+**3. Probe.** For `GITLAB_MR`, take the project path and the MR iid out of the URL, and read GitLab
+the first way that is actually available: the `gitlab` MCP server, else the `glab` CLI, else `curl`
+against the REST API with a token the user has configured. Then:
+
+- `PIPELINE` aspect - look at the MR's latest pipeline. `success` → outcome `success`;
+  `failed`/`canceled` → outcome `failed` (go there immediately, do not keep waiting); anything else
+  (`running`, `pending`, `created`, no pipeline yet) → keep waiting.
+- `REVIEW` aspect - in this priority order: the MR is approved → outcome `approved`; else there is
+  an unresolved discussion whose LAST note is not by the MR's author → outcome `comments`; else
+  keep waiting. The "last note not by the author" part is what makes a second pass work: after you
+  have answered the reviewer's threads, the last word in them is yours, so the watcher keeps
+  waiting for the reviewer instead of firing `comments` again at once.
+- `COMMAND` - run the probe. Exit code 0 → outcome `success`; any other code → keep waiting (a
+  non-zero exit means "not yet", never "failed").
+
+A watcher never judges whether review comments are substantive - it only reports that unresolved
+ones exist. Deciding what to do with them is the job of the step in the `comments` branch.
+
+**4. Report every check.** Call
+`pipeline_run_step_check(runId, orderIndex, observedState)` once per probe, passing what you saw as
+a short literal (`"running"`, `"success"`, `"unresolved-comments"`); the dashboard shows it while
+the watcher waits. The response is `{checkCount, deadlineAt, expired}`. While `expired` is `false`,
+keep waiting. The moment it is `true`, stop waiting and close the step with outcome `timeout` -
+never compute the deadline yourself.
+
+**5. Close it like any other step.** `pipeline_run_step_update(runId, orderIndex, "DONE", note,
+outcome, outputsJson)` with the outcome you decided above. A watcher's outcome keys are fixed by
+its source and aspect, so you do not invent them: `GITLAB_MR`+`PIPELINE` → `success`/`failed`/
+`timeout`, `GITLAB_MR`+`REVIEW` → `approved`/`comments`/`timeout`, `COMMAND` → `success`/`timeout`.
+If the step declares `outputs`, fill them as usual.
+
+A watcher never appears inside a **Параллельно** fan-out (the dashboard refuses to save one there),
+so the sub-agent rules in the previous section never apply to it - you always work a watcher
+yourself.
+
 ## Resuming an interrupted run
 
 If the user asks to continue a pipeline run from an earlier session, call
 `pipeline_run_get(runId)` and resume from whatever step its `currentStepOrderIndex` points to -
 don't assume it's "the first `PENDING` step", since in a branching pipeline some `PENDING` steps
 may belong to a path that was never taken and will stay `PENDING` forever.
+
+If the step you land on is a `WATCHER`, just start waiting again as described above: its
+`watchCheckCount` and `watchDeadlineAt` carry over, so it picks up the wait where the previous
+session left it instead of starting from zero - and if `watchExpired` is already `true`, close it
+with outcome `timeout` straight away rather than probing once more.
