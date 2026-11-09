@@ -474,54 +474,192 @@ class PipelineServiceTest {
     }
 
     @Test
-    void savesAndReadsBackAVariableStepWithItsSingleOutput() {
+    void rejectsAVariableStepBecauseAVariableIsNoLongerAStep() {
         PipelineUpsertRequest request = new PipelineUpsertRequest(
                 "var-1", "Variable pipeline", "desc", "pipeline-svc-test-project",
                 List.of(),
-                List.of(
-                        new PipelineUpsertRequest.StepRequest("Greeting", PipelineStep.ContentType.VARIABLE, "hello",
-                                null, null, 0, 0, List.of(),
-                                List.of(new PipelineUpsertRequest.StepRequest.OutputRequest("greeting")),
-                                List.of(), null, null),
-                        new PipelineUpsertRequest.StepRequest("Use it", PipelineStep.ContentType.PROMPT, "say it",
-                                null, null, 0, 0, List.of(), List.of(), List.of(), null, null)));
+                List.of(new PipelineUpsertRequest.StepRequest("Greeting", PipelineStep.ContentType.VARIABLE, "hello",
+                        null, null, 0, 0, List.of(),
+                        List.of(new PipelineUpsertRequest.StepRequest.OutputRequest("greeting")),
+                        List.of(), null, null)));
+
+        assertThatThrownBy(() -> pipelineService.create(request, "Tester"))
+                .isInstanceOf(PipelineInvalidGraphException.class)
+                .hasMessageContaining("input plate");
+    }
+
+    @Test
+    void savesAndReadsBackAVariableWiredIntoAStep() {
+        PipelineUpsertRequest request = new PipelineUpsertRequest(
+                "var-plate-1", "Variable plate", "desc", "pipeline-svc-test-project",
+                List.of(),
+                List.of(new PipelineUpsertRequest.StepRequest("Use it", PipelineStep.ContentType.PROMPT,
+                        "say {{data:tok-greeting}}", null, null, 0, 0, List.of(), List.of(), List.of(), null, null)),
+                List.of(),
+                List.of(new PipelineUpsertRequest.VariableRequest("greeting", "hello")),
+                List.of(new PipelineUpsertRequest.VariableLinkRequest("tok-greeting", "greeting", 0, null)),
+                0);
 
         PipelineDetail detail = pipelineService.create(request, "Tester");
 
-        PipelineDetail.PipelineStepView variable = detail.steps().get(0);
-        assertThat(variable.contentType()).isEqualTo(PipelineStep.ContentType.VARIABLE);
-        assertThat(variable.promptText()).isEqualTo("hello");
-        assertThat(variable.outputs()).extracting(PipelineDetail.PipelineStepView.OutputView::name).containsExactly("greeting");
+        assertThat(detail.variables()).extracting(PipelineDetail.PipelineVariableView::name).containsExactly("greeting");
+        assertThat(detail.variables()).extracting(PipelineDetail.PipelineVariableView::value).containsExactly("hello");
+        assertThat(detail.variableLinks()).singleElement().satisfies(link -> {
+            assertThat(link.variableName()).isEqualTo("greeting");
+            assertThat(link.targetStepOrderIndex()).isZero();
+            assertThat(link.targetVariableName()).isNull();
+        });
+        assertThat(detail.startStepOrderIndex()).isZero();
     }
 
     @Test
-    void rejectsAVariableStepWithoutExactlyOneOutput() {
+    void buildsOneVariableOutOfAnotherWithoutAnyStep() {
         PipelineUpsertRequest request = new PipelineUpsertRequest(
-                "var-2", "No output", "desc", "pipeline-svc-test-project",
+                "var-plate-2", "Nested variables", "desc", "pipeline-svc-test-project",
                 List.of(),
-                List.of(new PipelineUpsertRequest.StepRequest("A", PipelineStep.ContentType.VARIABLE, "hello",
-                        null, null, 0, 0, List.of(), List.of(), List.of(), null, null)));
+                List.of(new PipelineUpsertRequest.StepRequest("Use it", PipelineStep.ContentType.PROMPT,
+                        "say {{data:tok-full}}", null, null, 0, 0, List.of(), List.of(), List.of(), null, null)),
+                List.of(),
+                List.of(new PipelineUpsertRequest.VariableRequest("name", "Юрий"),
+                        new PipelineUpsertRequest.VariableRequest("full", "Привет, {{data:tok-name}}")),
+                List.of(new PipelineUpsertRequest.VariableLinkRequest("tok-name", "name", null, "full"),
+                        new PipelineUpsertRequest.VariableLinkRequest("tok-full", "full", 0, null)),
+                0);
+
+        PipelineDetail detail = pipelineService.create(request, "Tester");
+
+        assertThat(detail.variableLinks())
+                .extracting(PipelineDetail.PipelineVariableLinkView::variableName,
+                        PipelineDetail.PipelineVariableLinkView::targetVariableName,
+                        PipelineDetail.PipelineVariableLinkView::targetStepOrderIndex)
+                .containsExactlyInAnyOrder(
+                        org.assertj.core.groups.Tuple.tuple("name", "full", null),
+                        org.assertj.core.groups.Tuple.tuple("full", null, 0));
+    }
+
+    private PipelineUpsertRequest variablePlateRequest(String slug) {
+        return new PipelineUpsertRequest(
+                slug, "Variable plate", "desc", "pipeline-svc-test-project",
+                List.of(),
+                List.of(new PipelineUpsertRequest.StepRequest("Use it", PipelineStep.ContentType.PROMPT,
+                        "say {{data:vtok-1}}", null, null, 0, 0, List.of(), List.of(), List.of(), null, null)),
+                List.of(),
+                List.of(new PipelineUpsertRequest.VariableRequest("greeting", "hello")),
+                List.of(new PipelineUpsertRequest.VariableLinkRequest("vtok-1", "greeting", 0, null)),
+                0);
+    }
+
+    @Test
+    void resavingKeepsTheVariablesItsWiresAndTheStart() {
+        // A save replaces the whole definition, start step and variable rows included - the step the
+        // start points at is deleted and re-created, so the pointer has to survive that.
+        pipelineService.create(variablePlateRequest("var-resave-1"), "Tester");
+
+        PipelineDetail detail = pipelineService.update("var-resave-1", variablePlateRequest("var-resave-1"));
+
+        assertThat(detail.variables()).extracting(PipelineDetail.PipelineVariableView::name).containsExactly("greeting");
+        assertThat(detail.variableLinks()).singleElement()
+                .satisfies(link -> assertThat(link.targetStepOrderIndex()).isZero());
+        assertThat(detail.startStepOrderIndex()).isZero();
+    }
+
+    @Test
+    void deleteRemovesAPipelineWithVariablesAndTheirWires() {
+        pipelineService.create(variablePlateRequest("var-delete-1"), "Tester");
+
+        boolean deleted = pipelineService.delete("var-delete-1");
+
+        assertThat(deleted).isTrue();
+        assertThatThrownBy(() -> pipelineService.get("var-delete-1")).isInstanceOf(PipelineNotFoundException.class);
+    }
+
+    @Test
+    void rejectsAVariableWithNoValueAndNothingWiredIntoIt() {
+        PipelineUpsertRequest request = new PipelineUpsertRequest(
+                "var-plate-3", "Empty variable", "desc", "pipeline-svc-test-project",
+                List.of(), List.of(), List.of(),
+                List.of(new PipelineUpsertRequest.VariableRequest("blank", "  ")),
+                List.of(), null);
 
         assertThatThrownBy(() -> pipelineService.create(request, "Tester"))
-                .isInstanceOf(PipelineInvalidGraphException.class);
+                .isInstanceOf(PipelineInvalidGraphException.class)
+                .hasMessageContaining("nothing wired into it");
     }
 
     @Test
-    void rejectsAVariableStepWithANamedRoute() {
+    void rejectsTwoVariablesWithTheSameName() {
         PipelineUpsertRequest request = new PipelineUpsertRequest(
-                "var-3", "Named route on variable", "desc", "pipeline-svc-test-project",
+                "var-plate-4", "Duplicate variables", "desc", "pipeline-svc-test-project",
+                List.of(), List.of(), List.of(),
+                List.of(new PipelineUpsertRequest.VariableRequest("same", "a"),
+                        new PipelineUpsertRequest.VariableRequest("same", "b")),
+                List.of(), null);
+
+        assertThatThrownBy(() -> pipelineService.create(request, "Tester"))
+                .isInstanceOf(PipelineInvalidGraphException.class)
+                .hasMessageContaining("more than one variable named");
+    }
+
+    @Test
+    void rejectsVariablesBuiltOutOfEachOther() {
+        PipelineUpsertRequest request = new PipelineUpsertRequest(
+                "var-plate-5", "Cyclic variables", "desc", "pipeline-svc-test-project",
+                List.of(), List.of(), List.of(),
+                List.of(new PipelineUpsertRequest.VariableRequest("a", "{{data:tok-b}}"),
+                        new PipelineUpsertRequest.VariableRequest("b", "{{data:tok-a}}")),
+                List.of(new PipelineUpsertRequest.VariableLinkRequest("tok-a", "a", null, "b"),
+                        new PipelineUpsertRequest.VariableLinkRequest("tok-b", "b", null, "a")),
+                null);
+
+        assertThatThrownBy(() -> pipelineService.create(request, "Tester"))
+                .isInstanceOf(PipelineInvalidGraphException.class)
+                .hasMessageContaining("cannot form a cycle");
+    }
+
+    @Test
+    void acceptsTwoStepsWithNoIncomingRouteWhenTheStartIsExplicit() {
+        // Before V24 this was refused as "more than one starting step". With the start pinned to the
+        // input plate, a step nobody routes into is just one the author has not wired up yet.
+        PipelineUpsertRequest request = new PipelineUpsertRequest(
+                "explicit-start-1", "Two roots", "desc", "pipeline-svc-test-project",
                 List.of(),
                 List.of(
-                        new PipelineUpsertRequest.StepRequest("A", PipelineStep.ContentType.VARIABLE, "hello",
+                        new PipelineUpsertRequest.StepRequest("First", PipelineStep.ContentType.PROMPT, "a",
                                 null, null, 0, 0,
-                                List.of(new PipelineUpsertRequest.StepRequest.RouteRequest("go", 1)),
-                                List.of(new PipelineUpsertRequest.StepRequest.OutputRequest("greeting")),
-                                List.of(), null, null),
-                        new PipelineUpsertRequest.StepRequest("B", PipelineStep.ContentType.PROMPT, "b",
-                                null, null, 0, 0, List.of(), List.of(), List.of(), null, null)));
+                                List.of(new PipelineUpsertRequest.StepRequest.RouteRequest(null, 2)),
+                                List.of(), List.of(), null, null),
+                        new PipelineUpsertRequest.StepRequest("Orphan", PipelineStep.ContentType.PROMPT, "b",
+                                null, null, 0, 0,
+                                List.of(new PipelineUpsertRequest.StepRequest.RouteRequest(null, 2)),
+                                List.of(), List.of(), null, null),
+                        new PipelineUpsertRequest.StepRequest("Last", PipelineStep.ContentType.PROMPT, "c",
+                                null, null, 0, 0, List.of(), List.of(), List.of(), null, null)),
+                List.of(), List.of(), List.of(), 1);
+
+        PipelineDetail detail = pipelineService.create(request, "Tester");
+
+        assertThat(detail.startStepOrderIndex()).isEqualTo(1);
+    }
+
+    @Test
+    void stillInfersTheStartWhenTheCallerNamesNone() {
+        PipelineDetail detail = pipelineService.create(sampleRequest("inferred-start-1"), "Tester");
+
+        assertThat(detail.startStepOrderIndex()).isZero();
+    }
+
+    @Test
+    void rejectsAStartIndexOutsideThePipeline() {
+        PipelineUpsertRequest request = new PipelineUpsertRequest(
+                "explicit-start-2", "Bad start", "desc", "pipeline-svc-test-project",
+                List.of(),
+                List.of(new PipelineUpsertRequest.StepRequest("Only", PipelineStep.ContentType.PROMPT, "a",
+                        null, null, 0, 0, List.of(), List.of(), List.of(), null, null)),
+                List.of(), List.of(), List.of(), 3);
 
         assertThatThrownBy(() -> pipelineService.create(request, "Tester"))
-                .isInstanceOf(PipelineInvalidGraphException.class);
+                .isInstanceOf(PipelineInvalidGraphException.class)
+                .hasMessageContaining("starts at step index 3");
     }
 
     private PipelineUpsertRequest parameterLinkRequest(String slug) {

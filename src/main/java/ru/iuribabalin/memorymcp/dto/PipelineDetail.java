@@ -15,6 +15,10 @@ public record PipelineDetail(
         List<PipelineParameterView> parameters,
         List<PipelineStepView> steps,
         List<PipelineParameterLinkView> parameterLinks,
+        List<PipelineVariableView> variables,
+        List<PipelineVariableLinkView> variableLinks,
+        /** Null only while a pipeline has no steps yet. */
+        Integer startStepOrderIndex,
         String createdBy,
         Instant createdAt,
         Instant updatedAt
@@ -24,8 +28,25 @@ public record PipelineDetail(
             boolean required, String defaultValue, int orderIndex) {
     }
 
+    /**
+     * Exactly one of {@code targetStepOrderIndex} / {@code targetVariableName} is set - a parameter
+     * either feeds a step or helps build a variable.
+     */
     public record PipelineParameterLinkView(Long id, String token, String parameterName,
-                                            Integer targetStepOrderIndex, String targetStepTitle) {
+                                            Integer targetStepOrderIndex, String targetStepTitle,
+                                            String targetVariableName) {
+    }
+
+    public record PipelineVariableView(Long id, String name, String value, int orderIndex) {
+    }
+
+    /**
+     * Exactly one of {@code targetStepOrderIndex} / {@code targetVariableName} is set - a variable's
+     * value either feeds a step or helps build another variable.
+     */
+    public record PipelineVariableLinkView(Long id, String token, String variableName,
+                                           Integer targetStepOrderIndex, String targetStepTitle,
+                                           String targetVariableName) {
     }
 
     public record PipelineStepView(

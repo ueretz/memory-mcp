@@ -43,7 +43,8 @@ class PipelineExportServiceTest {
         assertThat(imported.pipeline().slug()).isEqualTo("round-trip-2");
         assertThat(reexported.pipeline())
                 .usingRecursiveComparison()
-                .ignoringFields("slug", "steps.promptText", "steps.dataLinksOut.token", "parameterLinks.token")
+                .ignoringFields("slug", "steps.promptText", "steps.dataLinksOut.token", "parameterLinks.token",
+                        "variables.value", "variableLinks.token")
                 .isEqualTo(exported.pipeline());
         assertThat(reexported.warnings()).isEmpty();
 
@@ -51,8 +52,23 @@ class PipelineExportServiceTest {
         String parameterToken = imported.pipeline().parameterLinks().get(0).token();
         assertThat(dataToken).isNotEqualTo("round-trip-data");
         assertThat(parameterToken).isNotEqualTo("round-trip-parameter");
+        String variableToken = imported.pipeline().variableLinks().stream()
+                .filter(link -> link.targetStepOrderIndex() != null)
+                .findFirst().orElseThrow().token();
+        assertThat(variableToken).isNotEqualTo("round-trip-var");
         assertThat(imported.pipeline().steps().get(1).promptText())
-                .isEqualTo("Use {{data:" + dataToken + "}} and {{data:" + parameterToken + "}}");
+                .isEqualTo("Use {{data:" + dataToken + "}}, {{data:" + parameterToken + "}} and {{data:"
+                        + variableToken + "}}");
+        // A variable's own value carries a placeholder as well, and it must land on the new token.
+        String chainToken = imported.pipeline().variableLinks().stream()
+                .filter(link -> link.targetVariableName() != null)
+                .findFirst().orElseThrow().token();
+        assertThat(imported.pipeline().variables())
+                .extracting(PipelineDetail.PipelineVariableView::name, PipelineDetail.PipelineVariableView::value)
+                .containsExactly(
+                        org.assertj.core.groups.Tuple.tuple("branch", "main"),
+                        org.assertj.core.groups.Tuple.tuple("target", "ветка {{data:" + chainToken + "}}"));
+        assertThat(imported.pipeline().startStepOrderIndex()).isZero();
         assertThat(imported.pipeline().steps().get(0).routes().get(0).targetStepOrderIndex()).isEqualTo(1);
         assertThat(imported.pipeline().steps().get(0).dataLinksOut().get(0).targetStepOrderIndex()).isEqualTo(1);
         assertThat(imported.pipeline().parameterLinks().get(0).targetStepOrderIndex()).isEqualTo(1);
@@ -132,10 +148,17 @@ class PipelineExportServiceTest {
                                 null, null),
                         new PipelineUpsertRequest.StepRequest(
                                 "Report", PipelineStep.ContentType.PROMPT,
-                                "Use {{data:round-trip-data}} and {{data:round-trip-parameter}}", null, null,
+                                "Use {{data:round-trip-data}}, {{data:round-trip-parameter}} and {{data:round-trip-var}}", null, null,
                                 300, 20, List.of(), List.of(), List.of(), null, null)),
                 List.of(new PipelineUpsertRequest.ParameterLinkRequest(
-                        "round-trip-parameter", "folder", 1)));
+                        "round-trip-parameter", "folder", 1)),
+                List.of(new PipelineUpsertRequest.VariableRequest("branch", "main"),
+                        new PipelineUpsertRequest.VariableRequest("target", "ветка {{data:round-trip-var-chain}}")),
+                List.of(new PipelineUpsertRequest.VariableLinkRequest(
+                                "round-trip-var-chain", "branch", null, "target"),
+                        new PipelineUpsertRequest.VariableLinkRequest(
+                                "round-trip-var", "target", 1, null)),
+                0);
     }
 
     private PipelineUpsertRequest singleStepRequest(String slug) {

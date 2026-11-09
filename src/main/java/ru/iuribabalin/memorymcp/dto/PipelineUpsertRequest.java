@@ -16,10 +16,36 @@ public record PipelineUpsertRequest(
          * Wires from a pipeline parameter into a step's {@code {{data:token}}}. They live at the
          * top level (not inside a step) because their source is a parameter, not a step.
          */
-        List<ParameterLinkRequest> parameterLinks
+        List<ParameterLinkRequest> parameterLinks,
+        /**
+         * Named constants on the input plate. Not steps: a variable does no work, so it has no
+         * place in the transition graph (V24).
+         */
+        List<VariableRequest> variables,
+        /**
+         * Wires out of a variable - into a step's {@code {{data:token}}} or into another variable's
+         * value. Top level for the same reason as {@code parameterLinks}: the source is not a step.
+         */
+        List<VariableLinkRequest> variableLinks,
+        /**
+         * The step a run begins at. Null means "work it out from the graph" (the pre-V24 rule: the
+         * one step nothing routes into) and is what older callers and older exports send; the board
+         * always states the start explicitly, which is the whole point of the input plate's start
+         * port.
+         */
+        Integer startStepIndex
 ) {
     public PipelineUpsertRequest {
         parameterLinks = parameterLinks == null ? List.of() : parameterLinks;
+        variables = variables == null ? List.of() : variables;
+        variableLinks = variableLinks == null ? List.of() : variableLinks;
+    }
+
+    /** Pre-V24 shape: no variables of their own, no explicit start. */
+    public PipelineUpsertRequest(String slug, String name, String description, String projectScope,
+                                 List<ParameterRequest> parameters, List<StepRequest> steps,
+                                 List<ParameterLinkRequest> parameterLinks) {
+        this(slug, name, description, projectScope, parameters, steps, parameterLinks, List.of(), List.of(), null);
     }
 
     /** Pre-V17 shape: no parameter links. */
@@ -31,7 +57,22 @@ public record PipelineUpsertRequest(
     public record ParameterRequest(String name, String label, PipelineParameter.Type type, boolean required, String defaultValue) {
     }
 
-    public record ParameterLinkRequest(String token, String parameterName, Integer targetStepIndex) {
+    /** Exactly one of {@code targetStepIndex} / {@code targetVariableName} is set. */
+    public record ParameterLinkRequest(String token, String parameterName, Integer targetStepIndex,
+                                       String targetVariableName) {
+
+        /** Pre-V24 shape: a parameter could only be wired into a step. */
+        public ParameterLinkRequest(String token, String parameterName, Integer targetStepIndex) {
+            this(token, parameterName, targetStepIndex, null);
+        }
+    }
+
+    public record VariableRequest(String name, String value) {
+    }
+
+    /** Exactly one of {@code targetStepIndex} / {@code targetVariableName} is set. */
+    public record VariableLinkRequest(String token, String variableName, Integer targetStepIndex,
+                                      String targetVariableName) {
     }
 
     public record StepRequest(

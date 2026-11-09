@@ -8,9 +8,15 @@ import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 
 /**
- * A wire carrying a value into a step's {@code {{data:token}}} placeholder. The source is either a
- * step output ({@code sourceStepId} + {@code sourceOutputId}) or a pipeline parameter
- * ({@code sourceParameterId}) - exactly one of the two (enforced by a CHECK constraint, V17).
+ * A wire carrying a value into a {@code {{data:token}}} placeholder.
+ *
+ * <p>The source is a step output ({@code sourceStepId} + {@code sourceOutputId}), a pipeline
+ * parameter ({@code sourceParameterId}) or a pipeline variable ({@code sourceVariableId}) - exactly
+ * one of the three (enforced by a CHECK constraint, V17 and V24).
+ *
+ * <p>The target is a step ({@code targetStepId}) or another variable ({@code targetVariableId}) -
+ * again exactly one, so a variable's value can be assembled out of a parameter or of other
+ * variables without any of them becoming a step (V24).
  */
 @Entity
 @Table(name = "pipeline_data_links")
@@ -32,8 +38,14 @@ public class PipelineDataLink {
     @Column(name = "source_parameter_id")
     private Long sourceParameterId;
 
-    @Column(name = "target_step_id", nullable = false)
+    @Column(name = "source_variable_id")
+    private Long sourceVariableId;
+
+    @Column(name = "target_step_id")
     private Long targetStepId;
+
+    @Column(name = "target_variable_id")
+    private Long targetVariableId;
 
     public Long getId() {
         return id;
@@ -71,8 +83,20 @@ public class PipelineDataLink {
         this.sourceParameterId = sourceParameterId;
     }
 
+    public Long getSourceVariableId() {
+        return sourceVariableId;
+    }
+
+    public void setSourceVariableId(Long sourceVariableId) {
+        this.sourceVariableId = sourceVariableId;
+    }
+
     public boolean isParameterSourced() {
         return sourceParameterId != null;
+    }
+
+    public boolean isVariableSourced() {
+        return sourceVariableId != null;
     }
 
     public Long getTargetStepId() {
@@ -81,5 +105,13 @@ public class PipelineDataLink {
 
     public void setTargetStepId(Long targetStepId) {
         this.targetStepId = targetStepId;
+    }
+
+    public Long getTargetVariableId() {
+        return targetVariableId;
+    }
+
+    public void setTargetVariableId(Long targetVariableId) {
+        this.targetVariableId = targetVariableId;
     }
 }

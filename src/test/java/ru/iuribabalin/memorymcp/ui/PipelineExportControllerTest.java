@@ -67,7 +67,7 @@ class PipelineExportControllerTest {
     void importReturnsTheCreatedPipelineAndWarnings() throws Exception {
         PipelineDetail detail = new PipelineDetail(
                 2L, "portable-2", "Portable", "desc", "scope", List.of(), List.of(), List.of(),
-                null, null, null);
+                List.of(), List.of(), null, null, null, null);
         when(exportService.importPipeline(any(), isNull())).thenReturn(new PipelineImportResponse(
                 detail, List.of("Step 'File' lost its asset references")));
 
