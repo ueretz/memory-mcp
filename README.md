@@ -4,8 +4,14 @@ MCP-сервер для Claude Code, дающий агенту **долговр�
 плоских markdown-файлов. Память организована как на GitHub/GitLab: проект → общий ("common")
 контекст продукта + отдельные папки задач, плюс отдельный тип записей — автоматически
 построенный граф расположения файлов/классов в проекте, чтобы агент не грепал файловую систему.
-Всё это доступно как самому агенту через MCP-инструменты, так и человеку — через локальный
+Всё это доступно как самому агенту — через 27 MCP-инструментов, так и человеку — через локальный
 веб-дашборд с навигацией в стиле GitLab и страницами записей в стиле Confluence.
+
+Поверх самой памяти выросли ещё три подсистемы: **папки** для группировки записей внутри scope,
+**доска подзадач** (`agent_task_*`) с атомарным захватом и параллельным исполнением по субагентам,
+и **пайплайны** — собранные руками в дашборде графы шагов с ветвлениями, циклами и передачей
+данных между шагами, которые агент прогоняет как чеклист. Плюс страницы `/stats` (журнал
+обращений к памяти) и `/settings` (флаги экспериментальных фич).
 
 ## Зачем это нужно
 
@@ -46,7 +52,7 @@ MCP-сервер для Claude Code, дающий агенту **долговр�
 
 ### Модель данных
 
-Три таблицы, миграции `src/main/resources/db/migration/V1..V4`:
+Ядро памяти — три таблицы (всего их 17; миграции `src/main/resources/db/migration/V1..V21`):
 
 - **`memory_nodes`** — сама запись памяти: `name` (уникальный slug, до 500 символов — для
   `LOCATION`-записей это может быть полное имя класса), `type`
@@ -65,21 +71,55 @@ MCP-сервер для Claude Code, дающий агенту **долговр�
   `task_id = NULL` — это "общий" (common) контекст проекта; с `task_id` — контекст конкретной
   задачи. Удаление задачи каскадно удаляет её записи (FK `ON DELETE CASCADE`).
 
+Остальные таблицы — надстройки над этим ядром:
+
+- **`folders`** (V6) — папка внутри scope (project или task) для группировки записей, с
+  опциональной вложенностью (`parent_id`); scope папки после создания неизменен.
+- **`agent_tasks`** (V7-V8) — доска подзадач внутри задачи: тип, статус и опциональная
+  зависимость (`depends_on_id`, self-FK), на которой держится атомарный захват
+  `agent_task_claim`.
+- **`usage_events`** (V5, V13) — журнал обращений к памяти (действие, запись, scope, автор,
+  время), источник данных для страницы `/stats`.
+- **`settings`** (V9) — key-value настройки дашборда; сейчас единственный ключ
+  `feature.pipelines.enabled` — флаг экспериментальной фичи пайплайнов.
+- **`pipelines`**, **`pipeline_steps`**, **`pipeline_step_routes`**, **`pipeline_step_outputs`**,
+  **`pipeline_parameters`**, **`pipeline_data_links`**, **`pipeline_assets`** — определение
+  пайплайна (граф шагов, ветки по outcome, выходы шагов, параметры запуска, проводка данных,
+  загруженные `.md`-файлы), а **`pipeline_runs`**, **`pipeline_run_steps`**,
+  **`pipeline_run_step_outputs`** — снапшот конкретного прогона (V10-V12, V14-V20). Подробнее —
+  в разделе "Пайплайны".
+
+С V21 полнотекстовый поиск индексирует `search_vector` сразу двумя словарями — `english` **и**
+`russian`. До этого кириллица попадала в индекс нестеммированными лексемами, и поиск по «стенд» не
+находил «стендам»; теперь каждый язык стеммируется своим конфигом, а запросная сторона
+(`MemoryNodeRepository.search`) объединяет оба `plainto_tsquery` через OR.
+
 Java-слой (`ru.iuribabalin.memorymcp`):
-- `entity/` — `MemoryNode`, `MemoryEdge`, `Task` (JPA-сущности);
+- `entity/` — `MemoryNode`, `MemoryEdge`, `Task`, `Folder`, `AgentTask`, `UsageEvent`, `Setting`
+  плюс 10 `Pipeline*`-сущностей (JPA-сущности);
 - `repository/` — `MemoryNodeRepository` (FTS с `ts_rank`, фильтрация по scope/task через
-  `taskFilterMode` NONE/COMMON/TASK), `MemoryEdgeRepository`, `TaskRepository`;
+  `taskFilterMode` NONE/COMMON/TASK), `MemoryEdgeRepository`, `TaskRepository`,
+  `FolderRepository`, `AgentTaskRepository`, `SettingRepository`, `UsageEventRepository` и
+  10 репозиториев пайплайнов;
 - `service/LinkParser` — regex-парсер `[[name]]` (буквы/цифры/`_`/`-`/`.`) из markdown;
 - `service/MemoryService` — upsert с диффом рёбер и резолвом задачи по `taskKey`, get, list,
   search, graph, related, delete;
-- `service/TaskService` — start (upsert)/list/close задач;
-- `service/ProjectService` — агрегация списка проектов со счётчиками;
+- `service/TaskService` — start (upsert)/list/close/delete задач;
+- `service/AgentTaskService` — доска подзадач, включая атомарный захват (conditional UPDATE);
+- `service/FolderService` — папки внутри scope, с расфайливанием записей при удалении;
+- `service/ProjectService` — агрегация списка проектов со счётчиками и удаление проекта целиком;
 - `service/RepositoryScanner` — обход дерева проекта и построение `LOCATION`-записей (см. ниже);
 - `service/MemoryExportService` + `service/PdfRenderer` — экспорт записи в PDF/markdown (см.
   "PDF-экспорт" ниже);
+- `service/PipelineService`, `PipelineRunService`, `PipelineAssetService`,
+  `PipelineExportService` — определение пайплайнов и валидация графа, прогоны и продвижение по
+  шагам, загруженные `.md`-файлы, экспорт/импорт в JSON;
+- `service/SettingsService` — настройки и флаги фич (`isEnabled`), `service/UsageEventRecorder` +
+  `service/StatsService` — запись обращений и сводка для `/stats`;
 - `dto/` — `MemoryEntrySummary`/`MemoryEntryDetail` (включая
   `projectScope`/`taskKey`/`filePath`/`createdBy`), `GraphResponse`, `TaskSummary`,
-  `ProjectSummary`, `SetupInfo`.
+  `ProjectSummary`, `FolderSummary`, `AgentTaskSummary`, `SettingSummary`, `StatsOverview`,
+  `SetupInfo` и `Pipeline*`-DTO.
 
 ### Иерархия Project → Task → Записи
 
@@ -140,19 +180,42 @@ Java-слой (`ru.iuribabalin.memorymcp`):
 | `folder_delete` | `name` | Удалить папку (подпапки — каскадно, записи внутри — не удаляются, а расфайливаются в корень своего scope) |
 | `task_delete` | `projectScope`, `taskKey` | Безвозвратно удалить задачу целиком — записи/папки/доску подзадач (в отличие от `task_close`, который просто помечает done) |
 | `project_delete` | `projectScope` | Безвозвратно удалить весь проект — все задачи, common-записи, common-папки |
+| `pipeline_list` | `projectScope?` | Список пайплайнов, собранных руками в дашборде. Пайплайны общие для всех проектов, `projectScope` на фильтрацию не влияет. Нужен, чтобы превратить названное пользователем имя в точный slug |
+| `pipeline_get` | `slug` | Полное определение пайплайна: упорядоченные шаги (с инлайненным содержимым загруженных `.md`), параметры, `routes` каждого шага (какой `outcome` ведёт в какой шаг) и `outputs` (какие значения шаг должен вернуть) |
+| `pipeline_run_start` | `slug`, `parametersJson?` | Проверяет обязательные параметры, снапшотит текущие шаги и возвращает `runId` + список шагов и индексы активных |
+| `pipeline_run_step_update` | `runId`, `orderIndex`, `status`, `note?`, `outcome?`, `outputsJson?` | Статус шага (`RUNNING`/`DONE`/`FAILED`/`SKIPPED`), ветка по `outcome` и значения выходов шага; в ответе — что делать дальше (`currentStepOrderIndex`, `null` — все пути закончились) |
+| `pipeline_run_complete` | `runId`, `status` | Закрыть прогон: `DONE`/`FAILED`/`ABORTED` |
+| `pipeline_run_get` | `runId` | Текущее состояние прогона — чтобы подхватить прогон, брошенный предыдущей сессией |
+
+Все `pipeline_*` отключены, пока в `/settings` не включена экспериментальная фича **Pipelines** —
+иначе инструмент отвечает ошибкой `PipelineFeatureDisabledException`.
 
 ### REST API дашборда
 
-Без авторизации (рассчитано на localhost-only персональное использование). Только чтение, кроме
-`DELETE` — единственное осознанное исключение из "дашборд не пишет": `GET /api/projects`,
-`GET /api/projects/{scope}/tasks`, `GET /api/memory`, `GET /api/memory/{name}`,
-`GET /api/memory/search?q=`, `GET /api/memory/graph`, `GET /api/memory/{name}/pdf`,
-`GET /api/memory/{name}/html`, `GET /api/memory/{name}/markdown`, `GET /api/setup`,
-`GET /api/setup/skills/{id}`, `GET /api/folders`, `GET /api/folders/{name}`,
-`GET /api/stats/overview`, `DELETE /api/memory/{name}`, `DELETE /api/folders/{name}`,
+Без авторизации (рассчитано на localhost-only персональное использование).
+
+Память, проекты, задачи — **только чтение**, кроме `DELETE`: это осознанное исключение из
+"дашборд не пишет в память" (записи создаёт агент, удаляет человек):
+`GET /api/projects`, `GET /api/projects/{scope}/tasks`,
+`GET /api/projects/{scope}/tasks/{taskKey}/agent-tasks`, `GET /api/memory`,
+`GET /api/memory/{name}`, `GET /api/memory/search?q=`, `GET /api/memory/graph`,
+`GET /api/memory/{name}/pdf`, `GET /api/memory/{name}/html`, `GET /api/memory/{name}/markdown`,
+`GET /api/folders`, `GET /api/folders/{name}`, `GET /api/stats/overview`, `GET /api/setup`,
+`GET /api/setup/skills/{id}`, `DELETE /api/memory/{name}`, `DELETE /api/folders/{name}`,
 `DELETE /api/projects/{scope}/tasks/{taskKey}`, `DELETE /api/projects/{scope}`.
-`ApiExceptionHandler` превращает отсутствие записи/задачи/папки в HTTP 404, экспорт markdown у
-`REPORT`-записи — в 400, а сбой рендера PDF — в 500 (вместо голого 500 без объяснения).
+
+Пайплайны и настройки — **читаются и пишутся** через дашборд: пайплайн целиком авторится руками
+в UI-конструкторе, поэтому здесь полный CRUD. `GET/POST /api/pipelines`,
+`GET/PUT/DELETE /api/pipelines/{slug}`, `GET /api/pipelines/{slug}/runs`,
+`GET /api/pipelines/{slug}/export` + `POST /api/pipelines/import` (перенос пайплайна между
+инстансами одним JSON), `GET /api/pipeline-runs/{id}`,
+`POST /api/pipeline-assets` + `GET /api/pipeline-assets/{id}` (загруженные `.md`-файлы шагов),
+`GET /api/settings`, `PUT /api/settings/{key}`.
+
+`ApiExceptionHandler` превращает отсутствие записи/задачи/папки/пайплайна/прогона/шага в
+HTTP 404, занятый slug пайплайна — в 409, экспорт markdown у `REPORT`-записи, невалидные
+параметры и граф пайплайна, незнакомую версию формата импорта и неизвестный outcome/output шага —
+в 400, а сбой рендера PDF — в 500 (вместо голого 500 без объяснения).
 
 ### Веб-дашборд
 
@@ -182,6 +245,15 @@ SPA на Vue 3 (`ui/`, history-роутинг через `vue-router`; `SpaForwa
   панорамирование (`d3-zoom`), радиус узла зависит от числа связей, подсветка соседних рёбер при
   наведении, фильтр по типу (включая `LOCATION` — тот же граф классов, что строит `location_scan`,
   но визуально), клик по узлу ведёт на страницу записи;
+- `/p/{projectScope}/f/{folderName}` — страница папки: записи внутри неё и вложенные папки;
+- `/pipelines` — список пайплайнов (видна, когда фича включена в `/settings`), `/pipelines/new` и
+  `/pipelines/{slug}/edit` — визуальный конструктор графа шагов, `/pipelines/{slug}` — карточка
+  пайплайна с историей прогонов, `/pipelines/{slug}/board` — full-bleed доска прогона,
+  `/pipelines/{slug}/runs/{runId}` — конкретный прогон пошагово (старые адреса
+  `/p/{project}/pipelines/**` сохранены как редиректы);
+- `/stats` — сводка по памяти: всего записей и обращений, активность по дням, разбивка по типам
+  записей, топ самых востребованных записей (данные из `usage_events`);
+- `/settings` — флаги экспериментальных фич (сейчас — Pipelines);
 - `/setup` — страница подключения: команда `claude mcp add --transport http` с автоматически
   подставленным URL текущего инстанса (`http://<host>:<port>/mcp`), плюс скачивание трёх
   независимых скиллов (`memory-mcp`, `agent-task-board`, `agent-task-report` — каждый отвечает
@@ -193,6 +265,47 @@ SPA на Vue 3 (`ui/`, history-роутинг через `vue-router`; `SpaForwa
 стрелками), переключатель светлой/тёмной темы с запоминанием выбора. Тема и вся палитра —
 CSS-переменные, перенесённые в Tailwind через `@theme inline` (`ui/src/styles/main.css`), поэтому
 цвета типов/статусов задаются в одном месте.
+
+### Пайплайны
+
+Экспериментальная фича, выключенная по умолчанию — включается тумблером на `/settings`
+(`feature.pipelines.enabled`), пока он выключен все `pipeline_*`-инструменты отвечают ошибкой.
+
+Пайплайн — это **именованный граф шагов, собираемый только руками** в конструкторе дашборда
+(`/pipelines/new`); агент его не авторит, а исполняет. Пайплайны общие для всех проектов: один и
+тот же список приходит из любого репозитория. Шаг (`pipeline_steps`) — один из 7 типов:
+
+| Тип | Кто исполняет | Что делает |
+|---|---|---|
+| `PROMPT` | агент | Инструкция агенту текстом, прямо в шаге |
+| `MD_FILE` | агент | То же, но содержимое загружено файлом (`pipeline_assets`) и инлайнится в `pipeline_get` — отдельная скачка не нужна |
+| `CONDITION` | агент (`PROMPT`) / сервер (`VALUE`) | Ветвление: либо вопрос агенту (`conditionMode=PROMPT`), либо сравнение значения сервером (`conditionMode=VALUE` + оператор `EQUALS`/`GREATER_THAN`/`LESS_THAN`/`GREATER_OR_EQUAL`/`LESS_OR_EQUAL`) |
+| `VARIABLE` | сервер | Значение, заданное в конструкторе: шаг обязан объявить ровно один output, сервер сразу помечает его `DONE` и подставляет значение дальше |
+| `PARALLEL` | сервер | Фан-аут: активирует сразу все свои ветки |
+| `JOIN` | сервер | Ждёт, пока придёт каждая входящая ветка (`arrived_count`) |
+| `LOOP` | сервер | Возвращает исполнение на более ранний шаг, пока не исчерпан `max_iterations` (`execution_count` считает итерации) |
+
+То есть агенту достаются только `PROMPT`, `MD_FILE` и `CONDITION` в режиме `PROMPT` — остальные
+типы `PipelineRunService` разрешает сам и сразу продвигает прогон дальше, агент их даже не видит
+как активные.
+
+Поэтому прогон (`pipeline_runs`) отслеживает **множество** активных шагов (`active_steps_json`), а
+не один указатель; `current_step_order_index` остаётся как "первый активный" для совместимости.
+Переходы между шагами задаются `pipeline_step_routes` (ключ `outcome` → целевой шаг), а передача
+данных — `pipeline_step_outputs` (что шаг обязан вернуть) и `pipeline_data_links` (токен в
+промпте целевого шага ← выход предыдущего шага или параметр запуска). Параметры запуска
+(`pipeline_parameters`, типы `STRING`/`NUMBER`/`BOOLEAN`, обязательность, значение по умолчанию)
+валидируются в `pipeline_run_start` — агент обязан спросить их у пользователя заранее.
+
+Протокол исполнения для агента: `pipeline_list` → `pipeline_get` (узнать шаги, параметры и
+маршруты) → `pipeline_run_start` → для каждого активного шага `pipeline_run_step_update` →
+`pipeline_run_complete`. Брошенный прогон подхватывается через `pipeline_run_get`. На стороне
+агента это оформлено скиллом `pipelines` (`.claude/skills/pipelines/`) — в отличие от трёх
+остальных он не раздаётся через `/setup`, а живёт только в этом репозитории.
+
+Пайплайн переносится между инстансами одним JSON: `GET /api/pipelines/{slug}/export` →
+`POST /api/pipelines/import` (`PipelineExportService` версионирует формат и отказывается
+импортировать незнакомую версию).
 
 ### PDF-экспорт
 
@@ -343,22 +456,35 @@ scripts/macos/install-dock-app.sh --url http://localhost:8091    # другой 
 ```
 src/main/java/ru/iuribabalin/memorymcp/
 ├── MemoryMcpApplication.java      — точка входа (@SpringBootApplication)
-├── entity/                        — MemoryNode, MemoryEdge, Task
+├── entity/                        — MemoryNode, MemoryEdge, Task, Folder, AgentTask, Setting,
+│                                     UsageEvent, Pipeline* (10 сущностей)
 ├── repository/                    — Spring Data репозитории + нативные FTS/edge-запросы
-├── service/                       — LinkParser, MemoryService, TaskService, ProjectService,
-│                                     RepositoryScanner, MemoryExportService, PdfRenderer,
+├── service/                       — LinkParser, MemoryService, TaskService, AgentTaskService,
+│                                     FolderService, ProjectService, RepositoryScanner,
+│                                     MemoryExportService, PdfRenderer, SettingsService,
+│                                     StatsService, UsageEventRecorder, Pipeline*Service,
 │                                     *NotFoundException, PdfRenderException, UnsupportedExportException
-├── dto/                           — Summary/Detail/Graph/Task/Project/Setup DTO
-├── mcp/                           — MemoryMcpTools, TaskMcpTools, CodeMapMcpTools (11 @McpTool)
+├── dto/                           — Summary/Detail/Graph/Task/Project/Folder/AgentTask/Stats/
+│                                     Setting/Setup/Pipeline* DTO
+├── mcp/                           — MemoryMcpTools, TaskMcpTools, CodeMapMcpTools, FolderMcpTools,
+│                                     AgentTaskMcpTools, ProjectMcpTools, PipelineMcpTools
+│                                     (27 @McpTool)
 └── ui/                            — MemoryViewController, MemoryExportController,
-                                      ProjectViewController, SetupController, ApiExceptionHandler
-                                      (read-only REST + PDF/markdown export)
+                                      ProjectViewController, FolderViewController,
+                                      StatsViewController, SettingsController, SetupController,
+                                      Pipeline{,Run,Asset,Export}Controller, SpaForwardController,
+                                      ApiExceptionHandler (read-only REST по памяти + CRUD по
+                                      пайплайнам/настройкам + PDF/markdown/html export)
 
 src/main/resources/
 ├── application.yml                — единый конфиг, MCP-транспорт streamable HTTP (protocol: streamable)
 ├── logback-spring.xml             — обычный цветной вывод в stdout
-├── db/migration/                  — V1 (nodes/edges), V2 (tasks), V3 (LOCATION + file_path),
-│                                     V4 (REPORT + created_by)
+├── db/migration/                  — V1..V21: V1 (nodes/edges), V2 (tasks), V3 (LOCATION +
+│                                     file_path), V4 (REPORT + created_by), V5/V13 (usage_events),
+│                                     V6 (folders), V7-V8 (agent_tasks + dependencies),
+│                                     V9 (settings), V10-V12/V14-V20 (пайплайны: assets,
+│                                     определение, прогоны, routes, data links, condition mode,
+│                                     parallel, loop, prompt conditions), V21 (russian FTS)
 └── skill/                         — три скилла, раздаются через /api/setup/skills/{id}
     ├── SKILL.md                   — memory-mcp (одиночный файл)
     ├── agent-task-board/SKILL.md  — оркестрация доски подзадач (одиночный файл)
@@ -370,13 +496,18 @@ ui/                                — фронтенд-проект (Vue 3 + Vi
 ├── src/api/                       — types.ts (зеркало DTO бэкенда) + client.ts (типизированный fetch)
 ├── src/components/                — оболочка (сайдбар, шапка, палитра поиска, крошки) и элементы
 │                                     списков/карточек, MemoryGraph.vue (d3-force), MarkdownBody.vue
-├── src/views/                     — Projects/Project/Task/Entry/Report/Graph/Setup/NotFound
+├── src/views/                     — Projects/Project/Task/Folder/Entry/Report/Graph/Stats/
+│                                     Settings/Setup/NotFound + Pipelines/PipelineBuilder/
+│                                     Pipeline/PipelineBoard/PipelineRun
 ├── src/composables/               — useAsyncData (загрузка + гонки запросов), useTheme
 ├── src/lib/                       — links.ts (маршруты записей), markdown.ts, format.ts
 └── src/styles/main.css            — дизайн-токены (светлая/тёмная) + стили markdown
 
 .claude/skills/                    — зеркала src/main/resources/skill/ (memory-mcp, agent-task-board,
-                                      agent-task-report) для догфудинга в этом репо
+                                      agent-task-report) для догфудинга в этом репо, плюс
+                                      pipelines — скилл исполнения пайплайнов, который через
+                                      /setup не раздаётся (SkillAssetsInSyncTest сторожит, что
+                                      зеркала не разъехались с раздаваемыми копиями)
 Dockerfile                         — многостадийная сборка: ui (node:24) → jar (25-jdk) → рантайм (25-jre)
 .dockerignore                      — исключает build/.gradle/.git/ui/node_modules из контекста сборки
 docker-compose.yml                 — Postgres (с healthcheck) + сервис app (дашборд + MCP)
@@ -385,12 +516,13 @@ scripts/macos/                     — install-dock-app.sh + dock-icon.swift: д
 
 ## Статус и дальнейшие шаги
 
-Реализовано и проверено вручную (миграции, все 11 MCP-инструментов через прямой JSON-RPC поверх
-streamable HTTP, REST API, полный дашборд, регистрация в Claude Code через URL, сканирование
-этого же репозитория как реальный тест `location_scan`):
+Реализовано и проверено (юнит/интеграционные тесты в `src/test`, плюс ручная проверка: все 27
+MCP-инструментов через прямой JSON-RPC поверх streamable HTTP, REST API, полный дашборд,
+регистрация в Claude Code через URL, сканирование этого же репозитория как реальный тест
+`location_scan`):
 
-- [x] MCP-сервер поверх streamable HTTP (`/mcp`) с 11 инструментами, на одном порту с дашбордом
-- [x] Postgres + Flyway-схема (nodes/edges/tasks, тип LOCATION), самоисцеляющиеся dangling-связи
+- [x] MCP-сервер поверх streamable HTTP (`/mcp`) с 27 инструментами, на одном порту с дашбордом
+- [x] Postgres + Flyway-схема V1..V21 (17 таблиц), самоисцеляющиеся dangling-связи
 - [x] Иерархия Project → Task → Common/записи
 - [x] Дашборд на Vue 3 + Tailwind (проект `ui/`): навигация в стиле GitLab, страницы записей в стиле
       Confluence с рендерингом markdown, тёмная тема, поиск по Ctrl/⌘ + K
@@ -426,3 +558,15 @@ streamable HTTP, REST API, полный дашборд, регистрация �
       true)`, раздел про мультисессионный режим в скилле `agent-task-board`, 2 новых раздела отчёта
       (влияние на прод/продукт, на что обращать внимание при проверке) плюс авто-агрегация
       критичных находок в `agent-task-report`
+- [x] Папки (`folders`) — группировка записей внутри scope с вложенностью, MCP-инструменты
+      `folder_*`, страница папки в дашборде; удаление папки не удаляет записи, а расфайливает их
+      в корень scope
+- [x] Страница `/stats` — журнал обращений к памяти (`usage_events`): всего записей/обращений,
+      активность по дням, разбивка по типам, топ востребованных записей
+- [x] Страница `/settings` — флаги экспериментальных фич (key-value `settings`)
+- [x] Пайплайны (за флагом фичи) — визуальный конструктор графа шагов в дашборде, 7 типов шагов
+      (включая `PARALLEL`/`JOIN`/`LOOP` и `CONDITION` в режимах VALUE/PROMPT), ветвление по
+      `outcome`, проводка данных между шагами, параметры запуска, прогоны с историей,
+      экспорт/импорт пайплайна одним JSON, 6 MCP-инструментов `pipeline_*` и скилл `pipelines`
+- [x] Полнотекстовый поиск по русскому тексту со стеммингом (V21) — двойная индексация
+      `english` + `russian` вместо нестеммированной кириллицы
