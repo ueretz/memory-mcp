@@ -3,6 +3,7 @@ package ru.iuribabalin.memorymcp.service;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import ru.iuribabalin.memorymcp.dto.PipelineRunDetail;
+import ru.iuribabalin.memorymcp.dto.PipelineRunStepCheckResult;
 import ru.iuribabalin.memorymcp.dto.PipelineRunSummary;
 import ru.iuribabalin.memorymcp.entity.Pipeline;
 import ru.iuribabalin.memorymcp.entity.PipelineDataLink;
@@ -169,6 +170,54 @@ public class PipelineRunService {
             runStepOutput.setValue(node.get(name).asString());
             pipelineRunStepOutputRepository.save(runStepOutput);
         }
+    }
+
+    /**
+     * Records one watcher probe. The deadline starts at the FIRST check rather than at activation:
+     * a watcher activated on Friday evening and resumed on Monday must still get its full wait, and
+     * so must one the agent only reaches after finishing another active branch.
+     */
+    @Transactional
+    public PipelineRunStepCheckResult checkStep(Long runId, int orderIndex, String observedState) {
+        pipelineRunRepository.findById(runId).orElseThrow(() -> new PipelineRunNotFoundException(runId));
+        PipelineRunStep runStep = pipelineRunStepRepository.findByRunIdAndOrderIndex(runId, orderIndex)
+                .orElseThrow(() -> new PipelineRunStepNotFoundException(runId, orderIndex));
+        if (runStep.getContentType() != PipelineStep.ContentType.WATCHER) {
+            throw new PipelineRunNotAWatcherException(runId, orderIndex, runStep.getContentType());
+        }
+        Instant now = Instant.now();
+        if (runStep.getWatchDeadlineAt() == null) {
+            runStep.setWatchDeadlineAt(now.plusSeconds(watchTimeoutSecondsOf(runStep)));
+        }
+        runStep.setWatchCheckCount(runStep.getWatchCheckCount() + 1);
+        runStep.setWatchLastCheckedAt(now);
+        runStep.setWatchLastState(observedState);
+        if (runStep.getStatus() == PipelineRunStep.Status.PENDING) {
+            runStep.setStatus(PipelineRunStep.Status.RUNNING);
+            if (runStep.getStartedAt() == null) {
+                runStep.setStartedAt(now);
+            }
+        }
+        pipelineRunStepRepository.save(runStep);
+        return new PipelineRunStepCheckResult(runStep.getWatchCheckCount(), runStep.getWatchDeadlineAt(),
+                isWatchExpired(runStep, now));
+    }
+
+    /**
+     * The step definition owns the timeout. A run step whose definition has since been deleted or
+     * saved without one still gets a bounded wait rather than an unbounded one.
+     */
+    private int watchTimeoutSecondsOf(PipelineRunStep runStep) {
+        Integer configured = runStep.getPipelineStepId() == null ? null
+                : pipelineStepRepository.findById(runStep.getPipelineStepId())
+                        .map(PipelineStep::getWatchTimeoutSeconds)
+                        .orElse(null);
+        return configured == null ? 3600 : configured;
+    }
+
+    /** True once a watcher's wait is over. Computed on read too, so an abandoned run still shows it. */
+    private static boolean isWatchExpired(PipelineRunStep runStep, Instant now) {
+        return runStep.getWatchDeadlineAt() != null && !now.isBefore(runStep.getWatchDeadlineAt());
     }
 
     @Transactional
@@ -338,7 +387,7 @@ public class PipelineRunService {
 
     /**
      * Walks forward from {@code initial}: server-executed steps run immediately and enqueue whatever
-     * they lead to; PROMPT / MD_FILE and PROMPT-mode CONDITION steps wait for Claude. Only steps in
+     * they lead to; PROMPT / MD_FILE, WATCHER and PROMPT-mode CONDITION steps wait for Claude. Only steps in
      * a LOOP-bounded cycle may be reactivated, and the loop's iteration limit keeps this walk finite.
      */
     private void activate(PipelineRun run, List<PipelineStep> orderedSteps, List<Integer> initial) {
@@ -352,7 +401,8 @@ public class PipelineRunService {
             boolean promptCondition = step.getContentType() == PipelineStep.ContentType.CONDITION
                     && step.getConditionMode() == PipelineStep.ConditionMode.PROMPT;
             if (step.getContentType() != PipelineStep.ContentType.PROMPT
-                    && step.getContentType() != PipelineStep.ContentType.MD_FILE && !promptCondition) {
+                    && step.getContentType() != PipelineStep.ContentType.MD_FILE
+                    && step.getContentType() != PipelineStep.ContentType.WATCHER && !promptCondition) {
                 active.remove(Integer.valueOf(index));
             }
             switch (step.getContentType()) {
@@ -392,6 +442,12 @@ public class PipelineRunService {
             if (step.getContentType() != PipelineStep.ContentType.LOOP) {
                 runStep.setArrivedCount(0);
             }
+            // A second pass through a watcher is a fresh wait: the previous iteration's deadline
+            // would otherwise expire this one before it had probed even once.
+            runStep.setWatchCheckCount(0);
+            runStep.setWatchLastCheckedAt(null);
+            runStep.setWatchLastState(null);
+            runStep.setWatchDeadlineAt(null);
         }
         if (reactivating || runStep.getExecutionCount() == 0) {
             runStep.setExecutionCount(runStep.getExecutionCount() + 1);
@@ -678,11 +734,15 @@ public class PipelineRunService {
             }
         }
 
+        Instant readAt = Instant.now();
         List<PipelineRunDetail.PipelineRunStepView> steps = runSteps.stream()
                 .map(s -> new PipelineRunDetail.PipelineRunStepView(s.getId(), s.getOrderIndex(), s.getTitle(),
                         s.getContentType(), s.getStatus(), s.getNote(), s.getStartedAt(), s.getFinishedAt(),
                         resolveInstructionText(s, stepById, incomingLinks, runStepIdByPipelineStepId, reportedValues, parameterValueByToken),
-                        s.getExecutionCount()))
+                        s.getExecutionCount(),
+                        s.getContentType() == PipelineStep.ContentType.WATCHER ? s.getWatchCheckCount() : null,
+                        s.getWatchLastCheckedAt(), s.getWatchLastState(), s.getWatchDeadlineAt(),
+                        s.getContentType() == PipelineStep.ContentType.WATCHER ? isWatchExpired(s, readAt) : null))
                 .toList();
         return new PipelineRunDetail(run.getId(), run.getPipelineId(), pipelineSlug, run.getStatus(),
                 run.getParametersJson(), run.getStartedAt(), run.getFinishedAt(), run.getStartedBy(),

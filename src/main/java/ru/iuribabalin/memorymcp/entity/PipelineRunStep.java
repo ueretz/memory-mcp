@@ -57,6 +57,52 @@ public class PipelineRunStep {
     @Column(name = "execution_count", nullable = false)
     private int executionCount;
 
+    /** WATCHER only: how many times the agent has probed, and what it saw last. */
+    @Column(name = "watch_check_count", nullable = false)
+    private int watchCheckCount;
+
+    @Column(name = "watch_last_checked_at")
+    private Instant watchLastCheckedAt;
+
+    @Column(name = "watch_last_state", length = 100)
+    private String watchLastState;
+
+    /** Set on the FIRST check, not on activation - a run resumed days later still gets its wait. */
+    @Column(name = "watch_deadline_at")
+    private Instant watchDeadlineAt;
+
+    public int getWatchCheckCount() {
+        return watchCheckCount;
+    }
+
+    public void setWatchCheckCount(int watchCheckCount) {
+        this.watchCheckCount = watchCheckCount;
+    }
+
+    public Instant getWatchLastCheckedAt() {
+        return watchLastCheckedAt;
+    }
+
+    public void setWatchLastCheckedAt(Instant watchLastCheckedAt) {
+        this.watchLastCheckedAt = watchLastCheckedAt;
+    }
+
+    public String getWatchLastState() {
+        return watchLastState;
+    }
+
+    public void setWatchLastState(String watchLastState) {
+        this.watchLastState = watchLastState;
+    }
+
+    public Instant getWatchDeadlineAt() {
+        return watchDeadlineAt;
+    }
+
+    public void setWatchDeadlineAt(Instant watchDeadlineAt) {
+        this.watchDeadlineAt = watchDeadlineAt;
+    }
+
     public Long getId() {
         return id;
     }
