@@ -9,6 +9,8 @@ public record TaskSummary(
         String title,
         Task.Source source,
         Task.Status status,
+        TaskDetail.Progress progress,
+        String specEntryName,
         Instant updatedAt
 ) {
 }

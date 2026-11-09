@@ -15,6 +15,10 @@ public interface AgentTaskRepository extends JpaRepository<AgentTask, Long> {
 
     List<AgentTask> findByTaskIdOrderByCreatedAtAsc(Long taskId);
 
+    long countByTaskId(Long taskId);
+
+    long countByTaskIdAndStatus(Long taskId, AgentTask.Status status);
+
     Optional<AgentTask> findByIdAndTaskId(Long id, Long taskId);
 
     /**

@@ -20,7 +20,7 @@ public class Task {
     }
 
     public enum Status {
-        ACTIVE, DONE
+        ACTIVE, DONE, CANCELLED
     }
 
     @Id
@@ -43,6 +43,9 @@ public class Task {
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)
     private Status status;
+
+    @Column(name = "spec_entry_id")
+    private Long specEntryId;
 
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
@@ -92,6 +95,14 @@ public class Task {
 
     public void setStatus(Status status) {
         this.status = status;
+    }
+
+    public Long getSpecEntryId() {
+        return specEntryId;
+    }
+
+    public void setSpecEntryId(Long specEntryId) {
+        this.specEntryId = specEntryId;
     }
 
     public Instant getCreatedAt() {
