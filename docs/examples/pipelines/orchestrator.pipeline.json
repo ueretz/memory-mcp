@@ -208,7 +208,10 @@
                 "delegationHint": null
             }
         ],
-        "parameterLinks": []
+        "parameterLinks": [],
+        "variables": [],
+        "variableLinks": [],
+        "startStepIndex": 0
     },
     "warnings": []
 }
