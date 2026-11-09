@@ -11,7 +11,9 @@ import ru.iuribabalin.memorymcp.entity.PipelineParameter;
 import ru.iuribabalin.memorymcp.entity.PipelineRun;
 import ru.iuribabalin.memorymcp.entity.PipelineRunStep;
 import ru.iuribabalin.memorymcp.entity.PipelineStep;
+import ru.iuribabalin.memorymcp.repository.PipelineRunStepRepository;
 
+import java.time.Instant;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -26,6 +28,9 @@ class PipelineRunServiceTest {
 
     @Autowired
     private PipelineRunService pipelineRunService;
+
+    @Autowired
+    private PipelineRunStepRepository pipelineRunStepRepository;
 
     private void createSamplePipeline(String slug) {
         pipelineService.create(new PipelineUpsertRequest(
@@ -613,9 +618,6 @@ class PipelineRunServiceTest {
         assertThat(no.activeStepOrderIndexes()).containsExactly(2);
     }
 
-    @Autowired
-    private ru.iuribabalin.memorymcp.repository.PipelineRunStepRepository pipelineRunStepRepository;
-
     private PipelineUpsertRequest.StepRequest.RouteRequest route(String key, Integer target) {
         return new PipelineUpsertRequest.StepRequest.RouteRequest(key, target);
     }
@@ -685,7 +687,7 @@ class PipelineRunServiceTest {
         PipelineRunDetail run = pipelineRunService.start("watch-run-4", null, "Tester");
         pipelineRunService.checkStep(run.id(), 0, "running");
         PipelineRunStep runStep = pipelineRunStepRepository.findByRunIdAndOrderIndex(run.id(), 0).orElseThrow();
-        runStep.setWatchDeadlineAt(java.time.Instant.now().minusSeconds(1));
+        runStep.setWatchDeadlineAt(Instant.now().minusSeconds(1));
         pipelineRunStepRepository.save(runStep);
 
         PipelineRunStepCheckResult result = pipelineRunService.checkStep(run.id(), 0, "running");
@@ -719,7 +721,7 @@ class PipelineRunServiceTest {
         PipelineRunDetail run = pipelineRunService.start("watch-run-7", null, "Tester");
         pipelineRunService.checkStep(run.id(), 0, "running");
         PipelineRunStep runStep = pipelineRunStepRepository.findByRunIdAndOrderIndex(run.id(), 0).orElseThrow();
-        runStep.setWatchDeadlineAt(java.time.Instant.now().minusSeconds(1));
+        runStep.setWatchDeadlineAt(Instant.now().minusSeconds(1));
         pipelineRunStepRepository.save(runStep);
 
         assertThat(pipelineRunService.get(run.id()).steps().get(0).watchExpired()).isTrue();
@@ -758,7 +760,7 @@ class PipelineRunServiceTest {
         pipelineRunService.checkStep(run.id(), 0, "success");
         pipelineRunService.updateStep(run.id(), 0, PipelineRunStep.Status.DONE, "build green", "success", null);
         PipelineRunStep runStep = pipelineRunStepRepository.findByRunIdAndOrderIndex(run.id(), 0).orElseThrow();
-        runStep.setWatchDeadlineAt(java.time.Instant.now().minusSeconds(1));
+        runStep.setWatchDeadlineAt(Instant.now().minusSeconds(1));
         pipelineRunStepRepository.save(runStep);
 
         assertThat(pipelineRunService.get(run.id()).steps().get(0).watchExpired()).isFalse();
@@ -825,6 +827,6 @@ class PipelineRunServiceTest {
         PipelineRunStepCheckResult result = pipelineRunService.checkStep(run.id(), 0, "waiting");
 
         assertThat(result.deadlineAt()).isBetween(
-                java.time.Instant.now().plusSeconds(3500), java.time.Instant.now().plusSeconds(3700));
+                Instant.now().plusSeconds(3500), Instant.now().plusSeconds(3700));
     }
 }

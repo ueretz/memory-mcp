@@ -2,7 +2,7 @@
 import { computed, ref, toRef } from 'vue'
 import { useRouter } from 'vue-router'
 
-import { deleteTask, fetchAgentTasks, fetchEntries, fetchFolders, fetchTasks } from '@/api/client'
+import { deleteTask, fetchAgentTasks, fetchEntries, fetchFolders, fetchTask } from '@/api/client'
 import AgentTaskBoard from '@/components/AgentTaskBoard.vue'
 import AppIcon from '@/components/AppIcon.vue'
 import ConfirmDialog from '@/components/ConfirmDialog.vue'
@@ -13,6 +13,8 @@ import FolderCard from '@/components/FolderCard.vue'
 import PageHeader from '@/components/PageHeader.vue'
 import SkeletonRows from '@/components/SkeletonRows.vue'
 import StatusBadge from '@/components/StatusBadge.vue'
+import TaskProgressBar from '@/components/TaskProgressBar.vue'
+import TaskSpecCard from '@/components/TaskSpecCard.vue'
 import { useAsyncData } from '@/composables/useAsyncData'
 import { entryHref, graphLocation, projectLocation } from '@/lib/links'
 
@@ -26,13 +28,13 @@ const { data: entries, error, loading, reload } = useAsyncData(
   [project, taskKey],
 )
 
-const { data: tasks } = useAsyncData(() => fetchTasks(project.value), [project])
+// One request for this task instead of fetching the project's whole task list and finding
+// ourselves in it - it also carries the linked spec and the server-computed progress.
+const { data: task } = useAsyncData(() => fetchTask(project.value, taskKey.value), [project, taskKey])
 
 const { data: folders } = useAsyncData(() => fetchFolders(project.value, taskKey.value, null), [project, taskKey])
 
 const { data: agentTasks } = useAsyncData(() => fetchAgentTasks(project.value, taskKey.value), [project, taskKey])
-
-const task = computed(() => (tasks.value ?? []).find((item) => item.taskKey === taskKey.value) ?? null)
 
 /**
  * Resolves a [[wiki-link]] inside an agent task's description to this task's entries.
@@ -108,6 +110,21 @@ async function confirmDelete() {
       </template>
     </PageHeader>
 
+    <TaskProgressBar
+      v-if="task"
+      :status="task.status"
+      :progress="task.progress"
+      :agent-tasks="agentTasks ?? []"
+    />
+
+    <section v-if="task?.spec" class="mb-9">
+      <h2 class="mb-3 flex items-center gap-2 text-[13px] font-semibold tracking-wide text-content uppercase">
+        <AppIcon name="document" class="size-4 text-faint" />
+        Spec
+      </h2>
+      <TaskSpecCard :spec="task.spec" :project-scope="project" :task-key="taskKey" />
+    </section>
+
     <section v-if="folders?.length" class="mb-9">
       <h2 class="mb-3 flex items-center gap-2 text-[13px] font-semibold tracking-wide text-content uppercase">
         <AppIcon name="folder" class="size-4 text-faint" />
@@ -126,7 +143,12 @@ async function confirmDelete() {
         <AppIcon name="task" class="size-4 text-faint" />
         Agent Tasks
       </h2>
-      <AgentTaskBoard :agent-tasks="agentTasks ?? []" :resolve-link="resolveAgentTaskLink" />
+      <AgentTaskBoard
+        :agent-tasks="agentTasks ?? []"
+        :resolve-link="resolveAgentTaskLink"
+        :project-scope="project"
+        :task-key="taskKey"
+      />
     </section>
 
     <ErrorState v-if="error" :message="error" @retry="reload" />

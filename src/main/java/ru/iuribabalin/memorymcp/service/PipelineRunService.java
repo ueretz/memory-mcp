@@ -1,5 +1,7 @@
 package ru.iuribabalin.memorymcp.service;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import ru.iuribabalin.memorymcp.dto.PipelineRunDetail;
@@ -41,8 +43,13 @@ import java.util.stream.Collectors;
 @Service
 public class PipelineRunService {
 
+    private static final Logger log = LoggerFactory.getLogger(PipelineRunService.class);
+
     /** Matches the {@code watch_last_state} column; a longer probe report is kept truncated. */
     private static final int WATCH_STATE_MAX_LENGTH = 100;
+
+    /** Used only when a watcher's step definition is no longer reachable - see watchTimeoutSecondsOf. */
+    private static final int DEFAULT_WATCH_TIMEOUT_SECONDS = 3600;
 
     private final PipelineRunRepository pipelineRunRepository;
     private final PipelineRunStepRepository pipelineRunStepRepository;
@@ -215,14 +222,22 @@ public class PipelineRunService {
 
     /**
      * The step definition owns the timeout. A run step whose definition has since been deleted or
-     * saved without one still gets a bounded wait rather than an unbounded one.
+     * saved without one still gets a bounded wait rather than an unbounded one - saving the pipeline
+     * replaces its step rows, so any edit while a run is in flight lands here. The fallback is
+     * logged because the alternative is a watcher configured for a day silently waiting an hour.
      */
     private int watchTimeoutSecondsOf(PipelineRunStep runStep) {
         Integer configured = runStep.getPipelineStepId() == null ? null
                 : pipelineStepRepository.findById(runStep.getPipelineStepId())
                         .map(PipelineStep::getWatchTimeoutSeconds)
                         .orElse(null);
-        return configured == null ? 3600 : configured;
+        if (configured == null) {
+            log.warn("Watcher step {} of run {} has no reachable timeout configuration "
+                            + "(its step definition was replaced or deleted mid-run); waiting {}s instead",
+                    runStep.getOrderIndex(), runStep.getRunId(), DEFAULT_WATCH_TIMEOUT_SECONDS);
+            return DEFAULT_WATCH_TIMEOUT_SECONDS;
+        }
+        return configured;
     }
 
     /**

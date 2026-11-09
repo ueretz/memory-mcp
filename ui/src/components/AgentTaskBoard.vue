@@ -9,6 +9,8 @@ import EmptyState from './EmptyState.vue'
 const props = defineProps<{
   agentTasks: AgentTaskSummary[]
   resolveLink?: (name: string) => string | null
+  projectScope: string
+  taskKey: string
 }>()
 
 const COLUMNS: Array<{ status: AgentTaskStatus; label: string; dot: string }> = [

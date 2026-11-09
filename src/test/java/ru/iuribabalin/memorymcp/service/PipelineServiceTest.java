@@ -5,6 +5,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.transaction.annotation.Transactional;
 import ru.iuribabalin.memorymcp.dto.PipelineDetail;
+import ru.iuribabalin.memorymcp.dto.PipelineExecutionDetail;
 import ru.iuribabalin.memorymcp.dto.PipelineSummary;
 import ru.iuribabalin.memorymcp.dto.PipelineUpsertRequest;
 import ru.iuribabalin.memorymcp.entity.PipelineParameter;
@@ -793,10 +794,9 @@ class PipelineServiceTest {
                         List.of(route("approved", 1), route("comments", null), route("timeout", null))),
                 prompt("Merge it", "merge", List.of())), "Tester");
 
-        ru.iuribabalin.memorymcp.dto.PipelineExecutionDetail detail =
-                pipelineService.getForExecution("watcher-exec-1");
+        PipelineExecutionDetail detail = pipelineService.getForExecution("watcher-exec-1");
 
-        ru.iuribabalin.memorymcp.dto.PipelineExecutionDetail.StepView step = detail.steps().get(0);
+        PipelineExecutionDetail.StepView step = detail.steps().get(0);
         assertThat(step.watchSource()).isEqualTo(PipelineStep.WatchSource.GITLAB_MR);
         assertThat(step.watchAspect()).isEqualTo(PipelineStep.WatchAspect.REVIEW);
         assertThat(step.checkIntervalSeconds()).isEqualTo(120);
