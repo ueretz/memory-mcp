@@ -74,9 +74,16 @@ function rawEdges(pipeline: PipelineDetail): RawEdge[] {
       fromStep: step,
     }))
   }
-  return steps.flatMap((step) =>
-    step.routes.map((route) => ({ from: step.orderIndex, to: route.targetStepOrderIndex, label: route.outcomeKey, fromStep: step })),
-  )
+  return steps.flatMap((step) => {
+    // A LOOP_END's only transition is the implicit return to its loop. It has to appear here or the
+    // diagram shows the loop body walking off the right edge with no way back.
+    if (step.contentType === 'LOOP_END') {
+      return step.regionStartStepOrderIndex === null
+        ? []
+        : [{ from: step.orderIndex, to: step.regionStartStepOrderIndex, label: null, fromStep: step }]
+    }
+    return step.routes.map((route) => ({ from: step.orderIndex, to: route.targetStepOrderIndex, label: route.outcomeKey, fromStep: step }))
+  })
 }
 
 export function layoutStages(pipeline: PipelineDetail, run: PipelineRunDetail | null): StageLayout {

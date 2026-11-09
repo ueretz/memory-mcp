@@ -47,6 +47,17 @@ function kindLabel(contentType: string): string {
  * A watcher can sit in RUNNING for hours, so its row says what it has actually been doing rather
  * than leaving the reader to guess whether anything is still happening.
  */
+/**
+ * A prompt loop repeats one instruction, so "выполнение 1" says nothing useful - what the reader
+ * wants is which pass of how many it is on. The server owns the count, this only shows it.
+ */
+function loopProgress(step: PipelineRunStepView): string | null {
+  if (step.loopIteration === null || step.loopIteration === 0) return null
+  return step.loopMaxIterations === null
+    ? `итерация ${step.loopIteration}`
+    : `итерация ${step.loopIteration} из ${step.loopMaxIterations}`
+}
+
 function watchProgress(step: PipelineRunStepView): string | null {
   if (step.contentType !== 'WATCHER' || step.watchCheckCount === null) return null
   if (step.watchCheckCount === 0) return 'ещё не проверял'
@@ -142,7 +153,10 @@ function watchProgress(step: PipelineRunStepView): string | null {
                 <td class="pl-runs-time">{{ step.orderIndex + 1 }}</td>
                 <td>
                   <span class="pl-runs-id">{{ step.title }}</span>
-                  <span class="pl-runs-by">{{ kindLabel(step.contentType) }}<template v-if="step.executionCount > 1"> · выполнение {{ step.executionCount }}</template></span>
+                  <span class="pl-runs-by">
+                    {{ kindLabel(step.contentType) }}<template v-if="step.executionCount > 1"> · выполнение {{ step.executionCount }}</template>
+                    <template v-if="step.orchestrated"> · делегируется</template>
+                  </span>
                 </td>
                 <td>
                   <span class="pl-step-status" :class="`pl-step-status-${stageStatusFor(run, step.orderIndex)}`">
@@ -161,6 +175,7 @@ function watchProgress(step: PipelineRunStepView): string | null {
                     class="pl-runs-watch"
                     :class="{ 'pl-runs-watch-expired': step.watchExpired }"
                   >{{ watchProgress(step) }}</span>
+                  <span v-else-if="loopProgress(step)" class="pl-runs-watch">{{ loopProgress(step) }}</span>
                   <template v-if="step.note">{{ step.note }}</template>
                 </td>
               </tr>
