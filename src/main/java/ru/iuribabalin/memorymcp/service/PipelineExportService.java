@@ -102,7 +102,9 @@ public class PipelineExportService {
                                 link.token(), link.sourceOutputName(),
                                 stepIndexByOrderIndex.get(link.targetStepOrderIndex())))
                         .toList(),
-                step.conditionOperator(), step.conditionValue(), step.conditionMode(), step.maxIterations());
+                step.conditionOperator(), step.conditionValue(), step.conditionMode(), step.maxIterations(),
+                step.watchSource(), step.watchAspect(), step.checkIntervalSeconds(), step.watchTimeoutSeconds(),
+                stepIndexByOrderIndex.get(step.regionStartStepOrderIndex()), step.delegationHint());
     }
 
     private PipelineUpsertRequest.StepRequest toImportedStep(
@@ -123,7 +125,9 @@ public class PipelineExportService {
                         .map(link -> new PipelineUpsertRequest.StepRequest.DataLinkRequest(
                                 tokenReplacements.get(link.token()), link.sourceOutputName(), link.targetStepIndex()))
                         .toList(),
-                step.conditionOperator(), step.conditionValue(), step.conditionMode(), step.maxIterations());
+                step.conditionOperator(), step.conditionValue(), step.conditionMode(), step.maxIterations(),
+                step.watchSource(), step.watchAspect(), step.checkIntervalSeconds(), step.watchTimeoutSeconds(),
+                step.regionStartStepIndex(), step.delegationHint());
     }
 
     private void addAssetWarning(String stepTitle, Long assetId, Long referenceAssetId, List<String> warnings) {

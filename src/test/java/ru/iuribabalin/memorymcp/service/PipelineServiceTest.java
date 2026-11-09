@@ -858,4 +858,38 @@ class PipelineServiceTest {
 
         assertThat(detail.steps().get(4).watchSource()).isEqualTo(PipelineStep.WatchSource.COMMAND);
     }
+
+    /** Full-shape step request: every per-kind field spelled out, including the V23 region fields. */
+    private PipelineUpsertRequest.StepRequest step(String title, PipelineStep.ContentType type, String prompt,
+                                                   List<PipelineUpsertRequest.StepRequest.RouteRequest> routes,
+                                                   Integer maxIterations, Integer regionStartStepIndex,
+                                                   PipelineStep.DelegationHint delegationHint) {
+        return new PipelineUpsertRequest.StepRequest(title, type, prompt, null, null, 0, 0, routes,
+                List.of(), List.of(), null, null, PipelineStep.ConditionMode.VALUE, maxIterations,
+                null, null, null, null, regionStartStepIndex, delegationHint);
+    }
+
+    @Test
+    void savesAndReadsBackLoopRegionAndOrchestratorFields() {
+        pipelineService.create(new PipelineUpsertRequest(
+                "loop-region-fields", "Loops", "desc", "pipeline-svc-test-project", List.of(),
+                List.of(
+                        step("Цикл", PipelineStep.ContentType.LOOP, null, List.of(route(null, 1), route("done", 3)), 2, null, null),
+                        step("Тело", PipelineStep.ContentType.PROMPT, "Сделай", List.of(route(null, 2)), null, null, null),
+                        step("Конец цикла", PipelineStep.ContentType.LOOP_END, null, List.of(), null, 0, null),
+                        step("Ревью", PipelineStep.ContentType.PROMPT_LOOP, "Проведи ревью", List.of(route(null, 4)), 5, null, null),
+                        step("Оркестратор", PipelineStep.ContentType.ORCHESTRATOR, null, List.of(route(null, 5)), 2, null, null),
+                        step("Черновик", PipelineStep.ContentType.PROMPT, "Набросай", List.of(route(null, 6)), null, null, PipelineStep.DelegationHint.CHEAPEST),
+                        step("Приёмка", PipelineStep.ContentType.ORCHESTRATOR_END, null, List.of(route(null, null)), null, 4, null))
+        ), "Tester");
+
+        PipelineDetail saved = pipelineService.get("loop-region-fields");
+
+        assertThat(saved.steps().get(2).contentType()).isEqualTo(PipelineStep.ContentType.LOOP_END);
+        assertThat(saved.steps().get(2).regionStartStepOrderIndex()).isEqualTo(0);
+        assertThat(saved.steps().get(3).contentType()).isEqualTo(PipelineStep.ContentType.PROMPT_LOOP);
+        assertThat(saved.steps().get(3).maxIterations()).isEqualTo(5);
+        assertThat(saved.steps().get(5).delegationHint()).isEqualTo(PipelineStep.DelegationHint.CHEAPEST);
+        assertThat(saved.steps().get(6).regionStartStepOrderIndex()).isEqualTo(4);
+    }
 }

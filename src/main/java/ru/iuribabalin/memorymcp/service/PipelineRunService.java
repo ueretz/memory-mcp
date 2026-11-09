@@ -156,7 +156,7 @@ public class PipelineRunService {
     }
 
     private void recordOutputs(PipelineRunStep runStep, String outputsJson) {
-        List<PipelineStepOutput> declared = pipelineStepOutputRepository.findByStepId(runStep.getPipelineStepId());
+        List<PipelineStepOutput> declared = pipelineStepOutputRepository.findByStepIdOrderByIdAsc(runStep.getPipelineStepId());
         Map<String, Long> outputIdByName = declared.stream()
                 .collect(Collectors.toMap(PipelineStepOutput::getName, PipelineStepOutput::getId));
         JsonNode node;
@@ -711,7 +711,7 @@ public class PipelineRunService {
         runStep.setNote("Variable set to its configured value");
         pipelineRunStepRepository.save(runStep);
 
-        List<PipelineStepOutput> outputs = pipelineStepOutputRepository.findByStepId(step.getId());
+        List<PipelineStepOutput> outputs = pipelineStepOutputRepository.findByStepIdOrderByIdAsc(step.getId());
         if (!outputs.isEmpty()) {
             PipelineStepOutput output = outputs.get(0);
             PipelineRunStepOutput runStepOutput = pipelineRunStepOutputRepository

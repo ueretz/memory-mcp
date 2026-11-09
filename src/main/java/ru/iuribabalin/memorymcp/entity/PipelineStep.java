@@ -14,10 +14,21 @@ import jakarta.persistence.Table;
 public class PipelineStep {
 
     /**
-     * PROMPT / MD_FILE, PROMPT-mode CONDITION and WATCHER steps are worked on by Claude. VALUE-mode
-     * CONDITION, VARIABLE, PARALLEL, JOIN and LOOP are executed by the server.
+     * PROMPT / MD_FILE, PROMPT-mode CONDITION, WATCHER and PROMPT_LOOP steps are worked on by
+     * Claude. VALUE-mode CONDITION, VARIABLE, PARALLEL, JOIN, LOOP, LOOP_END, ORCHESTRATOR and
+     * ORCHESTRATOR_END are executed by the server.
      */
-    public enum ContentType { PROMPT, MD_FILE, CONDITION, VARIABLE, PARALLEL, JOIN, LOOP, WATCHER }
+    public enum ContentType {
+        PROMPT, MD_FILE, CONDITION, VARIABLE, PARALLEL, JOIN, LOOP, WATCHER,
+        LOOP_END, PROMPT_LOOP, ORCHESTRATOR, ORCHESTRATOR_END
+    }
+
+    /**
+     * Author's hint about who should do a step inside an orchestrated region. The leading ("director")
+     * model picks the actual executor at run time - the server never knows which models exist on the
+     * machine - so this is advice, not a pin. SELF means "do not delegate this one".
+     */
+    public enum DelegationHint { CHEAPEST, BALANCED, SELF }
 
     /** What a WATCHER step watches. Its outcome keys follow from this (and the aspect). */
     public enum WatchSource { GITLAB_MR, COMMAND }
@@ -84,6 +95,17 @@ public class PipelineStep {
 
     @Column(name = "watch_timeout_seconds")
     private Integer watchTimeoutSeconds;
+
+    /**
+     * The step that opens the region this step closes: a LOOP for a LOOP_END, an ORCHESTRATOR for an
+     * ORCHESTRATOR_END. Null on every other kind.
+     */
+    @Column(name = "region_start_step_id")
+    private Long regionStartStepId;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "delegation_hint", length = 20)
+    private DelegationHint delegationHint;
 
     @Column(name = "position_x", nullable = false)
     private double positionX;
@@ -213,6 +235,22 @@ public class PipelineStep {
 
     public void setWatchTimeoutSeconds(Integer watchTimeoutSeconds) {
         this.watchTimeoutSeconds = watchTimeoutSeconds;
+    }
+
+    public Long getRegionStartStepId() {
+        return regionStartStepId;
+    }
+
+    public void setRegionStartStepId(Long regionStartStepId) {
+        this.regionStartStepId = regionStartStepId;
+    }
+
+    public DelegationHint getDelegationHint() {
+        return delegationHint;
+    }
+
+    public void setDelegationHint(DelegationHint delegationHint) {
+        this.delegationHint = delegationHint;
     }
 
     public double getPositionX() {

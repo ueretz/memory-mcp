@@ -41,10 +41,30 @@ public record PipelineUpsertRequest(
             PipelineStep.ConditionOperator conditionOperator, String conditionValue,
             PipelineStep.ConditionMode conditionMode, Integer maxIterations,
             PipelineStep.WatchSource watchSource, PipelineStep.WatchAspect watchAspect,
-            Integer checkIntervalSeconds, Integer watchTimeoutSeconds) {
+            Integer checkIntervalSeconds, Integer watchTimeoutSeconds,
+            /**
+             * Index (in this same list) of the step that opens the region this step closes: the
+             * LOOP of a LOOP_END, the ORCHESTRATOR of an ORCHESTRATOR_END. Resolved to a step id on
+             * save, exactly like {@code RouteRequest.targetStepIndex}.
+             */
+            Integer regionStartStepIndex,
+            PipelineStep.DelegationHint delegationHint) {
 
         public StepRequest {
             conditionMode = conditionMode == null ? PipelineStep.ConditionMode.VALUE : conditionMode;
+        }
+
+        /** Pre-V23 shape: no region or delegation fields. */
+        public StepRequest(String title, PipelineStep.ContentType contentType, String promptText,
+                           Long assetId, Long referenceAssetId, double positionX, double positionY,
+                           List<RouteRequest> routes, List<OutputRequest> outputs, List<DataLinkRequest> dataLinksOut,
+                           PipelineStep.ConditionOperator conditionOperator, String conditionValue,
+                           PipelineStep.ConditionMode conditionMode, Integer maxIterations,
+                           PipelineStep.WatchSource watchSource, PipelineStep.WatchAspect watchAspect,
+                           Integer checkIntervalSeconds, Integer watchTimeoutSeconds) {
+            this(title, contentType, promptText, assetId, referenceAssetId, positionX, positionY,
+                    routes, outputs, dataLinksOut, conditionOperator, conditionValue, conditionMode, maxIterations,
+                    watchSource, watchAspect, checkIntervalSeconds, watchTimeoutSeconds, null, null);
         }
 
         /** Pre-V22 shape: no watcher fields. */

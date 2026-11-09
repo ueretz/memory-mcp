@@ -182,7 +182,7 @@ public class PipelineService {
                                         r.getTargetStepId() != null ? stepsById.get(r.getTargetStepId()).getOrderIndex() : null,
                                         r.getTargetStepId() != null ? stepsById.get(r.getTargetStepId()).getTitle() : null))
                                 .toList(),
-                        pipelineStepOutputRepository.findByStepId(step.getId()).stream()
+                        pipelineStepOutputRepository.findByStepIdOrderByIdAsc(step.getId()).stream()
                                 .map(PipelineStepOutput::getName)
                                 .toList(),
                         step.getContentType(),
@@ -752,9 +752,19 @@ public class PipelineService {
             step.setWatchAspect(stepRequest.watchAspect());
             step.setCheckIntervalSeconds(stepRequest.checkIntervalSeconds());
             step.setWatchTimeoutSeconds(stepRequest.watchTimeoutSeconds());
+            step.setDelegationHint(stepRequest.delegationHint());
             step.setPositionX(stepRequest.positionX());
             step.setPositionY(stepRequest.positionY());
             savedSteps.add(pipelineStepRepository.save(step));
+        }
+        // Second pass: a region pointer names a step by index, and the id it resolves to only
+        // exists once every step of this save has a row - same reason routes are wired below.
+        for (int i = 0; i < request.steps().size(); i++) {
+            Integer regionStart = request.steps().get(i).regionStartStepIndex();
+            if (regionStart != null) {
+                savedSteps.get(i).setRegionStartStepId(savedSteps.get(regionStart).getId());
+                pipelineStepRepository.save(savedSteps.get(i));
+            }
         }
         for (int i = 0; i < request.steps().size(); i++) {
             for (PipelineUpsertRequest.StepRequest.RouteRequest routeRequest : request.steps().get(i).routes()) {
@@ -823,7 +833,7 @@ public class PipelineService {
                 .collect(Collectors.toMap(PipelineStep::getId, PipelineStep::getTitle));
         List<PipelineDetail.PipelineStepView> steps = pipelineSteps.stream()
                 .map(s -> {
-                    List<PipelineStepOutput> stepOutputs = pipelineStepOutputRepository.findByStepId(s.getId());
+                    List<PipelineStepOutput> stepOutputs = pipelineStepOutputRepository.findByStepIdOrderByIdAsc(s.getId());
                     Map<Long, PipelineStepOutput> outputsById = stepOutputs.stream()
                             .collect(Collectors.toMap(PipelineStepOutput::getId, o -> o));
                     return new PipelineDetail.PipelineStepView(
@@ -844,7 +854,9 @@ public class PipelineService {
                                     .toList(),
                             s.getConditionOperator(), s.getConditionValue(), s.getConditionMode(), s.getMaxIterations(),
                             s.getWatchSource(), s.getWatchAspect(), s.getCheckIntervalSeconds(),
-                            s.getWatchTimeoutSeconds());
+                            s.getWatchTimeoutSeconds(),
+                            s.getRegionStartStepId() != null ? orderIndexById.get(s.getRegionStartStepId()) : null,
+                            s.getDelegationHint());
                 })
                 .toList();
         Map<Long, String> parameterNameById = parameters.stream()

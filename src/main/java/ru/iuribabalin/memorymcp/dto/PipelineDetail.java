@@ -36,7 +36,26 @@ public record PipelineDetail(
             PipelineStep.ConditionOperator conditionOperator, String conditionValue,
             PipelineStep.ConditionMode conditionMode, Integer maxIterations,
             PipelineStep.WatchSource watchSource, PipelineStep.WatchAspect watchAspect,
-            Integer checkIntervalSeconds, Integer watchTimeoutSeconds) {
+            Integer checkIntervalSeconds, Integer watchTimeoutSeconds,
+            /** orderIndex of the step opening the region this one closes (LOOP_END, ORCHESTRATOR_END). */
+            Integer regionStartStepOrderIndex,
+            PipelineStep.DelegationHint delegationHint) {
+
+        /** Pre-V23 shape: no region or delegation fields. */
+        public PipelineStepView(
+                Long id, int orderIndex, String title, PipelineStep.ContentType contentType,
+                String promptText, Long assetId, Long referenceAssetId,
+                double positionX, double positionY, List<RouteView> routes,
+                List<OutputView> outputs, List<DataLinkView> dataLinksOut,
+                PipelineStep.ConditionOperator conditionOperator, String conditionValue,
+                PipelineStep.ConditionMode conditionMode, Integer maxIterations,
+                PipelineStep.WatchSource watchSource, PipelineStep.WatchAspect watchAspect,
+                Integer checkIntervalSeconds, Integer watchTimeoutSeconds) {
+            this(id, orderIndex, title, contentType, promptText, assetId, referenceAssetId,
+                    positionX, positionY, routes, outputs, dataLinksOut, conditionOperator, conditionValue,
+                    conditionMode, maxIterations, watchSource, watchAspect, checkIntervalSeconds,
+                    watchTimeoutSeconds, null, null);
+        }
 
         public record RouteView(String outcomeKey, Integer targetStepOrderIndex) {
         }
