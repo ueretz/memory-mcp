@@ -76,12 +76,27 @@ final class PipelineGraph {
     }
 
     /**
-     * The steps an ORCHESTRATOR delegates: everything reachable from it without entering the
-     * ORCHESTRATOR_END that closes its region. The region start and end are not themselves part of
-     * it - they are markers, not work.
+     * The steps an ORCHESTRATOR delegates, plus the ORCHESTRATOR_END that closes its region: the end
+     * is included so a caller can tell a closed region from an open one, and callers that want only
+     * the delegated work drop it. The start is never included - markers are not work.
      */
     static Set<Integer> orchestratedRegion(int orchestratorIndex, int endIndex, List<List<Integer>> adjacency) {
-        Set<Integer> region = new HashSet<>(reachableUntil(orchestratorIndex, adjacency, Set.of(endIndex)));
+        Set<Integer> region = new HashSet<>();
+        Deque<Integer> stack = new ArrayDeque<>();
+        stack.push(orchestratorIndex);
+        while (!stack.isEmpty()) {
+            int current = stack.pop();
+            for (int next : adjacency.get(current)) {
+                if (!region.add(next)) {
+                    continue;
+                }
+                // The closing marker is part of the region (that is how we know the region closes at
+                // all) but the walk does not continue past it: what follows is the director's own work.
+                if (next != endIndex) {
+                    stack.push(next);
+                }
+            }
+        }
         region.remove(orchestratorIndex);
         return region;
     }

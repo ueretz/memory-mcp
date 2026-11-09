@@ -1023,4 +1023,104 @@ class PipelineServiceTest {
         assertThat(saved.steps().get(0).maxIterations()).isEqualTo(5);
         assertThat(saved.steps().get(0).promptText()).isEqualTo("проведи ревью, после поправь ошибки");
     }
+
+    // ---- Orchestrator region (V24) -------------------------------------------------------------
+
+    private PipelineUpsertRequest.StepRequest orchestrator(String title, Integer attempts, Integer next) {
+        return step(title, PipelineStep.ContentType.ORCHESTRATOR, null, List.of(route(null, next)), attempts, null, null);
+    }
+
+    private PipelineUpsertRequest.StepRequest orchestratorEnd(String title, Integer startIndex, Integer next) {
+        return step(title, PipelineStep.ContentType.ORCHESTRATOR_END, null, List.of(route(null, next)), null, startIndex, null);
+    }
+
+    private PipelineUpsertRequest.StepRequest delegated(String title, PipelineStep.DelegationHint hint, Integer next) {
+        return step(title, PipelineStep.ContentType.PROMPT, "набросай", List.of(route(null, next)), null, null, hint);
+    }
+
+    @Test
+    void orchestratorNeedsItsEndStep() {
+        PipelineUpsertRequest request = withSteps("orch-1",
+                orchestrator("Оркестратор", 2, 1),
+                prompt("Черновик", "набросай", List.of(route(null, null))));
+
+        assertThatThrownBy(() -> pipelineService.create(request, "Tester"))
+                .isInstanceOf(PipelineInvalidGraphException.class)
+                .hasMessageContaining("is type ORCHESTRATOR and needs an ORCHESTRATOR_END step closing its region");
+    }
+
+    @Test
+    void orchestratorEndMustPointAtAnOrchestrator() {
+        PipelineUpsertRequest request = withSteps("orch-2",
+                orchestrator("Оркестратор", 2, 1),
+                prompt("Черновик", "набросай", List.of(route(null, 2))),
+                orchestratorEnd("Приёмка", 1, null));
+
+        assertThatThrownBy(() -> pipelineService.create(request, "Tester"))
+                .isInstanceOf(PipelineInvalidGraphException.class)
+                .hasMessageContaining("is type ORCHESTRATOR_END and must point at an ORCHESTRATOR step");
+    }
+
+    @Test
+    void orchestratorNeedsAnAttemptLimitBetweenOneAndFive() {
+        PipelineUpsertRequest request = withSteps("orch-3",
+                orchestrator("Оркестратор", 9, 1),
+                prompt("Черновик", "набросай", List.of(route(null, 2))),
+                orchestratorEnd("Приёмка", 0, null));
+
+        assertThatThrownBy(() -> pipelineService.create(request, "Tester"))
+                .isInstanceOf(PipelineInvalidParametersException.class)
+                .hasMessageContaining("is type ORCHESTRATOR and needs an attempt limit between 1 and 5");
+    }
+
+    @Test
+    void orchestratorCannotSitInsideAParallelFanOut() {
+        PipelineUpsertRequest request = withSteps("orch-4",
+                step("Развилка", PipelineStep.ContentType.PARALLEL, null, List.of(route(null, 1), route(null, 4)), null, null, null),
+                orchestrator("Оркестратор", 2, 2),
+                prompt("Черновик", "набросай", List.of(route(null, 3))),
+                orchestratorEnd("Приёмка", 1, 4),
+                step("Ожидать все", PipelineStep.ContentType.JOIN, null, List.of(route(null, null)), null, null, null));
+
+        assertThatThrownBy(() -> pipelineService.create(request, "Tester"))
+                .isInstanceOf(PipelineInvalidGraphException.class)
+                .hasMessageContaining("cannot sit inside the fan-out of the PARALLEL step");
+    }
+
+    @Test
+    void delegationHintIsOnlyAllowedInsideAnOrchestratedRegion() {
+        PipelineUpsertRequest request = withSteps("orch-5",
+                delegated("Черновик", PipelineStep.DelegationHint.CHEAPEST, null));
+
+        assertThatThrownBy(() -> pipelineService.create(request, "Tester"))
+                .isInstanceOf(PipelineInvalidGraphException.class)
+                .hasMessageContaining("has a delegation hint but does not sit inside an orchestrated region");
+    }
+
+    @Test
+    void anOrchestratorCannotSitInsideAnotherOrchestratorsRegion() {
+        PipelineUpsertRequest request = withSteps("orch-6",
+                orchestrator("Директор", 2, 1),
+                orchestrator("Второй директор", 2, 2),
+                prompt("Черновик", "набросай", List.of(route(null, 3))),
+                orchestratorEnd("Приёмка внутренняя", 1, 4),
+                orchestratorEnd("Приёмка внешняя", 0, null));
+
+        assertThatThrownBy(() -> pipelineService.create(request, "Tester"))
+                .isInstanceOf(PipelineInvalidGraphException.class)
+                .hasMessageContaining("cannot sit inside the region of the ORCHESTRATOR step");
+    }
+
+    @Test
+    void orchestratorRegionSavesWithItsHints() {
+        PipelineDetail saved = pipelineService.create(withSteps("orch-7",
+                orchestrator("Оркестратор", 2, 1),
+                delegated("Черновик", PipelineStep.DelegationHint.CHEAPEST, 2),
+                orchestratorEnd("Приёмка", 0, 3),
+                prompt("Выводы", "подведи итоги", List.of(route(null, null)))), "Tester");
+
+        assertThat(saved.steps().get(0).maxIterations()).isEqualTo(2);
+        assertThat(saved.steps().get(1).delegationHint()).isEqualTo(PipelineStep.DelegationHint.CHEAPEST);
+        assertThat(saved.steps().get(2).regionStartStepOrderIndex()).isEqualTo(0);
+    }
 }

@@ -507,6 +507,10 @@ public class PipelineRunService {
                 case JOIN -> enqueue(queue, executeJoinStep(run, step, orderedSteps));
                 case LOOP -> enqueue(queue, executeLoopStep(run, step));
                 case LOOP_END -> enqueue(queue, executeLoopEndStep(run, step, orderedSteps));
+                case ORCHESTRATOR -> enqueue(queue, executeOrchestratorMarker(run, step,
+                        "Директор берёт регион на себя: попыток на шаг — " + step.getMaxIterations()));
+                case ORCHESTRATOR_END -> enqueue(queue, executeOrchestratorMarker(run, step,
+                        "Приёмка региона завершена"));
                 default -> {
                     if (runStep.getStatus() == PipelineRunStep.Status.PENDING && !active.contains(index)) {
                         active.add(index);
@@ -648,6 +652,23 @@ public class PipelineRunService {
         runStep.setNote("Возврат в цикл «" + loop.getTitle() + "»");
         pipelineRunStepRepository.save(runStep);
         return loop.getOrderIndex();
+    }
+
+    /**
+     * An orchestrator marker does no work: it records that the region opened (or closed) and hands
+     * the flow to its single transition. Everything the marker MEANS - discovering the models on the
+     * machine, delegating, accepting the result - belongs to the leading agent and the skill.
+     */
+    private Integer executeOrchestratorMarker(PipelineRun run, PipelineStep step, String note) {
+        PipelineRunStep runStep = pipelineRunStepRepository.findByRunIdAndOrderIndex(run.getId(), step.getOrderIndex())
+                .orElseThrow(() -> new PipelineRunStepNotFoundException(run.getId(), step.getOrderIndex()));
+        Instant now = Instant.now();
+        runStep.setStatus(PipelineRunStep.Status.DONE);
+        runStep.setStartedAt(now);
+        runStep.setFinishedAt(now);
+        runStep.setNote(note);
+        pipelineRunStepRepository.save(runStep);
+        return resolveNextOrderIndex(run.getPipelineId(), step.getId(), step.getOrderIndex(), null);
     }
 
     /** Steps the agent works on; everything else the server executes the moment it is reached. */
@@ -877,6 +898,7 @@ public class PipelineRunService {
         }
 
         Instant readAt = Instant.now();
+        Map<Integer, PipelineStep> orchestratorByRegionStep = orchestratorRegions(run.getPipelineId());
         List<PipelineRunDetail.PipelineRunStepView> steps = runSteps.stream()
                 .map(s -> new PipelineRunDetail.PipelineRunStepView(s.getId(), s.getOrderIndex(), s.getTitle(),
                         s.getContentType(), s.getStatus(), s.getNote(), s.getStartedAt(), s.getFinishedAt(),
@@ -887,11 +909,55 @@ public class PipelineRunService {
                         s.getContentType() == PipelineStep.ContentType.WATCHER ? isWatchExpired(s, readAt) : null,
                         countsIterations(s.getContentType()) ? s.getArrivedCount() : null,
                         countsIterations(s.getContentType()) ? maxIterationsOf(s, stepById) : null,
-                        null, null, null))
+                        orchestratorByRegionStep.containsKey(s.getOrderIndex()),
+                        delegationHintOf(s, stepById),
+                        orchestratorByRegionStep.containsKey(s.getOrderIndex())
+                                ? orchestratorByRegionStep.get(s.getOrderIndex()).getMaxIterations()
+                                : null))
                 .toList();
         return new PipelineRunDetail(run.getId(), run.getPipelineId(), pipelineSlug, run.getStatus(),
                 run.getParametersJson(), run.getStartedAt(), run.getFinishedAt(), run.getStartedBy(),
                 run.getCurrentStepOrderIndex(), steps, activeSteps(run));
+    }
+
+    /**
+     * Which ORCHESTRATOR owns each delegated step, by order index. A step inside a region is one the
+     * leading model is expected to hand to a cheaper one and then check; the markers themselves are
+     * not in their own region.
+     */
+    private Map<Integer, PipelineStep> orchestratorRegions(Long pipelineId) {
+        List<PipelineStep> steps = pipelineStepRepository.findByPipelineIdOrderByOrderIndexAsc(pipelineId);
+        boolean anyOrchestrator = steps.stream()
+                .anyMatch(step -> step.getContentType() == PipelineStep.ContentType.ORCHESTRATOR);
+        if (!anyOrchestrator) {
+            return Map.of();
+        }
+        Map<Long, Integer> indexById = steps.stream()
+                .collect(Collectors.toMap(PipelineStep::getId, PipelineStep::getOrderIndex));
+        List<List<Integer>> adjacency = executionAdjacency(steps);
+        Map<Integer, PipelineStep> ownerByStep = new HashMap<>();
+        for (PipelineStep end : steps) {
+            if (end.getContentType() != PipelineStep.ContentType.ORCHESTRATOR_END
+                    || end.getRegionStartStepId() == null) {
+                continue;
+            }
+            Integer startIndex = indexById.get(end.getRegionStartStepId());
+            if (startIndex == null) {
+                continue;
+            }
+            PipelineStep start = steps.get(startIndex);
+            for (int inside : PipelineGraph.orchestratedRegion(startIndex, end.getOrderIndex(), adjacency)) {
+                if (inside != end.getOrderIndex()) {
+                    ownerByStep.put(inside, start);
+                }
+            }
+        }
+        return ownerByStep;
+    }
+
+    private static PipelineStep.DelegationHint delegationHintOf(PipelineRunStep runStep, Map<Long, PipelineStep> stepById) {
+        PipelineStep step = runStep.getPipelineStepId() == null ? null : stepById.get(runStep.getPipelineStepId());
+        return step == null ? null : step.getDelegationHint();
     }
 
     /** LOOP and PROMPT_LOOP both keep their iteration number in {@code arrived_count}. */

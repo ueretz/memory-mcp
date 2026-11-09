@@ -1006,4 +1006,57 @@ class PipelineRunServiceTest {
         assertThat(secondPass.iteration()).isEqualTo(1);
         assertThat(secondPass.done()).isFalse();
     }
+
+    // ---- Orchestrator region (V24): markers only, the skill does the delegating -----------------
+
+    /** ORCHESTRATOR(attempts) -> A -> B -> ORCHESTRATOR_END -> «Выводы». */
+    private void createOrchestratorPipeline(String slug, int attempts) {
+        pipelineService.create(new PipelineUpsertRequest(
+                slug, "Orchestrated", "desc", "pipeline-run-svc-test-project", List.of(),
+                List.of(
+                        new PipelineUpsertRequest.StepRequest("Оркестратор", PipelineStep.ContentType.ORCHESTRATOR, null,
+                                null, null, 0, 0,
+                                List.of(new PipelineUpsertRequest.StepRequest.RouteRequest(null, 1)),
+                                List.of(), List.of(), null, null, attempts),
+                        new PipelineUpsertRequest.StepRequest("Черновик A", PipelineStep.ContentType.PROMPT, "набросай A",
+                                null, null, 0, 0,
+                                List.of(new PipelineUpsertRequest.StepRequest.RouteRequest(null, 2)),
+                                List.of(), List.of(), null, null, PipelineStep.ConditionMode.VALUE, null,
+                                null, null, null, null, null, PipelineStep.DelegationHint.CHEAPEST),
+                        prompt("Черновик B", List.of(new PipelineUpsertRequest.StepRequest.RouteRequest(null, 3))),
+                        new PipelineUpsertRequest.StepRequest("Приёмка", PipelineStep.ContentType.ORCHESTRATOR_END, null,
+                                null, null, 0, 0,
+                                List.of(new PipelineUpsertRequest.StepRequest.RouteRequest(null, 4)),
+                                List.of(), List.of(), null, null, PipelineStep.ConditionMode.VALUE, null,
+                                null, null, null, null, 0, null),
+                        prompt("Выводы", List.of(new PipelineUpsertRequest.StepRequest.RouteRequest(null, null))))
+        ), "Tester");
+    }
+
+    @Test
+    void orchestratorMarksItsRegionOnEveryRunStep() {
+        createOrchestratorPipeline("orch-run-1", 2);
+
+        PipelineRunDetail run = pipelineRunService.start("orch-run-1", "{}", "Tester");
+
+        assertThat(run.activeStepOrderIndexes()).containsExactly(1);
+        assertThat(run.steps().get(1).orchestrated()).isTrue();
+        assertThat(run.steps().get(1).orchestratorMaxAttempts()).isEqualTo(2);
+        assertThat(run.steps().get(1).delegationHint()).isEqualTo(PipelineStep.DelegationHint.CHEAPEST);
+        assertThat(run.steps().get(2).orchestrated()).isTrue();
+        assertThat(run.steps().get(4).orchestrated()).isFalse();
+    }
+
+    @Test
+    void orchestratorEndHandsTheFlowToTheStepAfterTheRegion() {
+        createOrchestratorPipeline("orch-run-2", 2);
+        PipelineRunDetail run = pipelineRunService.start("orch-run-2", "{}", "Tester");
+
+        pipelineRunService.updateStep(run.id(), 1, PipelineRunStep.Status.DONE, "сделано qwen2.5-coder, попытка 1", null, null);
+        run = pipelineRunService.updateStep(run.id(), 2, PipelineRunStep.Status.DONE, "сделано директором: нет CLI", null, null);
+
+        assertThat(run.activeStepOrderIndexes()).containsExactly(4);
+        assertThat(run.steps().get(3).status()).isEqualTo(PipelineRunStep.Status.DONE);
+        assertThat(run.steps().get(0).status()).isEqualTo(PipelineRunStep.Status.DONE);
+    }
 }

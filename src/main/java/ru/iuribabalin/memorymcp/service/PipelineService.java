@@ -490,10 +490,15 @@ public class PipelineService {
                 validateLoopEndStep(step, steps, incomingDataLinkCount[i]);
             } else if (step.contentType() == PipelineStep.ContentType.PROMPT_LOOP) {
                 validatePromptLoopStep(step);
+            } else if (step.contentType() == PipelineStep.ContentType.ORCHESTRATOR) {
+                validateOrchestratorStep(step, incomingDataLinkCount[i]);
+            } else if (step.contentType() == PipelineStep.ContentType.ORCHESTRATOR_END) {
+                validateOrchestratorEndStep(step, steps, incomingDataLinkCount[i]);
             }
         }
-        validateNoWatcherInsideAParallelFanOut(steps);
+        validateNothingWaitsInsideAParallelFanOut(steps);
         validateLoopRegions(steps);
+        validateOrchestratorRegions(steps);
     }
 
     /**
@@ -583,20 +588,34 @@ public class PipelineService {
      * merged, though: past the JOIN the run is back to a single active step worked by the leading
      * agent, which is why the walk below stops at JOIN steps instead of running to the end.
      */
-    private void validateNoWatcherInsideAParallelFanOut(List<PipelineUpsertRequest.StepRequest> steps) {
+    /**
+     * Kinds that only the leading agent can work, so they cannot sit in a branch a sub-agent runs: a
+     * WATCHER holds the background poller, and an orchestrator region needs one model deciding who
+     * gets what and accepting the result.
+     */
+    private static final Set<PipelineStep.ContentType> BANNED_INSIDE_A_FAN_OUT = Set.of(
+            PipelineStep.ContentType.WATCHER,
+            PipelineStep.ContentType.ORCHESTRATOR,
+            PipelineStep.ContentType.ORCHESTRATOR_END);
+
+    private void validateNothingWaitsInsideAParallelFanOut(List<PipelineUpsertRequest.StepRequest> steps) {
         List<List<Integer>> adjacency = buildExecutionAdjacency(steps);
         for (int i = 0; i < steps.size(); i++) {
             if (steps.get(i).contentType() != PipelineStep.ContentType.PARALLEL) {
                 continue;
             }
             for (int inFanOut : reachableBeforeAnyJoin(i, adjacency, steps)) {
-                if (steps.get(inFanOut).contentType() == PipelineStep.ContentType.WATCHER) {
-                    throw new PipelineInvalidGraphException(
-                            "Step '" + steps.get(inFanOut).title() + "' is type WATCHER and cannot sit inside the "
-                                    + "fan-out of the PARALLEL step '" + steps.get(i).title()
-                                    + "' - a watcher waits in the leading agent's session, not in a parallel branch. "
-                                    + "Move it after the JOIN that merges the branches.");
+                PipelineStep.ContentType kind = steps.get(inFanOut).contentType();
+                if (!BANNED_INSIDE_A_FAN_OUT.contains(kind)) {
+                    continue;
                 }
+                String why = kind == PipelineStep.ContentType.WATCHER
+                        ? "a watcher waits in the leading agent's session, not in a parallel branch"
+                        : "an orchestrator region is led by one model, and a parallel branch is worked by a sub-agent";
+                throw new PipelineInvalidGraphException(
+                        "Step '" + steps.get(inFanOut).title() + "' is type " + kind + " and cannot sit inside the "
+                                + "fan-out of the PARALLEL step '" + steps.get(i).title()
+                                + "' - " + why + ". Move it after the JOIN that merges the branches.");
             }
         }
     }
@@ -704,6 +723,107 @@ public class PipelineService {
         if (!step.outputs().isEmpty() || incomingDataLinkCount != 0) {
             throw new PipelineInvalidGraphException(
                     "Step '" + step.title() + "' is type LOOP and carries no data - it can have neither outputs nor incoming data links");
+        }
+    }
+
+    /**
+     * The orchestrator is a marker, not work: the server only records where the region starts and how
+     * many attempts a delegated step gets. Everything else - which model does what, and whether the
+     * result is accepted - is the leading agent's job, described in the `pipelines` skill.
+     */
+    private void validateOrchestratorStep(PipelineUpsertRequest.StepRequest step, int incomingDataLinkCount) {
+        if (step.maxIterations() == null || step.maxIterations() < 1 || step.maxIterations() > 5) {
+            throw new PipelineInvalidParametersException(
+                    "Step '" + step.title() + "' is type ORCHESTRATOR and needs an attempt limit between 1 and 5");
+        }
+        requireSingleDefaultRoute(step, "ORCHESTRATOR");
+        requireCarriesNoData(step, "ORCHESTRATOR", incomingDataLinkCount);
+    }
+
+    private void validateOrchestratorEndStep(PipelineUpsertRequest.StepRequest step,
+                                              List<PipelineUpsertRequest.StepRequest> steps, int incomingDataLinkCount) {
+        Integer startIndex = step.regionStartStepIndex();
+        if (startIndex == null || startIndex < 0 || startIndex >= steps.size()
+                || steps.get(startIndex).contentType() != PipelineStep.ContentType.ORCHESTRATOR) {
+            throw new PipelineInvalidGraphException(
+                    "Step '" + step.title() + "' is type ORCHESTRATOR_END and must point at an ORCHESTRATOR step - "
+                            + "pick the region it ends.");
+        }
+        requireSingleDefaultRoute(step, "ORCHESTRATOR_END");
+        requireCarriesNoData(step, "ORCHESTRATOR_END", incomingDataLinkCount);
+    }
+
+    private void requireSingleDefaultRoute(PipelineUpsertRequest.StepRequest step, String kind) {
+        long defaults = step.routes().stream().filter(route -> route.outcomeKey() == null).count();
+        if (step.routes().size() != 1 || defaults != 1) {
+            throw new PipelineInvalidGraphException(
+                    "Step '" + step.title() + "' is type " + kind + " and has exactly one outgoing transition");
+        }
+    }
+
+    private void requireCarriesNoData(PipelineUpsertRequest.StepRequest step, String kind, int incomingDataLinkCount) {
+        if (!step.outputs().isEmpty() || incomingDataLinkCount != 0) {
+            throw new PipelineInvalidGraphException(
+                    "Step '" + step.title() + "' is type " + kind
+                            + " and carries no data - it can have neither outputs nor incoming data links");
+        }
+    }
+
+    /**
+     * Region-wide orchestrator rules: every ORCHESTRATOR is closed by exactly one ORCHESTRATOR_END
+     * that its own flow reaches, regions do not nest (one director per run), and a delegation hint
+     * only means something on a step some director actually delegates.
+     */
+    private void validateOrchestratorRegions(List<PipelineUpsertRequest.StepRequest> steps) {
+        int n = steps.size();
+        Map<Integer, Integer> endByStartIndex = new HashMap<>();
+        for (int i = 0; i < n; i++) {
+            if (steps.get(i).contentType() != PipelineStep.ContentType.ORCHESTRATOR_END) {
+                continue;
+            }
+            int startIndex = steps.get(i).regionStartStepIndex();
+            Integer existing = endByStartIndex.putIfAbsent(startIndex, i);
+            if (existing != null) {
+                throw new PipelineInvalidGraphException(
+                        "Step '" + steps.get(i).title() + "': the ORCHESTRATOR '" + steps.get(startIndex).title()
+                                + "' is already closed by '" + steps.get(existing).title() + "'");
+            }
+        }
+        for (int i = 0; i < n; i++) {
+            if (steps.get(i).contentType() == PipelineStep.ContentType.ORCHESTRATOR && !endByStartIndex.containsKey(i)) {
+                throw new PipelineInvalidGraphException(
+                        "Step '" + steps.get(i).title() + "' is type ORCHESTRATOR and needs an ORCHESTRATOR_END step "
+                                + "closing its region - everything between the two is what gets delegated.");
+            }
+        }
+        List<List<Integer>> adjacency = buildExecutionAdjacency(steps);
+        Map<Integer, Set<Integer>> regions = new HashMap<>();
+        for (Map.Entry<Integer, Integer> entry : endByStartIndex.entrySet()) {
+            Set<Integer> region = PipelineGraph.orchestratedRegion(entry.getKey(), entry.getValue(), adjacency);
+            if (!region.contains(entry.getValue())) {
+                throw new PipelineInvalidGraphException(
+                        "Step '" + steps.get(entry.getValue()).title() + "' is not reachable from the ORCHESTRATOR it "
+                                + "closes ('" + steps.get(entry.getKey()).title() + "') - wire it after the region's last step.");
+            }
+            region.remove(entry.getValue());
+            regions.put(entry.getKey(), region);
+        }
+        for (Map.Entry<Integer, Set<Integer>> region : regions.entrySet()) {
+            for (int inside : region.getValue()) {
+                if (steps.get(inside).contentType() == PipelineStep.ContentType.ORCHESTRATOR) {
+                    throw new PipelineInvalidGraphException(
+                            "Step '" + steps.get(inside).title() + "' cannot sit inside the region of the ORCHESTRATOR "
+                                    + "step '" + steps.get(region.getKey()).title() + "' - one director per run.");
+                }
+            }
+        }
+        Set<Integer> orchestrated = regions.values().stream().flatMap(Set::stream).collect(Collectors.toSet());
+        for (int i = 0; i < n; i++) {
+            if (steps.get(i).delegationHint() != null && !orchestrated.contains(i)) {
+                throw new PipelineInvalidGraphException(
+                        "Step '" + steps.get(i).title() + "' has a delegation hint but does not sit inside an "
+                                + "orchestrated region - only a director delegates, so the hint has nobody to advise.");
+            }
         }
     }
 
