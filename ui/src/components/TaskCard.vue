@@ -7,6 +7,7 @@ import { taskLocation } from '@/lib/links'
 
 import AppIcon from './AppIcon.vue'
 import StatusBadge from './StatusBadge.vue'
+import TaskProgressRing from './TaskProgressRing.vue'
 
 const props = defineProps<{ task: TaskSummary; projectScope: string }>()
 
@@ -23,6 +24,9 @@ const to = computed(() => taskLocation(props.projectScope, props.task.taskKey))
       style="background: linear-gradient(135deg, color-mix(in oklab, var(--color-accent) 24%, transparent), color-mix(in oklab, var(--color-accent) 6%, transparent))"
     >
       <AppIcon name="task" class="size-9 text-accent" />
+      <span class="absolute top-2.5 left-2.5">
+        <TaskProgressRing :status="task.status" :progress="task.progress" />
+      </span>
       <span class="absolute top-2.5 right-2.5">
         <StatusBadge :status="task.status" />
       </span>
@@ -34,6 +38,14 @@ const to = computed(() => taskLocation(props.projectScope, props.task.taskKey))
         <span v-if="task.source === 'JIRA'" class="text-[11px] font-medium text-faint">Jira</span>
       </span>
       <span class="line-clamp-2 text-[12.5px] leading-snug text-muted">{{ task.title || 'No title' }}</span>
+      <span
+        v-if="task.specEntryName"
+        class="flex items-center gap-1.5 text-[11.5px] text-faint"
+        :title="task.specEntryName"
+      >
+        <AppIcon name="document" class="size-3.5" />
+        <span class="truncate font-mono">{{ task.specEntryName }}</span>
+      </span>
 
       <time class="mt-auto pt-2.5 text-[11.5px] text-faint" :datetime="task.updatedAt">
         {{ relativeTime(task.updatedAt) }}

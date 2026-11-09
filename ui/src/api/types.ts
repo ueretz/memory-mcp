@@ -4,7 +4,7 @@ export const MEMORY_TYPES = ['USER', 'FEEDBACK', 'PROJECT', 'REFERENCE', 'LOCATI
 
 export type MemoryType = (typeof MEMORY_TYPES)[number]
 
-export type TaskStatus = 'ACTIVE' | 'DONE'
+export type TaskStatus = 'ACTIVE' | 'DONE' | 'CANCELLED'
 
 export type TaskSource = 'MANUAL' | 'JIRA'
 
@@ -12,12 +12,27 @@ export type AgentTaskType = 'ANALYSIS' | 'IMPLEMENTATION' | 'TESTING' | 'REVIEW'
 
 export type AgentTaskStatus = 'TODO' | 'IN_PROGRESS' | 'DONE' | 'BLOCKED'
 
+/** The MD entry a task or subtask links as its spec - the description lives there, not inline. */
+export interface SpecSummary {
+  name: string
+  description: string
+  updatedAt: string
+}
+
+/** Share of a task's subtasks that are DONE, computed server-side - never entered by hand. */
+export interface TaskProgress {
+  done: number
+  total: number
+  percent: number
+}
+
 export interface AgentTaskSummary {
   id: number
   title: string
   type: AgentTaskType
   status: AgentTaskStatus
   description: string | null
+  spec: SpecSummary | null
   updatedAt: string
   dependsOnId: number | null
 }
@@ -33,6 +48,19 @@ export interface TaskSummary {
   title: string | null
   source: TaskSource
   status: TaskStatus
+  progress: TaskProgress
+  specEntryName: string | null
+  updatedAt: string
+}
+
+export interface TaskDetail {
+  taskKey: string
+  title: string | null
+  source: TaskSource
+  status: TaskStatus
+  spec: SpecSummary | null
+  progress: TaskProgress
+  createdAt: string
   updatedAt: string
 }
 

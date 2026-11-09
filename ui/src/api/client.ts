@@ -19,6 +19,7 @@ import type {
   SetupInfo,
   SettingSummary,
   StatsOverview,
+  TaskDetail,
   TaskSummary,
 } from './types'
 
@@ -118,6 +119,12 @@ export function fetchProjects(): Promise<ProjectSummary[]> {
 
 export function fetchTasks(projectScope: string): Promise<TaskSummary[]> {
   return getJson(`/api/projects/${encodeURIComponent(projectScope)}/tasks`)
+}
+
+export function fetchTask(projectScope: string, taskKey: string): Promise<TaskDetail> {
+  return getJson(
+    `/api/projects/${encodeURIComponent(projectScope)}/tasks/${encodeURIComponent(taskKey)}`,
+  )
 }
 
 export function fetchAgentTasks(projectScope: string, taskKey: string): Promise<AgentTaskSummary[]> {

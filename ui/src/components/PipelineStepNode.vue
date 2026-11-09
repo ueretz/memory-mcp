@@ -8,12 +8,12 @@ import AppIcon from '@/components/AppIcon.vue'
 import {
   BLOCK_KIND_BY_TYPE,
   DEFAULT_ROUTE_LABEL,
-  WATCHER_PORT_LABELS,
   acceptsDataInput,
   ensureFixedPorts,
   hasEditableOutputs,
   hasOutputs,
   supportsAddingPorts,
+  watcherPortLabel,
   type BoardStep,
 } from '@/lib/pipelineBoard'
 
@@ -130,10 +130,6 @@ const watcherHint = computed(() => {
     : 'Ссылку на MR можно подать выходом предыдущего шага через токен {{data:...}} — например того шага, который этот MR и создал.'
   return `${source} Проверки идут фоновым поллером и почти не тратят токенов, но ожидание держится на открытой сессии агента: закроете терминал — прогон встанет и продолжится с того же места, когда его возобновят.`
 })
-
-function watcherPortLabel(outcomeKey: string | null): string {
-  return WATCHER_PORT_LABELS[outcomeKey ?? ''] ?? outcomeKey ?? DEFAULT_ROUTE_LABEL
-}
 
 function pinClassForRoute(outcomeKey: string | null): string {
   if (outcomeKey === 'true' && isCondition.value) return 'pl-pin-true'
@@ -319,7 +315,7 @@ function pinClassForRoute(outcomeKey: string | null): string {
             <span class="pl-branch-default">{{ route.outcomeKey === 'done' ? 'выход при лимите' : 'тело цикла' }}</span>
           </template>
           <template v-else-if="isWatcher">
-            <span class="pl-branch-default">{{ watcherPortLabel(route.outcomeKey) }}</span>
+            <span class="pl-branch-default">{{ watcherPortLabel(data.step.watchSource, data.step.watchAspect, route.outcomeKey) }}</span>
           </template>
           <template v-else-if="isParallel">
             <span class="pl-branch-default">ветка {{ routeIndex + 1 }}</span>

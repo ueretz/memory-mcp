@@ -8,6 +8,7 @@ const props = defineProps<{ status: TaskStatus }>()
 const STYLES: Record<TaskStatus, string> = {
   ACTIVE: 'text-status-active bg-status-active/10 ring-status-active/20',
   DONE: 'text-status-done bg-status-done/10 ring-status-done/20',
+  CANCELLED: 'text-status-cancelled bg-status-cancelled/10 ring-status-cancelled/20',
 }
 
 const styleClass = computed(() => STYLES[props.status])

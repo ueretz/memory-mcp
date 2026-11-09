@@ -98,12 +98,27 @@ export function watcherOutcomeKeys(
   return aspect === 'REVIEW' ? ['approved', 'comments', 'timeout'] : ['success', 'failed', 'timeout']
 }
 
-export const WATCHER_PORT_LABELS: Record<string, string> = {
-  success: 'событие наступило',
-  failed: 'сборка упала',
-  timeout: 'не дождались',
-  approved: 'апрув',
-  comments: 'есть замечания',
+/**
+ * Port labels depend on what is being watched, not just on the outcome key: `success` means
+ * "the build passed" for a GitLab build watcher and "it happened" for a probe command, and showing
+ * the generic wording next to «сборка упала» reads as two different vocabularies on one axis.
+ */
+export function watcherPortLabel(
+  source: PipelineWatchSource | null,
+  aspect: PipelineWatchAspect | null,
+  outcomeKey: string | null,
+): string {
+  if (outcomeKey === 'timeout') return 'не дождались'
+  if (source === 'GITLAB_MR' && aspect === 'PIPELINE') {
+    if (outcomeKey === 'success') return 'сборка прошла'
+    if (outcomeKey === 'failed') return 'сборка упала'
+  }
+  if (source === 'GITLAB_MR' && aspect === 'REVIEW') {
+    if (outcomeKey === 'approved') return 'апрув'
+    if (outcomeKey === 'comments') return 'есть замечания'
+  }
+  if (outcomeKey === 'success') return 'событие наступило'
+  return outcomeKey ?? DEFAULT_ROUTE_LABEL
 }
 
 export const BLOCK_KIND_BY_TYPE: Record<PipelineStepContentType, BlockKindMeta> = Object.fromEntries(
@@ -574,7 +589,8 @@ export function collectIssues(steps: BoardStep[], paramLinks: BoardParamLink[] =
           text: `«${title}»: наблюдатель не может стоять внутри развилки «${stepDisplayTitle(steps[fanOut], fanOut)}» — ожидание держит ведущий агент, а ветки выполняют суб-агенты. Перенесите его за блок «Ожидать все»`,
         })
       }
-      const unwired = step.routes.filter((r) => r.target === null).map((r) => WATCHER_PORT_LABELS[r.outcomeKey ?? ''] ?? r.outcomeKey)
+      const unwired = step.routes.filter((r) => r.target === null)
+        .map((r) => watcherPortLabel(step.watchSource, step.watchAspect, r.outcomeKey))
       if (unwired.length > 0) {
         issues.push({ stepIndex: i, severity: 'warning', text: `«${title}»: ветка «${unwired.join('», «')}» не подключена — путь завершится` })
       }

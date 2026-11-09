@@ -807,4 +807,24 @@ class PipelineRunServiceTest {
         assertThat(afterCreate.steps().get(1).resolvedInstructionText())
                 .isEqualTo("https://gitlab.example.com/g/p/-/merge_requests/77");
     }
+
+    @Test
+    void aWatcherWhoseStepDefinitionWasReplacedMidRunFallsBackToAnHour() {
+        pipelineService.create(new PipelineUpsertRequest(
+                "watch-run-13", "Long watch", "desc", "pipeline-run-svc-test-project", List.of(),
+                List.of(watcher("Wait a day", PipelineStep.WatchSource.COMMAND, null, "test -f /tmp/ready",
+                        60, 86400, List.of(route("success", null), route("timeout", null))))), "Tester");
+        PipelineRunDetail run = pipelineRunService.start("watch-run-13", null, "Tester");
+        // Saving the pipeline replaces its step rows, so the run step now points at a deleted
+        // definition and its configured 24-hour timeout is no longer reachable.
+        pipelineService.update("watch-run-13", new PipelineUpsertRequest(
+                "watch-run-13", "Long watch", "desc", "pipeline-run-svc-test-project", List.of(),
+                List.of(watcher("Wait a day", PipelineStep.WatchSource.COMMAND, null, "test -f /tmp/ready",
+                        60, 86400, List.of(route("success", null), route("timeout", null))))));
+
+        PipelineRunStepCheckResult result = pipelineRunService.checkStep(run.id(), 0, "waiting");
+
+        assertThat(result.deadlineAt()).isBetween(
+                java.time.Instant.now().plusSeconds(3500), java.time.Instant.now().plusSeconds(3700));
+    }
 }

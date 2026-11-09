@@ -28,6 +28,7 @@
 
   --c-active: #1d6fd8;
   --c-done: #6b7280;
+  --c-cancelled: #dc2626;
 
   --c-agent-todo: #6b7280;
   --c-agent-in-progress: #1d6fd8;
@@ -68,6 +69,7 @@
 
   --c-active: #60a5fa;
   --c-done: #8b8b9e;
+  --c-cancelled: #f87171;
 
   --c-agent-todo: #9797ac;
   --c-agent-in-progress: #60a5fa;
@@ -106,6 +108,7 @@
 
   --color-status-active: var(--c-active);
   --color-status-done: var(--c-done);
+  --color-status-cancelled: var(--c-cancelled);
 
   --color-agent-todo: var(--c-agent-todo);
   --color-agent-in-progress: var(--c-agent-in-progress);
