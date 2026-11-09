@@ -124,6 +124,9 @@ export const DEFAULT_ROUTE_LABEL = 'далее'
 /** A GITLAB_MR watcher's target must name a merge request - the project and iid come from it. */
 export const MERGE_REQUEST_URL = /\/merge_requests\/\d+/
 
+/** `{{data:token}}` / `{{param}}` - a target whose real value only exists at run time. */
+export const TEMPLATE_TOKEN = /\{\{[^}]+\}\}/
+
 /** Can this kind of step have named (outcome-keyed) transition ports added by the author? */
 export function supportsNamedBranches(kind: PipelineStepContentType): boolean {
   return kind === 'PROMPT' || kind === 'MD_FILE'
@@ -432,6 +435,28 @@ export function wouldCreateCycle(steps: BoardStep[], from: number, to: number): 
 }
 
 /** Is `target` reachable from `source` over wired transitions (the backend's data-link rule)? */
+/**
+ * Steps reachable from `start` without passing through a JOIN - i.e. the open fan-out. A watcher is
+ * banned inside one (branches are worked by sub-agents) but welcome after the JOIN, where the run is
+ * back to a single step worked by the leading agent. Mirrors PipelineService.reachableBeforeAnyJoin.
+ */
+export function reachableBeforeAnyJoin(steps: BoardStep[], start: number): Set<number> {
+  const adjacency = wiredAdjacency(steps)
+  const seen = new Set<number>()
+  const stack = [start]
+  while (stack.length) {
+    const current = stack.pop()!
+    for (const next of adjacency[current]) {
+      if (steps[next]?.contentType === 'JOIN') continue
+      if (!seen.has(next)) {
+        seen.add(next)
+        stack.push(next)
+      }
+    }
+  }
+  return seen
+}
+
 export function isAncestor(steps: BoardStep[], source: number, target: number): boolean {
   if (source === target) return false
   const adjacency = wiredAdjacency(steps)
@@ -478,8 +503,14 @@ export function collectIssues(steps: BoardStep[], paramLinks: BoardParamLink[] =
     })
   }
   const incomingData = new Array<number>(steps.length).fill(0)
+  // Step outputs counted apart from parameters: a COMMAND watcher may take a value the user typed
+  // at run start, but never one a model produced on an earlier step.
+  const incomingStepData = new Array<number>(steps.length).fill(0)
   steps.forEach((step) => step.dataLinksOut.forEach((l) => {
-    if (l.targetStepIndex !== null) incomingData[l.targetStepIndex]++
+    if (l.targetStepIndex !== null) {
+      incomingData[l.targetStepIndex]++
+      incomingStepData[l.targetStepIndex]++
+    }
   }))
   paramLinks.forEach((l) => {
     if (l.targetStepIndex >= 0 && l.targetStepIndex < steps.length) incomingData[l.targetStepIndex]++
@@ -517,8 +548,10 @@ export function collectIssues(steps: BoardStep[], paramLinks: BoardParamLink[] =
             ? `«${title}»: укажите ссылку на merge request, за которым следить`
             : `«${title}»: укажите команду-пробу, по которой проверять событие`,
         })
-      } else if (gitlab && !MERGE_REQUEST_URL.test(step.promptText)) {
-        issues.push({ stepIndex: i, severity: 'error', text: `«${title}»: ссылка должна вести на merge request (содержать /merge_requests/<номер>)` })
+      } else if (gitlab && !TEMPLATE_TOKEN.test(step.promptText) && !MERGE_REQUEST_URL.test(step.promptText)) {
+        // A templated target (the MR URL wired in from the step that opened it) can only be checked
+        // at run time, so only a literal one is held to the URL shape.
+        issues.push({ stepIndex: i, severity: 'error', text: `«${title}»: ссылка должна вести на merge request (содержать /merge_requests/<номер>) или собираться из подставляемого значения` })
       }
       const interval = step.checkIntervalSeconds
       const timeout = step.watchTimeoutSeconds
@@ -530,15 +563,15 @@ export function collectIssues(steps: BoardStep[], paramLinks: BoardParamLink[] =
       } else if (interval !== null && timeout < interval) {
         issues.push({ stepIndex: i, severity: 'error', text: `«${title}»: предельное ожидание не может быть меньше интервала проверки` })
       }
-      if (!gitlab && incomingData[i] > 0) {
-        issues.push({ stepIndex: i, severity: 'error', text: `«${title}»: в команду нельзя подавать данные с предыдущих шагов — отсоедините вход данных` })
+      if (!gitlab && incomingStepData[i] > 0) {
+        issues.push({ stepIndex: i, severity: 'error', text: `«${title}»: в команду нельзя подавать выход предыдущего шага — отсоедините этот провод (значение параметра подавать можно)` })
       }
-      const fanOut = steps.findIndex((other, j) => other.contentType === 'PARALLEL' && isAncestor(steps, j, i))
+      const fanOut = steps.findIndex((other, j) => other.contentType === 'PARALLEL' && reachableBeforeAnyJoin(steps, j).has(i))
       if (fanOut >= 0) {
         issues.push({
           stepIndex: i,
           severity: 'error',
-          text: `«${title}»: наблюдатель не может стоять в параллельной ветке от «${stepDisplayTitle(steps[fanOut], fanOut)}» — ожидание держит ведущий агент, а ветки выполняют суб-агенты`,
+          text: `«${title}»: наблюдатель не может стоять внутри развилки «${stepDisplayTitle(steps[fanOut], fanOut)}» — ожидание держит ведущий агент, а ветки выполняют суб-агенты. Перенесите его за блок «Ожидать все»`,
         })
       }
       const unwired = step.routes.filter((r) => r.target === null).map((r) => WATCHER_PORT_LABELS[r.outcomeKey ?? ''] ?? r.outcomeKey)

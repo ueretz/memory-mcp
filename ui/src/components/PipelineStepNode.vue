@@ -98,11 +98,16 @@ const watchTimeoutMinutes = minutesField('watchTimeoutSeconds')
  * Changing what a watcher watches changes which outcome ports it has, so the port set (and any
  * wire on a port that no longer exists) is rebuilt right here rather than on the next save.
  */
-function watchTargetChanged() {
+function watchTargetChanged(sourceChanged = false) {
   if (props.data.step.watchSource === 'COMMAND') {
     props.data.step.watchAspect = null
   } else if (props.data.step.watchAspect === null) {
     props.data.step.watchAspect = 'PIPELINE'
+  }
+  // An MR URL left behind in a probe-command field saves cleanly and then fails every single probe
+  // until the timeout fires hours later, so the target does not survive a change of source.
+  if (sourceChanged) {
+    props.data.step.promptText = ''
   }
   ensureFixedPorts(props.data.step)
 }
@@ -232,7 +237,7 @@ function pinClassForRoute(outcomeKey: string | null): string {
       </template>
 
       <template v-else-if="data.step.contentType === 'WATCHER'">
-        <select v-model="data.step.watchSource" class="pl-select mb-2" @change="watchTargetChanged()">
+        <select v-model="data.step.watchSource" class="pl-select mb-2" @change="watchTargetChanged(true)">
           <option value="GITLAB_MR">Merge request в GitLab</option>
           <option value="COMMAND">Команда-проба</option>
         </select>

@@ -41,6 +41,9 @@ import java.util.stream.Collectors;
 @Service
 public class PipelineRunService {
 
+    /** Matches the {@code watch_last_state} column; a longer probe report is kept truncated. */
+    private static final int WATCH_STATE_MAX_LENGTH = 100;
+
     private final PipelineRunRepository pipelineRunRepository;
     private final PipelineRunStepRepository pipelineRunStepRepository;
     private final PipelineRepository pipelineRepository;
@@ -185,13 +188,20 @@ public class PipelineRunService {
         if (runStep.getContentType() != PipelineStep.ContentType.WATCHER) {
             throw new PipelineRunNotAWatcherException(runId, orderIndex, runStep.getContentType());
         }
+        if (isTerminal(runStep.getStatus())) {
+            throw new PipelineRunStepClosedException(runId, orderIndex, runStep.getStatus());
+        }
         Instant now = Instant.now();
         if (runStep.getWatchDeadlineAt() == null) {
             runStep.setWatchDeadlineAt(now.plusSeconds(watchTimeoutSecondsOf(runStep)));
         }
         runStep.setWatchCheckCount(runStep.getWatchCheckCount() + 1);
         runStep.setWatchLastCheckedAt(now);
-        runStep.setWatchLastState(observedState);
+        // The tool asks for a short literal, but a probe is not the place to fail a whole wait over
+        // a verbose one: the column holds 100 characters, so keep the first 100.
+        runStep.setWatchLastState(observedState == null || observedState.length() <= WATCH_STATE_MAX_LENGTH
+                ? observedState
+                : observedState.substring(0, WATCH_STATE_MAX_LENGTH));
         if (runStep.getStatus() == PipelineRunStep.Status.PENDING) {
             runStep.setStatus(PipelineRunStep.Status.RUNNING);
             if (runStep.getStartedAt() == null) {
@@ -215,9 +225,21 @@ public class PipelineRunService {
         return configured == null ? 3600 : configured;
     }
 
-    /** True once a watcher's wait is over. Computed on read too, so an abandoned run still shows it. */
+    /**
+     * True once a watcher's wait is over AND the step is still waiting. Computed on read too, so an
+     * abandoned run still shows an overdue watcher - but a watcher that already reported its outcome
+     * is not "overdue" just because its deadline has since passed, in the dashboard or in the
+     * agent's resume decision.
+     */
     private static boolean isWatchExpired(PipelineRunStep runStep, Instant now) {
-        return runStep.getWatchDeadlineAt() != null && !now.isBefore(runStep.getWatchDeadlineAt());
+        return !isTerminal(runStep.getStatus())
+                && runStep.getWatchDeadlineAt() != null
+                && !now.isBefore(runStep.getWatchDeadlineAt());
+    }
+
+    private static boolean isTerminal(PipelineRunStep.Status status) {
+        return status == PipelineRunStep.Status.DONE || status == PipelineRunStep.Status.FAILED
+                || status == PipelineRunStep.Status.SKIPPED;
     }
 
     @Transactional

@@ -42,6 +42,9 @@ public class PipelineService {
     /** A GITLAB_MR watcher's target must name a merge request; the project and iid come from it. */
     private static final Pattern MERGE_REQUEST_URL = Pattern.compile("/merge_requests/\\d+");
 
+    /** {@code {{data:token}}} / {@code {{param}}} - a target whose real value only exists at run time. */
+    private static final Pattern TEMPLATE_TOKEN = Pattern.compile("\\{\\{[^}]+}}");
+
     private final PipelineRepository pipelineRepository;
     private final PipelineParameterRepository pipelineParameterRepository;
     private final PipelineStepRepository pipelineStepRepository;
@@ -424,10 +427,14 @@ public class PipelineService {
                                    List<PipelineUpsertRequest.ParameterLinkRequest> parameterLinks) {
         int n = steps.size();
         int[] incomingDataLinkCount = new int[n];
+        // Counted apart from parameter links: a COMMAND watcher may take a value the USER typed at
+        // run start, but never one a model produced on an earlier step (validateWatcherStep).
+        int[] incomingStepDataLinkCount = new int[n];
         for (PipelineUpsertRequest.StepRequest step : steps) {
             for (PipelineUpsertRequest.StepRequest.DataLinkRequest link : step.dataLinksOut()) {
                 if (link.targetStepIndex() != null) {
                     incomingDataLinkCount[link.targetStepIndex()]++;
+                    incomingStepDataLinkCount[link.targetStepIndex()]++;
                 }
             }
         }
@@ -449,17 +456,18 @@ public class PipelineService {
             } else if (step.contentType() == PipelineStep.ContentType.LOOP) {
                 validateLoopStep(step, incomingDataLinkCount[i]);
             } else if (step.contentType() == PipelineStep.ContentType.WATCHER) {
-                validateWatcherStep(step, incomingDataLinkCount[i]);
+                validateWatcherStep(step, incomingStepDataLinkCount[i]);
             }
         }
         validateNoWatcherInsideAParallelFanOut(steps);
     }
 
     /**
-     * A watcher waits by holding one background poller owned by the leading agent, while a PARALLEL
-     * branch is worked by a sub-agent that must not call pipeline tools at all - so a watcher can
-     * never live inside a fan-out. Rejecting it at save time is what lets the skill's parallel
-     * section stay as it is.
+     * A watcher waits by holding one background poller owned by the leading agent, while a branch of
+     * an open fan-out is worked by a sub-agent that must not call pipeline tools at all - so a
+     * watcher can never live inside a fan-out. It may perfectly well sit AFTER the branches have
+     * merged, though: past the JOIN the run is back to a single active step worked by the leading
+     * agent, which is why the walk below stops at JOIN steps instead of running to the end.
      */
     private void validateNoWatcherInsideAParallelFanOut(List<PipelineUpsertRequest.StepRequest> steps) {
         List<List<Integer>> adjacency = buildExecutionAdjacency(steps);
@@ -467,15 +475,36 @@ public class PipelineService {
             if (steps.get(i).contentType() != PipelineStep.ContentType.PARALLEL) {
                 continue;
             }
-            for (int reachable : reachableFrom(i, adjacency)) {
-                if (steps.get(reachable).contentType() == PipelineStep.ContentType.WATCHER) {
+            for (int inFanOut : reachableBeforeAnyJoin(i, adjacency, steps)) {
+                if (steps.get(inFanOut).contentType() == PipelineStep.ContentType.WATCHER) {
                     throw new PipelineInvalidGraphException(
-                            "Step '" + steps.get(reachable).title() + "' is type WATCHER and cannot be reached from "
-                                    + "the PARALLEL step '" + steps.get(i).title()
-                                    + "' - a watcher waits in the leading agent's session, not in a parallel branch");
+                            "Step '" + steps.get(inFanOut).title() + "' is type WATCHER and cannot sit inside the "
+                                    + "fan-out of the PARALLEL step '" + steps.get(i).title()
+                                    + "' - a watcher waits in the leading agent's session, not in a parallel branch. "
+                                    + "Move it after the JOIN that merges the branches.");
                 }
             }
         }
+    }
+
+    /** Steps reachable from {@code start} without passing through a JOIN - i.e. the open fan-out. */
+    private Set<Integer> reachableBeforeAnyJoin(int start, List<List<Integer>> adjacency,
+                                                 List<PipelineUpsertRequest.StepRequest> steps) {
+        Set<Integer> visited = new HashSet<>();
+        Deque<Integer> stack = new ArrayDeque<>();
+        stack.push(start);
+        while (!stack.isEmpty()) {
+            int current = stack.pop();
+            for (int next : adjacency.get(current)) {
+                if (steps.get(next).contentType() == PipelineStep.ContentType.JOIN) {
+                    continue;
+                }
+                if (visited.add(next)) {
+                    stack.push(next);
+                }
+            }
+        }
+        return visited;
     }
 
     /** The outcome keys a watcher's routes must cover - fixed by its source and aspect. */
@@ -504,10 +533,15 @@ public class PipelineService {
                     "Step '" + step.title() + "' is type WATCHER but has no watch target"
                             + (gitlab ? " - give it a merge request URL" : " - give it a probe command"));
         }
-        if (gitlab && !MERGE_REQUEST_URL.matcher(step.promptText()).find()) {
+        // Only a literal target can be checked for shape. The headline composition feeds the URL in
+        // from the step that opened the MR ({{data:...}}), and a parameter token is filled in at run
+        // start - neither looks like a URL at save time, and rejecting them would block the feature's
+        // main use.
+        boolean templatedTarget = TEMPLATE_TOKEN.matcher(step.promptText()).find();
+        if (gitlab && !templatedTarget && !MERGE_REQUEST_URL.matcher(step.promptText()).find()) {
             throw new PipelineInvalidGraphException(
                     "Step '" + step.title() + "' is a GITLAB_MR watcher, so its target must be a merge request URL "
-                            + "containing '/merge_requests/<number>'");
+                            + "containing '/merge_requests/<number>', or a token that resolves to one");
         }
         Integer interval = step.checkIntervalSeconds();
         if (interval == null || interval < 10 || interval > 3600) {

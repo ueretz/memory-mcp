@@ -803,4 +803,59 @@ class PipelineServiceTest {
         assertThat(step.watchTimeoutSeconds()).isEqualTo(7200);
         assertThat(step.instructionText()).isEqualTo("https://gitlab.example.com/g/p/-/merge_requests/7");
     }
+
+    @Test
+    void allowsAGitlabWatcherWhoseTargetArrivesFromAnEarlierStepsOutput() {
+        PipelineUpsertRequest.StepRequest maker = new PipelineUpsertRequest.StepRequest(
+                "Create the MR", PipelineStep.ContentType.PROMPT, "push and open an MR", null, null, 0, 0,
+                List.of(route(null, 1)),
+                List.of(new PipelineUpsertRequest.StepRequest.OutputRequest("mrUrl")),
+                List.of(new PipelineUpsertRequest.StepRequest.DataLinkRequest("mrUrl", "mrUrl", 1)),
+                null, null);
+        PipelineUpsertRequest request = withSteps("watcher-tpl-1", maker,
+                watcher("Wait for the build", PipelineStep.WatchSource.GITLAB_MR, PipelineStep.WatchAspect.PIPELINE,
+                        "{{data:mrUrl}}", 60, 3600,
+                        List.of(route("success", null), route("failed", null), route("timeout", null))));
+
+        PipelineDetail detail = pipelineService.create(request, "Tester");
+
+        assertThat(detail.steps().get(1).promptText()).isEqualTo("{{data:mrUrl}}");
+    }
+
+    @Test
+    void allowsACommandWatcherFedByAPipelineParameter() {
+        PipelineUpsertRequest request = new PipelineUpsertRequest(
+                "watcher-param-1", "Watch a health url", "desc", "pipeline-svc-test-project",
+                List.of(new PipelineUpsertRequest.ParameterRequest("healthUrl", "Health URL",
+                        PipelineParameter.Type.STRING, true, null)),
+                List.of(
+                        watcher("Wait for the service", PipelineStep.WatchSource.COMMAND, null,
+                                "curl -fsS {{data:healthUrl}}", 60, 600,
+                                List.of(route("success", 1), route("timeout", null))),
+                        prompt("Report", "report", List.of())),
+                List.of(new PipelineUpsertRequest.ParameterLinkRequest("healthUrl", "healthUrl", 0)));
+
+        PipelineDetail detail = pipelineService.create(request, "Tester");
+
+        assertThat(detail.parameterLinks()).extracting(PipelineDetail.PipelineParameterLinkView::parameterName)
+                .containsExactly("healthUrl");
+    }
+
+    @Test
+    void allowsAWatcherPlacedAfterTheParallelBranchesHaveJoined() {
+        PipelineUpsertRequest request = withSteps("watcher-join-1",
+                new PipelineUpsertRequest.StepRequest("Fan out", PipelineStep.ContentType.PARALLEL, null,
+                        null, null, 0, 0, List.of(route(null, 1), route(null, 2)),
+                        List.of(), List.of(), null, null),
+                prompt("Write the code", "code", List.of(route(null, 3))),
+                prompt("Write the tests", "tests", List.of(route(null, 3))),
+                new PipelineUpsertRequest.StepRequest("Wait for both", PipelineStep.ContentType.JOIN, null,
+                        null, null, 0, 0, List.of(route(null, 4)), List.of(), List.of(), null, null),
+                watcher("Wait for the build", PipelineStep.WatchSource.COMMAND, null, "test -f /tmp/built",
+                        60, 600, List.of(route("success", null), route("timeout", null))));
+
+        PipelineDetail detail = pipelineService.create(request, "Tester");
+
+        assertThat(detail.steps().get(4).watchSource()).isEqualTo(PipelineStep.WatchSource.COMMAND);
+    }
 }

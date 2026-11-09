@@ -750,4 +750,61 @@ class PipelineRunServiceTest {
         assertThat(watcherStep.watchDeadlineAt()).isNull();
         assertThat(watcherStep.watchLastState()).isNull();
     }
+
+    @Test
+    void aClosedWatcherDoesNotKeepReadingAsExpired() {
+        createGitlabWatcherPipeline("watch-run-9", 60);
+        PipelineRunDetail run = pipelineRunService.start("watch-run-9", null, "Tester");
+        pipelineRunService.checkStep(run.id(), 0, "success");
+        pipelineRunService.updateStep(run.id(), 0, PipelineRunStep.Status.DONE, "build green", "success", null);
+        PipelineRunStep runStep = pipelineRunStepRepository.findByRunIdAndOrderIndex(run.id(), 0).orElseThrow();
+        runStep.setWatchDeadlineAt(java.time.Instant.now().minusSeconds(1));
+        pipelineRunStepRepository.save(runStep);
+
+        assertThat(pipelineRunService.get(run.id()).steps().get(0).watchExpired()).isFalse();
+    }
+
+    @Test
+    void checkingAWatcherThatIsAlreadyClosedIsRejected() {
+        createGitlabWatcherPipeline("watch-run-10", 3600);
+        PipelineRunDetail run = pipelineRunService.start("watch-run-10", null, "Tester");
+        pipelineRunService.updateStep(run.id(), 0, PipelineRunStep.Status.DONE, "build green", "success", null);
+
+        assertThatThrownBy(() -> pipelineRunService.checkStep(run.id(), 0, "success"))
+                .isInstanceOf(PipelineRunStepClosedException.class);
+    }
+
+    @Test
+    void anOverlongObservedStateIsStoredTruncatedRatherThanFailingTheCheck() {
+        createGitlabWatcherPipeline("watch-run-11", 3600);
+        PipelineRunDetail run = pipelineRunService.start("watch-run-11", null, "Tester");
+
+        pipelineRunService.checkStep(run.id(), 0, "x".repeat(250));
+
+        assertThat(pipelineRunService.get(run.id()).steps().get(0).watchLastState()).hasSize(100);
+    }
+
+    @Test
+    void aWatcherTargetIsResolvedFromTheEarlierStepsReportedOutput() {
+        pipelineService.create(new PipelineUpsertRequest(
+                "watch-run-12", "Create then watch", "desc", "pipeline-run-svc-test-project", List.of(),
+                List.of(
+                        new PipelineUpsertRequest.StepRequest("Create the MR", PipelineStep.ContentType.PROMPT,
+                                "push and open an MR", null, null, 0, 0, List.of(route(null, 1)),
+                                List.of(new PipelineUpsertRequest.StepRequest.OutputRequest("mrUrl")),
+                                List.of(new PipelineUpsertRequest.StepRequest.DataLinkRequest("mrUrl", "mrUrl", 1)),
+                                null, null),
+                        watcher("Wait for the build", PipelineStep.WatchSource.GITLAB_MR,
+                                PipelineStep.WatchAspect.PIPELINE, "{{data:mrUrl}}", 60, 3600,
+                                List.of(route("success", null), route("failed", null), route("timeout", null))))),
+                "Tester");
+        PipelineRunDetail run = pipelineRunService.start("watch-run-12", null, "Tester");
+
+        PipelineRunDetail afterCreate = pipelineRunService.updateStep(run.id(), 0, PipelineRunStep.Status.DONE,
+                "opened", null, "{\"mrUrl\":\"https://gitlab.example.com/g/p/-/merge_requests/77\"}");
+
+        assertThat(afterCreate.activeStepOrderIndexes()).containsExactly(1);
+        assertThat(afterCreate.steps().get(1).resolvedInstructionText())
+                .isEqualTo("https://gitlab.example.com/g/p/-/merge_requests/77");
+    }
 }
