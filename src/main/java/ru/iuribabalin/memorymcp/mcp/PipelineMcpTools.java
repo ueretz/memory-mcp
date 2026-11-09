@@ -100,20 +100,26 @@ public class PipelineMcpTools {
     }
 
     @McpTool(name = "pipeline_run_step_check",
-            description = "Report one probe of a WATCHER step - the step kind that waits for an external event (a " +
-                    "merge request's pipeline or review in GitLab, or any probe command). Call this once per check, " +
-                    "passing what you observed as 'observedState' verbatim (e.g. 'running', 'success', " +
-                    "'unresolved-comments'); it is shown in the dashboard while the watcher waits. The server owns " +
-                    "the deadline, which starts at your FIRST check, so you never have to do the arithmetic: while " +
-                    "the response says expired=false keep waiting (sleep this watcher's checkIntervalSeconds from " +
-                    "pipeline_get, ideally in one background poller rather than a loop in the conversation), and the " +
-                    "moment it says expired=true stop waiting and close the step with pipeline_run_step_update using " +
-                    "the outcome 'timeout'. When the event you are waiting for happens, close the step the same way " +
-                    "with the matching outcome instead.")
+            description = "Report one check of a step you are working: a WATCHER probe, or one finished iteration of " +
+                    "a PROMPT_LOOP. Pass what you saw as 'observedState' verbatim (e.g. 'running', 'success', " +
+                    "'unresolved-comments', 'нашёл 2 замечания'); it is shown in the dashboard while the step runs. " +
+                    "WATCHER - the step kind that waits for an external event (a merge request's pipeline or review " +
+                    "in GitLab, or any probe command): call this once per check. The server owns the deadline, which " +
+                    "starts at your FIRST check, so you never have to do the arithmetic: while the response says " +
+                    "expired=false keep waiting (sleep this watcher's checkIntervalSeconds from pipeline_get, ideally " +
+                    "in one background poller rather than a loop in the conversation), and the moment it says " +
+                    "expired=true stop waiting and close the step with pipeline_run_step_update using the outcome " +
+                    "'timeout'. When the event you are waiting for happens, close the step the same way with the " +
+                    "matching outcome instead. PROMPT_LOOP - the step kind that repeats ONE instruction a fixed " +
+                    "number of times: do the step's work once, call this, and while the response says done=false do " +
+                    "the same work again; the moment it says done=true close the step with pipeline_run_step_update " +
+                    "(DONE) and note how many iterations it took. The server counts the iterations (it answers with " +
+                    "iteration of maxIterations), so never count them yourself and never stop early because the work " +
+                    "looks finished - a resumed run picks up on the iteration it reached.")
     public PipelineRunStepCheckResult pipelineRunStepCheck(
             @McpToolParam(description = "The run id, from pipeline_run_start", required = true) Long runId,
-            @McpToolParam(description = "0-based index of the watcher step in the run's step list", required = true) Integer orderIndex,
-            @McpToolParam(description = "What this probe observed, as a short literal value - stored as the watcher's last state", required = false) String observedState) {
+            @McpToolParam(description = "0-based index of the watcher or prompt-loop step in the run's step list", required = true) Integer orderIndex,
+            @McpToolParam(description = "What this check observed, as a short literal value - stored as the step's last state", required = false) String observedState) {
         requireEnabled();
         PipelineRunStepCheckResult result = pipelineRunService.checkStep(runId, orderIndex, observedState);
         usageEventRecorder.record(UsageEvent.Action.PIPELINE_RUN_STEP_CHECK, String.valueOf(runId), null, null, null);

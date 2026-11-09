@@ -893,4 +893,117 @@ class PipelineRunServiceTest {
         assertThat(run.steps().get(0).contentType()).isEqualTo(PipelineStep.ContentType.LOOP);
         assertThat(run.activeStepOrderIndexes()).containsExactly(1);
     }
+
+    // ---- Prompt loop (V24): the agent re-runs one prompt, the server counts ---------------------
+
+    /** PROMPT_LOOP(max) -> «Отчёт». */
+    private void createPromptLoopPipeline(String slug, Integer maxIterations) {
+        pipelineService.create(new PipelineUpsertRequest(
+                slug, "Prompt loop", "desc", "pipeline-run-svc-test-project", List.of(),
+                List.of(
+                        new PipelineUpsertRequest.StepRequest("Ревью", PipelineStep.ContentType.PROMPT_LOOP,
+                                "проведи ревью, после поправь ошибки", null, null, 0, 0,
+                                List.of(new PipelineUpsertRequest.StepRequest.RouteRequest(null, 1)),
+                                List.of(), List.of(), null, null, maxIterations),
+                        prompt("Отчёт", List.of(new PipelineUpsertRequest.StepRequest.RouteRequest(null, null))))
+        ), "Tester");
+    }
+
+    private void createPromptLoopPipelineUpdate(String slug, Integer maxIterations) {
+        pipelineService.update(slug, new PipelineUpsertRequest(
+                slug, "Prompt loop", "desc", "pipeline-run-svc-test-project", List.of(),
+                List.of(
+                        new PipelineUpsertRequest.StepRequest("Ревью", PipelineStep.ContentType.PROMPT_LOOP,
+                                "проведи ревью, после поправь ошибки", null, null, 0, 0,
+                                List.of(new PipelineUpsertRequest.StepRequest.RouteRequest(null, 1)),
+                                List.of(), List.of(), null, null, maxIterations),
+                        prompt("Отчёт", List.of(new PipelineUpsertRequest.StepRequest.RouteRequest(null, null))))));
+    }
+
+    @Test
+    void promptLoopIsWorkedByTheAgentAndCountsItsIterationsServerSide() {
+        createPromptLoopPipeline("prompt-loop-run-1", 3);
+        PipelineRunDetail run = pipelineRunService.start("prompt-loop-run-1", "{}", "Tester");
+        assertThat(run.activeStepOrderIndexes()).containsExactly(0);
+
+        PipelineRunStepCheckResult first = pipelineRunService.checkStep(run.id(), 0, "нашёл 2 замечания");
+        assertThat(first.iteration()).isEqualTo(1);
+        assertThat(first.maxIterations()).isEqualTo(3);
+        assertThat(first.done()).isFalse();
+
+        pipelineRunService.checkStep(run.id(), 0, "поправил");
+        PipelineRunStepCheckResult third = pipelineRunService.checkStep(run.id(), 0, "чисто");
+
+        assertThat(third.iteration()).isEqualTo(3);
+        assertThat(third.done()).isTrue();
+    }
+
+    @Test
+    void promptLoopIterationIsVisibleOnTheRunStep() {
+        createPromptLoopPipeline("prompt-loop-run-2", 3);
+        PipelineRunDetail run = pipelineRunService.start("prompt-loop-run-2", "{}", "Tester");
+        pipelineRunService.checkStep(run.id(), 0, "первый проход");
+        pipelineRunService.checkStep(run.id(), 0, "второй проход");
+
+        run = pipelineRunService.get(run.id());
+
+        assertThat(run.steps().get(0).loopIteration()).isEqualTo(2);
+        assertThat(run.steps().get(0).loopMaxIterations()).isEqualTo(3);
+        assertThat(run.steps().get(0).note()).isEqualTo("Итерация 2 из 3");
+        assertThat(run.steps().get(0).status()).isEqualTo(PipelineRunStep.Status.RUNNING);
+    }
+
+    @Test
+    void promptLoopWhoseStepDefinitionWasReplacedMidRunReportsDoneInsteadOfLoopingForever() {
+        createPromptLoopPipeline("prompt-loop-run-3", 50);
+        PipelineRunDetail run = pipelineRunService.start("prompt-loop-run-3", "{}", "Tester");
+        // Saving the pipeline replaces its step rows, so the run step now points at a deleted
+        // definition and the 50 iterations it was configured with are no longer reachable.
+        createPromptLoopPipelineUpdate("prompt-loop-run-3", 50);
+
+        PipelineRunStepCheckResult first = pipelineRunService.checkStep(run.id(), 0, "один проход");
+
+        assertThat(first.maxIterations()).isNull();
+        assertThat(first.done()).isTrue();
+    }
+
+    @Test
+    void checkStepStillRejectsAStepThatIsNeitherWatcherNorPromptLoop() {
+        createSamplePipeline("prompt-loop-run-4");
+        PipelineRunDetail run = pipelineRunService.start("prompt-loop-run-4", "{\"folder\":\"src\"}", "Tester");
+
+        assertThatThrownBy(() -> pipelineRunService.checkStep(run.id(), 0, "что-то"))
+                .isInstanceOf(PipelineRunNotAWatcherException.class);
+    }
+
+    @Test
+    void promptLoopInsideALoopRegionRestartsItsIterationCount() {
+        pipelineService.create(new PipelineUpsertRequest(
+                "prompt-loop-run-5", "Nested", "desc", "pipeline-run-svc-test-project", List.of(),
+                List.of(
+                        new PipelineUpsertRequest.StepRequest("Цикл", PipelineStep.ContentType.LOOP, null,
+                                null, null, 0, 0,
+                                List.of(new PipelineUpsertRequest.StepRequest.RouteRequest(null, 1),
+                                        new PipelineUpsertRequest.StepRequest.RouteRequest("done", 3)),
+                                List.of(), List.of(), null, null, 2),
+                        new PipelineUpsertRequest.StepRequest("Ревью", PipelineStep.ContentType.PROMPT_LOOP, "ревью",
+                                null, null, 0, 0,
+                                List.of(new PipelineUpsertRequest.StepRequest.RouteRequest(null, 2)),
+                                List.of(), List.of(), null, null, 2),
+                        new PipelineUpsertRequest.StepRequest("Конец цикла", PipelineStep.ContentType.LOOP_END, null,
+                                null, null, 0, 0, List.of(), List.of(), List.of(), null, null,
+                                PipelineStep.ConditionMode.VALUE, null, null, null, null, null, 0, null),
+                        prompt("Отчёт", List.of(new PipelineUpsertRequest.StepRequest.RouteRequest(null, null))))
+        ), "Tester");
+        PipelineRunDetail run = pipelineRunService.start("prompt-loop-run-5", "{}", "Tester");
+
+        pipelineRunService.checkStep(run.id(), 1, "раз");
+        pipelineRunService.checkStep(run.id(), 1, "два");
+        run = pipelineRunService.updateStep(run.id(), 1, PipelineRunStep.Status.DONE, "готово", null, null);
+
+        assertThat(run.activeStepOrderIndexes()).containsExactly(1);
+        PipelineRunStepCheckResult secondPass = pipelineRunService.checkStep(run.id(), 1, "раз заново");
+        assertThat(secondPass.iteration()).isEqualTo(1);
+        assertThat(secondPass.done()).isFalse();
+    }
 }

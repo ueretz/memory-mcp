@@ -192,11 +192,15 @@ public class PipelineRunService {
         pipelineRunRepository.findById(runId).orElseThrow(() -> new PipelineRunNotFoundException(runId));
         PipelineRunStep runStep = pipelineRunStepRepository.findByRunIdAndOrderIndex(runId, orderIndex)
                 .orElseThrow(() -> new PipelineRunStepNotFoundException(runId, orderIndex));
-        if (runStep.getContentType() != PipelineStep.ContentType.WATCHER) {
+        if (runStep.getContentType() != PipelineStep.ContentType.WATCHER
+                && runStep.getContentType() != PipelineStep.ContentType.PROMPT_LOOP) {
             throw new PipelineRunNotAWatcherException(runId, orderIndex, runStep.getContentType());
         }
         if (isTerminal(runStep.getStatus())) {
             throw new PipelineRunStepClosedException(runId, orderIndex, runStep.getStatus());
+        }
+        if (runStep.getContentType() == PipelineStep.ContentType.PROMPT_LOOP) {
+            return recordPromptLoopIteration(runStep, observedState);
         }
         Instant now = Instant.now();
         if (runStep.getWatchDeadlineAt() == null) {
@@ -206,9 +210,7 @@ public class PipelineRunService {
         runStep.setWatchLastCheckedAt(now);
         // The tool asks for a short literal, but a probe is not the place to fail a whole wait over
         // a verbose one: the column holds 100 characters, so keep the first 100.
-        runStep.setWatchLastState(observedState == null || observedState.length() <= WATCH_STATE_MAX_LENGTH
-                ? observedState
-                : observedState.substring(0, WATCH_STATE_MAX_LENGTH));
+        runStep.setWatchLastState(truncateState(observedState));
         if (runStep.getStatus() == PipelineRunStep.Status.PENDING) {
             runStep.setStatus(PipelineRunStep.Status.RUNNING);
             if (runStep.getStartedAt() == null) {
@@ -218,6 +220,56 @@ public class PipelineRunService {
         pipelineRunStepRepository.save(runStep);
         return new PipelineRunStepCheckResult(runStep.getWatchCheckCount(), runStep.getWatchDeadlineAt(),
                 isWatchExpired(runStep, now));
+    }
+
+    /**
+     * Records one finished iteration of a prompt loop. The count lives in {@code arrived_count} - the
+     * same column a LOOP uses for its iteration number - so a run interrupted mid-loop resumes on the
+     * iteration it reached instead of starting the prompt over from one.
+     */
+    private PipelineRunStepCheckResult recordPromptLoopIteration(PipelineRunStep runStep, String observedState) {
+        Integer max = promptLoopMaxIterationsOf(runStep);
+        Instant now = Instant.now();
+        int iteration = runStep.getArrivedCount() + 1;
+        runStep.setArrivedCount(iteration);
+        runStep.setWatchLastCheckedAt(now);
+        runStep.setWatchLastState(truncateState(observedState));
+        if (runStep.getStatus() == PipelineRunStep.Status.PENDING) {
+            runStep.setStatus(PipelineRunStep.Status.RUNNING);
+            if (runStep.getStartedAt() == null) {
+                runStep.setStartedAt(now);
+            }
+        }
+        boolean done = max == null || iteration >= max;
+        runStep.setNote(max == null
+                ? "Итерация " + iteration + " — предел не задан, цикл закрыт"
+                : "Итерация " + iteration + " из " + max);
+        pipelineRunStepRepository.save(runStep);
+        return new PipelineRunStepCheckResult(iteration, null, false, iteration, max, done);
+    }
+
+    /**
+     * A prompt loop with no reachable limit (its definition was replaced or deleted while the run was
+     * in flight) closes after the iteration in hand rather than repeating forever - the same bounded
+     * fallback a watcher gets when its timeout configuration disappears.
+     */
+    private Integer promptLoopMaxIterationsOf(PipelineRunStep runStep) {
+        Integer configured = runStep.getPipelineStepId() == null ? null
+                : pipelineStepRepository.findById(runStep.getPipelineStepId())
+                        .map(PipelineStep::getMaxIterations)
+                        .orElse(null);
+        if (configured == null) {
+            log.warn("Prompt loop step {} of run {} has no reachable iteration limit "
+                            + "(its step definition was replaced or deleted mid-run); closing the loop after this pass",
+                    runStep.getOrderIndex(), runStep.getRunId());
+        }
+        return configured;
+    }
+
+    private static String truncateState(String observedState) {
+        return observedState == null || observedState.length() <= WATCH_STATE_MAX_LENGTH
+                ? observedState
+                : observedState.substring(0, WATCH_STATE_MAX_LENGTH);
     }
 
     /**
@@ -602,7 +654,8 @@ public class PipelineRunService {
     private static boolean isWorkedByClaude(PipelineStep.ContentType contentType) {
         return contentType == PipelineStep.ContentType.PROMPT
                 || contentType == PipelineStep.ContentType.MD_FILE
-                || contentType == PipelineStep.ContentType.WATCHER;
+                || contentType == PipelineStep.ContentType.WATCHER
+                || contentType == PipelineStep.ContentType.PROMPT_LOOP;
     }
 
     private static void enqueue(Deque<Integer> queue, Integer index) {
@@ -831,11 +884,25 @@ public class PipelineRunService {
                         s.getExecutionCount(),
                         s.getContentType() == PipelineStep.ContentType.WATCHER ? s.getWatchCheckCount() : null,
                         s.getWatchLastCheckedAt(), s.getWatchLastState(), s.getWatchDeadlineAt(),
-                        s.getContentType() == PipelineStep.ContentType.WATCHER ? isWatchExpired(s, readAt) : null))
+                        s.getContentType() == PipelineStep.ContentType.WATCHER ? isWatchExpired(s, readAt) : null,
+                        countsIterations(s.getContentType()) ? s.getArrivedCount() : null,
+                        countsIterations(s.getContentType()) ? maxIterationsOf(s, stepById) : null,
+                        null, null, null))
                 .toList();
         return new PipelineRunDetail(run.getId(), run.getPipelineId(), pipelineSlug, run.getStatus(),
                 run.getParametersJson(), run.getStartedAt(), run.getFinishedAt(), run.getStartedBy(),
                 run.getCurrentStepOrderIndex(), steps, activeSteps(run));
+    }
+
+    /** LOOP and PROMPT_LOOP both keep their iteration number in {@code arrived_count}. */
+    private static boolean countsIterations(PipelineStep.ContentType contentType) {
+        return contentType == PipelineStep.ContentType.LOOP
+                || contentType == PipelineStep.ContentType.PROMPT_LOOP;
+    }
+
+    private static Integer maxIterationsOf(PipelineRunStep runStep, Map<Long, PipelineStep> stepById) {
+        PipelineStep step = runStep.getPipelineStepId() == null ? null : stepById.get(runStep.getPipelineStepId());
+        return step == null ? null : step.getMaxIterations();
     }
 
     private String resolveInstructionText(PipelineRunStep runStep, Map<Long, PipelineStep> stepById,

@@ -985,4 +985,42 @@ class PipelineServiceTest {
 
         assertThat(saved.steps()).hasSize(3);
     }
+
+    // ---- Prompt loop (V24) --------------------------------------------------------------------
+
+    private PipelineUpsertRequest.StepRequest promptLoop(String title, String text, Integer max,
+                                                          List<PipelineUpsertRequest.StepRequest.RouteRequest> routes) {
+        return step(title, PipelineStep.ContentType.PROMPT_LOOP, text, routes, max, null, null);
+    }
+
+    @Test
+    void promptLoopNeedsAnInstruction() {
+        PipelineUpsertRequest request = withSteps("prompt-loop-1",
+                promptLoop("Ревью", "   ", 5, List.of(route(null, null))));
+
+        assertThatThrownBy(() -> pipelineService.create(request, "Tester"))
+                .isInstanceOf(PipelineInvalidParametersException.class)
+                .hasMessageContaining("is type PROMPT_LOOP and needs an instruction");
+    }
+
+    @Test
+    void promptLoopNeedsAnIterationLimitBetweenOneAndAHundred() {
+        PipelineUpsertRequest request = withSteps("prompt-loop-2",
+                promptLoop("Ревью", "проведи ревью", 0, List.of(route(null, null))));
+
+        assertThatThrownBy(() -> pipelineService.create(request, "Tester"))
+                .isInstanceOf(PipelineInvalidParametersException.class)
+                .hasMessageContaining("is type PROMPT_LOOP and needs a max iteration count between 1 and 100");
+    }
+
+    @Test
+    void promptLoopSavesWithItsPromptAndLimit() {
+        PipelineDetail saved = pipelineService.create(withSteps("prompt-loop-3",
+                promptLoop("Ревью", "проведи ревью, после поправь ошибки", 5, List.of(route(null, 1))),
+                prompt("Отчёт", "report", List.of(route(null, null)))), "Tester");
+
+        assertThat(saved.steps().get(0).contentType()).isEqualTo(PipelineStep.ContentType.PROMPT_LOOP);
+        assertThat(saved.steps().get(0).maxIterations()).isEqualTo(5);
+        assertThat(saved.steps().get(0).promptText()).isEqualTo("проведи ревью, после поправь ошибки");
+    }
 }

@@ -488,6 +488,8 @@ public class PipelineService {
                 validateWatcherStep(step, incomingStepDataLinkCount[i]);
             } else if (step.contentType() == PipelineStep.ContentType.LOOP_END) {
                 validateLoopEndStep(step, steps, incomingDataLinkCount[i]);
+            } else if (step.contentType() == PipelineStep.ContentType.PROMPT_LOOP) {
+                validatePromptLoopStep(step);
             }
         }
         validateNoWatcherInsideAParallelFanOut(steps);
@@ -702,6 +704,22 @@ public class PipelineService {
         if (!step.outputs().isEmpty() || incomingDataLinkCount != 0) {
             throw new PipelineInvalidGraphException(
                     "Step '" + step.title() + "' is type LOOP and carries no data - it can have neither outputs nor incoming data links");
+        }
+    }
+
+    /**
+     * A prompt loop is one step that repeats its own instruction: the body lives in the prompt, not
+     * in the graph, so there is nothing to wire and nothing to close. Data flows through it like any
+     * other prompt step.
+     */
+    private void validatePromptLoopStep(PipelineUpsertRequest.StepRequest step) {
+        if (step.promptText() == null || step.promptText().isBlank()) {
+            throw new PipelineInvalidParametersException(
+                    "Step '" + step.title() + "' is type PROMPT_LOOP and needs an instruction to repeat");
+        }
+        if (step.maxIterations() == null || step.maxIterations() < 1 || step.maxIterations() > 100) {
+            throw new PipelineInvalidParametersException(
+                    "Step '" + step.title() + "' is type PROMPT_LOOP and needs a max iteration count between 1 and 100");
         }
     }
 
