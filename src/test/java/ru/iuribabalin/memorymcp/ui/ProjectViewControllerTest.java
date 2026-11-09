@@ -52,7 +52,7 @@ class ProjectViewControllerTest {
     @Test
     void listsAgentTasksForATask() throws Exception {
         AgentTaskSummary summary = new AgentTaskSummary(
-                1L, "Analyze", AgentTask.Type.ANALYSIS, AgentTask.Status.DONE, "desc", Instant.now(), null);
+                1L, "Analyze", AgentTask.Type.ANALYSIS, AgentTask.Status.DONE, "desc", null, Instant.now(), null);
         when(agentTaskService.list("memory-mcp", "AT-1", null, null, false)).thenReturn(List.of(summary));
 
         mockMvc.perform(get("/api/projects/memory-mcp/tasks/AT-1/agent-tasks"))

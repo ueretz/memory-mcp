@@ -2,6 +2,7 @@ package ru.iuribabalin.memorymcp.service;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import ru.iuribabalin.memorymcp.dto.SpecSummary;
 import ru.iuribabalin.memorymcp.dto.TaskDetail;
 import ru.iuribabalin.memorymcp.dto.TaskSummary;
 import ru.iuribabalin.memorymcp.entity.AgentTask;
@@ -144,7 +145,7 @@ public class TaskService {
     }
 
     private TaskSummary toSummary(Task task) {
-        TaskDetail.Spec spec = spec(task);
+        SpecSummary spec = spec(task);
         return new TaskSummary(
                 task.getTaskKey(),
                 task.getTitle(),
@@ -180,12 +181,12 @@ public class TaskService {
                 task.getUpdatedAt());
     }
 
-    private TaskDetail.Spec spec(Task task) {
+    private SpecSummary spec(Task task) {
         if (task.getSpecEntryId() == null) {
             return null;
         }
         return memoryNodeRepository.findById(task.getSpecEntryId())
-                .map(node -> new TaskDetail.Spec(node.getName(), node.getDescription(), node.getUpdatedAt()))
+                .map(node -> new SpecSummary(node.getName(), node.getDescription(), node.getUpdatedAt()))
                 .orElse(null);
     }
 

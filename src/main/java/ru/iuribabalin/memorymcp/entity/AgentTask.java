@@ -44,6 +44,9 @@ public class AgentTask {
     @Column(columnDefinition = "text")
     private String description;
 
+    @Column(name = "spec_entry_id")
+    private Long specEntryId;
+
     @Column(name = "depends_on_id")
     private Long dependsOnId;
 
@@ -95,6 +98,14 @@ public class AgentTask {
 
     public void setDescription(String description) {
         this.description = description;
+    }
+
+    public Long getSpecEntryId() {
+        return specEntryId;
+    }
+
+    public void setSpecEntryId(Long specEntryId) {
+        this.specEntryId = specEntryId;
     }
 
     public Long getDependsOnId() {

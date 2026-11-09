@@ -9,14 +9,11 @@ public record TaskDetail(
         String title,
         Task.Source source,
         Task.Status status,
-        Spec spec,
+        SpecSummary spec,
         Progress progress,
         Instant createdAt,
         Instant updatedAt
 ) {
-    public record Spec(String name, String description, Instant updatedAt) {
-    }
-
     public record Progress(long done, long total, int percent) {
     }
 }
