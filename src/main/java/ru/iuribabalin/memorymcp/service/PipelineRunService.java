@@ -15,8 +15,10 @@ import ru.iuribabalin.memorymcp.entity.PipelineRunStepOutput;
 import ru.iuribabalin.memorymcp.entity.PipelineStep;
 import ru.iuribabalin.memorymcp.entity.PipelineStepOutput;
 import ru.iuribabalin.memorymcp.entity.PipelineStepRoute;
+import ru.iuribabalin.memorymcp.entity.PipelineVariable;
 import ru.iuribabalin.memorymcp.repository.PipelineDataLinkRepository;
 import ru.iuribabalin.memorymcp.repository.PipelineParameterRepository;
+import ru.iuribabalin.memorymcp.repository.PipelineVariableRepository;
 import ru.iuribabalin.memorymcp.repository.PipelineRepository;
 import ru.iuribabalin.memorymcp.repository.PipelineRunRepository;
 import ru.iuribabalin.memorymcp.repository.PipelineRunStepOutputRepository;
@@ -33,6 +35,7 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -60,6 +63,7 @@ public class PipelineRunService {
     private final PipelineDataLinkRepository pipelineDataLinkRepository;
     private final PipelineRunStepOutputRepository pipelineRunStepOutputRepository;
     private final PipelineParameterRepository pipelineParameterRepository;
+    private final PipelineVariableRepository pipelineVariableRepository;
     private final ObjectMapper objectMapper;
 
     public PipelineRunService(PipelineRunRepository pipelineRunRepository,
@@ -71,6 +75,7 @@ public class PipelineRunService {
                                PipelineDataLinkRepository pipelineDataLinkRepository,
                                PipelineRunStepOutputRepository pipelineRunStepOutputRepository,
                                PipelineParameterRepository pipelineParameterRepository,
+                               PipelineVariableRepository pipelineVariableRepository,
                                ObjectMapper objectMapper) {
         this.pipelineRunRepository = pipelineRunRepository;
         this.pipelineRunStepRepository = pipelineRunStepRepository;
@@ -81,6 +86,7 @@ public class PipelineRunService {
         this.pipelineDataLinkRepository = pipelineDataLinkRepository;
         this.pipelineRunStepOutputRepository = pipelineRunStepOutputRepository;
         this.pipelineParameterRepository = pipelineParameterRepository;
+        this.pipelineVariableRepository = pipelineVariableRepository;
         this.objectMapper = objectMapper;
     }
 
@@ -96,7 +102,7 @@ public class PipelineRunService {
         run.setParametersJson(parametersJson);
         run.setStartedAt(now);
         run.setStartedBy(startedBy);
-        Integer root = resolveRootOrderIndex(steps);
+        Integer root = resolveStartOrderIndex(pipeline, steps);
         run.setCurrentStepOrderIndex(root);
         run = pipelineRunRepository.save(run);
         for (PipelineStep step : steps) {
@@ -290,6 +296,21 @@ public class PipelineRunService {
         return pipelineRepository.findById(run.getPipelineId()).map(Pipeline::getSlug).orElse(null);
     }
 
+    /**
+     * Where the run begins: the step the author pinned to the input plate's start port. A pipeline
+     * saved before V24 - or through an API call that names no start - still has it inferred.
+     */
+    private Integer resolveStartOrderIndex(Pipeline pipeline, List<PipelineStep> steps) {
+        if (pipeline.getStartStepId() == null) {
+            return resolveRootOrderIndex(steps);
+        }
+        return steps.stream()
+                .filter(step -> step.getId().equals(pipeline.getStartStepId()))
+                .map(PipelineStep::getOrderIndex)
+                .findFirst()
+                .orElseGet(() -> resolveRootOrderIndex(steps));
+    }
+
     private Integer resolveRootOrderIndex(List<PipelineStep> steps) {
         if (steps.isEmpty()) {
             return null;
@@ -452,7 +473,10 @@ public class PipelineRunService {
                         enqueue(queue, executeConditionStep(run, step));
                     }
                 }
-                case VARIABLE -> enqueue(queue, executeVariableStep(run, step));
+                // V24 moved variables onto the input plate, so no pipeline step can be one any
+                // more - only the run steps of runs recorded before then, which are already done.
+                case VARIABLE -> throw new IllegalStateException(
+                        "Step '" + step.getTitle() + "' is type VARIABLE, which is no longer a kind of step");
                 case PARALLEL -> executeParallelStep(run, step, orderedSteps).forEach(queue::add);
                 case JOIN -> enqueue(queue, executeJoinStep(run, step, orderedSteps));
                 case LOOP -> enqueue(queue, executeLoopStep(run, step));
@@ -635,6 +659,9 @@ public class PipelineRunService {
         if (link.isParameterSourced()) {
             return resolveParameterValue(run, link.getSourceParameterId(), parameterValues(run));
         }
+        if (link.isVariableSourced()) {
+            return variableValues(run).getOrDefault(link.getSourceVariableId(), "");
+        }
         return pipelineRunStepRepository.findByRunIdAndPipelineStepId(run.getId(), link.getSourceStepId())
                 .flatMap(sourceRunStep -> pipelineRunStepOutputRepository.findByRunStepIdAndOutputId(sourceRunStep.getId(), link.getSourceOutputId()))
                 .map(PipelineRunStepOutput::getValue)
@@ -701,28 +728,53 @@ public class PipelineRunService {
         }
     }
 
-    private Integer executeVariableStep(PipelineRun run, PipelineStep step) {
-        PipelineRunStep runStep = pipelineRunStepRepository.findByRunIdAndOrderIndex(run.getId(), step.getOrderIndex())
-                .orElseThrow(() -> new PipelineRunStepNotFoundException(run.getId(), step.getOrderIndex()));
-        Instant now = Instant.now();
-        runStep.setStatus(PipelineRunStep.Status.DONE);
-        runStep.setStartedAt(now);
-        runStep.setFinishedAt(now);
-        runStep.setNote("Variable set to its configured value");
-        pipelineRunStepRepository.save(runStep);
-
-        List<PipelineStepOutput> outputs = pipelineStepOutputRepository.findByStepId(step.getId());
-        if (!outputs.isEmpty()) {
-            PipelineStepOutput output = outputs.get(0);
-            PipelineRunStepOutput runStepOutput = pipelineRunStepOutputRepository
-                    .findByRunStepIdAndOutputId(runStep.getId(), output.getId())
-                    .orElseGet(PipelineRunStepOutput::new);
-            runStepOutput.setRunStepId(runStep.getId());
-            runStepOutput.setOutputId(output.getId());
-            runStepOutput.setValue(step.getPromptText());
-            pipelineRunStepOutputRepository.save(runStepOutput);
+    /**
+     * Every variable's resolved value, keyed by id. Variables are constants: a value only depends on
+     * the run's parameters and on other variables, so it is worked out on each read rather than
+     * stored. One variable may be built out of a parameter or out of another variable;
+     * {@code PipelineService} refuses a cycle at save time and the walk below still guards against
+     * one, so a hand-edited pipeline cannot hang a run.
+     */
+    private Map<Long, String> variableValues(PipelineRun run) {
+        List<PipelineVariable> variables = pipelineVariableRepository
+                .findByPipelineIdOrderByOrderIndexAsc(run.getPipelineId());
+        if (variables.isEmpty()) {
+            return Map.of();
         }
-        return resolveNextOrderIndex(run.getPipelineId(), step.getId(), step.getOrderIndex(), null);
+        Map<Long, PipelineVariable> byId = variables.stream()
+                .collect(Collectors.toMap(PipelineVariable::getId, v -> v));
+        Map<Long, List<PipelineDataLink>> incoming = pipelineDataLinkRepository
+                .findByTargetVariableIdIn(variables.stream().map(PipelineVariable::getId).toList()).stream()
+                .collect(Collectors.groupingBy(PipelineDataLink::getTargetVariableId));
+        Map<String, String> given = parameterValues(run);
+        Map<Long, String> resolved = new HashMap<>();
+        for (PipelineVariable variable : variables) {
+            resolveVariable(run, variable.getId(), byId, incoming, given, resolved, new HashSet<>());
+        }
+        return resolved;
+    }
+
+    private String resolveVariable(PipelineRun run, Long id, Map<Long, PipelineVariable> byId,
+                                    Map<Long, List<PipelineDataLink>> incoming, Map<String, String> given,
+                                    Map<Long, String> resolved, Set<Long> onPath) {
+        String cached = resolved.get(id);
+        if (cached != null) {
+            return cached;
+        }
+        PipelineVariable variable = byId.get(id);
+        if (variable == null || !onPath.add(id)) {
+            return "";
+        }
+        String text = variable.getValue() == null ? "" : variable.getValue();
+        for (PipelineDataLink link : incoming.getOrDefault(id, List.of())) {
+            String value = link.isParameterSourced()
+                    ? resolveParameterValue(run, link.getSourceParameterId(), given)
+                    : resolveVariable(run, link.getSourceVariableId(), byId, incoming, given, resolved, onPath);
+            text = text.replace("{{data:" + link.getToken() + "}}", value);
+        }
+        onPath.remove(id);
+        resolved.put(id, text);
+        return text;
     }
 
     private PipelineRunSummary toSummary(PipelineRun run, String pipelineSlug) {
@@ -757,17 +809,22 @@ public class PipelineRunService {
                 .collect(Collectors.toMap(PipelineRunStep::getPipelineStepId, PipelineRunStep::getId));
         List<PipelineDataLink> incomingLinks = pipelineDataLinkRepository.findByTargetStepIdIn(pipelineStepIds);
         List<Long> sourceRunStepIds = incomingLinks.stream()
-                .filter(link -> !link.isParameterSourced())
+                .filter(link -> link.getSourceStepId() != null)
                 .map(link -> runStepIdByPipelineStepId.get(link.getSourceStepId()))
                 .filter(Objects::nonNull)
                 .toList();
         Map<String, String> reportedValues = pipelineRunStepOutputRepository.findByRunStepIdIn(sourceRunStepIds).stream()
                 .collect(Collectors.toMap(o -> o.getRunStepId() + ":" + o.getOutputId(), PipelineRunStepOutput::getValue));
         Map<String, String> givenParameters = parameterValues(run);
-        Map<String, String> parameterValueByToken = new HashMap<>();
+        // One map for every value that does not come from a step's own output: a run parameter the
+        // user typed in, or a variable off the input plate. Both are known before the first step.
+        Map<String, String> constantValueByToken = new HashMap<>();
+        Map<Long, String> variableValues = variableValues(run);
         for (PipelineDataLink link : incomingLinks) {
             if (link.isParameterSourced()) {
-                parameterValueByToken.put(link.getToken(), resolveParameterValue(run, link.getSourceParameterId(), givenParameters));
+                constantValueByToken.put(link.getToken(), resolveParameterValue(run, link.getSourceParameterId(), givenParameters));
+            } else if (link.isVariableSourced()) {
+                constantValueByToken.put(link.getToken(), variableValues.getOrDefault(link.getSourceVariableId(), ""));
             }
         }
 
@@ -775,7 +832,7 @@ public class PipelineRunService {
         List<PipelineRunDetail.PipelineRunStepView> steps = runSteps.stream()
                 .map(s -> new PipelineRunDetail.PipelineRunStepView(s.getId(), s.getOrderIndex(), s.getTitle(),
                         s.getContentType(), s.getStatus(), s.getNote(), s.getStartedAt(), s.getFinishedAt(),
-                        resolveInstructionText(s, stepById, incomingLinks, runStepIdByPipelineStepId, reportedValues, parameterValueByToken),
+                        resolveInstructionText(s, stepById, incomingLinks, runStepIdByPipelineStepId, reportedValues, constantValueByToken),
                         s.getExecutionCount(),
                         s.getContentType() == PipelineStep.ContentType.WATCHER ? s.getWatchCheckCount() : null,
                         s.getWatchLastCheckedAt(), s.getWatchLastState(), s.getWatchDeadlineAt(),
@@ -790,7 +847,7 @@ public class PipelineRunService {
                                            List<PipelineDataLink> allIncomingLinks,
                                            Map<Long, Long> runStepIdByPipelineStepId,
                                            Map<String, String> reportedValues,
-                                           Map<String, String> parameterValueByToken) {
+                                           Map<String, String> constantValueByToken) {
         if (runStep.getPipelineStepId() == null) {
             return null;
         }
@@ -800,12 +857,12 @@ public class PipelineRunService {
         }
         String text = step.getPromptText();
         for (PipelineDataLink link : allIncomingLinks) {
-            if (!link.getTargetStepId().equals(runStep.getPipelineStepId())) {
+            if (!runStep.getPipelineStepId().equals(link.getTargetStepId())) {
                 continue;
             }
             String value;
-            if (link.isParameterSourced()) {
-                value = parameterValueByToken.getOrDefault(link.getToken(), "");
+            if (link.isParameterSourced() || link.isVariableSourced()) {
+                value = constantValueByToken.getOrDefault(link.getToken(), "");
             } else {
                 Long sourceRunStepId = runStepIdByPipelineStepId.get(link.getSourceStepId());
                 value = sourceRunStepId != null

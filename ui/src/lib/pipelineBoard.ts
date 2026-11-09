@@ -11,6 +11,9 @@ import type {
   PipelineWatchSource,
 } from '@/api/types'
 
+/** The kinds of block an author can actually put on the board (`VARIABLE` is not one - see below). */
+export type BoardBlockKind = Exclude<PipelineStepContentType, 'VARIABLE'>
+
 /**
  * Board-local model of a pipeline step.
  *
@@ -49,11 +52,25 @@ export interface BoardStep {
   watchTimeoutSeconds: number | null
 }
 
-/** A wire from the board's "input parameters" node into a step's data input. */
-export interface BoardParamLink {
+/** A named constant on the input plate: the author writes the value, nobody types it at run time. */
+export interface BoardVariable {
+  name: string
+  value: string
+}
+
+/**
+ * A wire out of the input plate - from a run parameter or from a variable - into a step's data
+ * input, or into another variable's value. Exactly one of the two targets is set.
+ *
+ * Both sources share one model because they share everything that matters to the board: the value
+ * is known before the first step runs, the wire carries a `{{data:token}}` placeholder, and it can
+ * land either on a step or on a variable being assembled out of other values.
+ */
+export interface BoardInputLink {
   token: string
-  parameterName: string
-  targetStepIndex: number
+  source: { kind: 'param' | 'variable'; name: string }
+  targetStepIndex: number | null
+  targetVariableName: string | null
 }
 
 /** Parameter pins are colored by type (the spec's PIN_COLORS); step outputs stay untyped/emerald. */
@@ -63,11 +80,19 @@ export const PARAM_PIN_COLORS: Record<PipelineParameterType, string> = {
   BOOLEAN: '#a855f7',
 }
 
-export const PARAMS_NODE_ID = 'params'
+/** Variables have no type, so one color - the teal the variable step used to carry. */
+export const VARIABLE_PIN_COLOR = '#0d9488'
+
+export const INPUT_NODE_ID = 'input'
 export const PARAMS_SOURCE_TITLE = 'Параметры'
+export const VARIABLES_SOURCE_TITLE = 'Переменные'
+
+export function inputLinkSourceTitle(link: BoardInputLink): string {
+  return link.source.kind === 'param' ? PARAMS_SOURCE_TITLE : VARIABLES_SOURCE_TITLE
+}
 
 export interface BlockKindMeta {
-  kind: PipelineStepContentType
+  kind: BoardBlockKind
   label: string
   description: string
   icon: string
@@ -75,11 +100,15 @@ export interface BlockKindMeta {
   color: string
 }
 
+/**
+ * Blocks the author can add. There is no «Переменная» here any more: a variable does no work, so it
+ * is a block on the input plate (see {@link BoardVariable}) instead of a step in the chain - which
+ * is what used to force authors to stand variables in a line just to have a few of them.
+ */
 export const BLOCK_KINDS: BlockKindMeta[] = [
   { kind: 'PROMPT', label: 'Промпт', description: 'Инструкция для Claude', icon: 'sparkles', color: 'var(--color-accent)' },
   { kind: 'MD_FILE', label: 'MD-файл', description: 'Инструкция из загруженного файла', icon: 'document', color: '#2563eb' },
   { kind: 'CONDITION', label: 'Условие', description: 'Сравнивает значение и выбирает ветку', icon: 'branch', color: '#d97706' },
-  { kind: 'VARIABLE', label: 'Переменная', description: 'Фиксированное значение как выход', icon: 'variable', color: '#0d9488' },
   { kind: 'PARALLEL', label: 'Параллельно', description: 'Запускает все ветки одновременно, каждую — суб-агентом', icon: 'fanout', color: '#0ea5e9' },
   { kind: 'JOIN', label: 'Ожидать все', description: 'Продолжает, когда все ветки завершились', icon: 'join', color: '#6366f1' },
   { kind: 'LOOP', label: 'Цикл', description: 'Повторяет блоки по обратному переходу, не больше заданного числа раз', icon: 'refresh', color: '#c026d3' },
@@ -121,9 +150,22 @@ export function watcherPortLabel(
   return outcomeKey ?? DEFAULT_ROUTE_LABEL
 }
 
-export const BLOCK_KIND_BY_TYPE: Record<PipelineStepContentType, BlockKindMeta> = Object.fromEntries(
-  BLOCK_KINDS.map((k) => [k.kind, k]),
-) as Record<PipelineStepContentType, BlockKindMeta>
+/** How a kind is presented. The map below is keyed by the kind, so the value does not repeat it. */
+export type StepKindMeta = Omit<BlockKindMeta, 'kind'>
+
+/**
+ * Presentation for every kind a card can report: the palette's, plus `VARIABLE` - which no new
+ * pipeline can contain, but runs recorded before V24 do, and their step list still has to render.
+ */
+export const BLOCK_KIND_BY_TYPE: Record<PipelineStepContentType, StepKindMeta> = Object.fromEntries([
+  ...BLOCK_KINDS.map((k) => [k.kind, k]),
+  ['VARIABLE', {
+    label: 'Переменная',
+    description: 'Значение из прошлых запусков — теперь переменные живут на плашке входа',
+    icon: 'variable',
+    color: VARIABLE_PIN_COLOR,
+  } satisfies StepKindMeta],
+]) as Record<PipelineStepContentType, StepKindMeta>
 
 /** Wire/pin colors shared by the board and the read-only views. */
 export const WIRE_COLORS = {
@@ -149,7 +191,7 @@ export function supportsNamedBranches(kind: PipelineStepContentType): boolean {
 
 /** Does this kind of step take a data input wire? */
 export function acceptsDataInput(kind: PipelineStepContentType): boolean {
-  return kind !== 'VARIABLE' && kind !== 'PARALLEL' && kind !== 'JOIN' && kind !== 'LOOP'
+  return kind !== 'PARALLEL' && kind !== 'JOIN' && kind !== 'LOOP'
 }
 
 /** Does this kind of step publish data outputs at all? */
@@ -171,7 +213,7 @@ export function stepDisplayTitle(step: { title: string }, index: number): string
   return step.title.trim() || `Шаг ${index + 1}`
 }
 
-export function newBoardStep(kind: PipelineStepContentType, position: { x: number; y: number }): BoardStep {
+export function newBoardStep(kind: BoardBlockKind, position: { x: number; y: number }): BoardStep {
   const step: BoardStep = {
     title: '',
     contentType: kind,
@@ -195,8 +237,6 @@ export function newBoardStep(kind: PipelineStepContentType, position: { x: numbe
   if (kind === 'CONDITION') {
     step.conditionOperator = 'EQUALS'
     step.conditionValue = ''
-  } else if (kind === 'VARIABLE') {
-    step.outputs = [{ name: 'value' }]
   }
   ensureFixedPorts(step)
   return step
@@ -204,7 +244,7 @@ export function newBoardStep(kind: PipelineStepContentType, position: { x: numbe
 
 /**
  * Every card shows the transition ports its kind requires, wired or not:
- * - PROMPT / MD_FILE / VARIABLE: exactly one default port ("далее"), kept last.
+ * - PROMPT / MD_FILE: exactly one default port ("далее"), kept last.
  * - CONDITION: exactly `true` and `false`; LOOP: body and `done`.
  * Named ports on PROMPT / MD_FILE are author-added and left untouched here.
  */
@@ -241,7 +281,7 @@ export function ensureFixedPorts(step: BoardStep): void {
   const named = step.routes.filter((r) => r.outcomeKey !== null)
   const defaults = step.routes.filter((r) => r.outcomeKey === null)
   const defaultRoute = defaults[0] ?? { outcomeKey: null, target: null }
-  step.routes = step.contentType === 'VARIABLE' || step.contentType === 'JOIN' ? [defaultRoute] : [...named, defaultRoute]
+  step.routes = step.contentType === 'JOIN' ? [defaultRoute] : [...named, defaultRoute]
 }
 
 export function fromDetail(pipeline: PipelineDetail): BoardStep[] {
@@ -301,10 +341,49 @@ export function applyLegacyAutoLayoutIfNeeded(steps: BoardStep[]): void {
   })
 }
 
-export function paramLinksFromDetail(pipeline: PipelineDetail): BoardParamLink[] {
-  return pipeline.parameterLinks
-    .filter((l) => l.targetStepOrderIndex !== null)
-    .map((l) => ({ token: l.token, parameterName: l.parameterName, targetStepIndex: l.targetStepOrderIndex as number }))
+export function variablesFromDetail(pipeline: PipelineDetail): BoardVariable[] {
+  return pipeline.variables.map((v) => ({ name: v.name, value: v.value ?? '' }))
+}
+
+export function inputLinksFromDetail(pipeline: PipelineDetail): BoardInputLink[] {
+  return [
+    ...pipeline.parameterLinks.map((l) => ({
+      token: l.token,
+      source: { kind: 'param' as const, name: l.parameterName },
+      targetStepIndex: l.targetStepOrderIndex,
+      targetVariableName: l.targetVariableName,
+    })),
+    ...pipeline.variableLinks.map((l) => ({
+      token: l.token,
+      source: { kind: 'variable' as const, name: l.variableName },
+      targetStepIndex: l.targetStepOrderIndex,
+      targetVariableName: l.targetVariableName,
+    })),
+  ]
+}
+
+/**
+ * A pipeline saved before V24 has no start of its own; the board shows the same step the engine
+ * would have inferred, so the author sees where their pipeline actually begins and the next save
+ * writes it down.
+ */
+export function startIndexFromDetail(pipeline: PipelineDetail, steps: BoardStep[]): number | null {
+  if (pipeline.startStepOrderIndex !== null) return pipeline.startStepOrderIndex
+  if (steps.length === 0) return null
+  const { roots } = analyzeGraph(steps, null)
+  return roots.length > 0 ? roots[0] : 0
+}
+
+export function toUpsertParameterLinks(links: BoardInputLink[]) {
+  return links
+    .filter((l) => l.source.kind === 'param')
+    .map((l) => ({ token: l.token, parameterName: l.source.name, targetStepIndex: l.targetStepIndex, targetVariableName: l.targetVariableName }))
+}
+
+export function toUpsertVariableLinks(links: BoardInputLink[]) {
+  return links
+    .filter((l) => l.source.kind === 'variable')
+    .map((l) => ({ token: l.token, variableName: l.source.name, targetStepIndex: l.targetStepIndex, targetVariableName: l.targetVariableName }))
 }
 
 export function toUpsertSteps(steps: BoardStep[]): PipelineUpsertStep[] {
@@ -342,12 +421,15 @@ export function toUpsertSteps(steps: BoardStep[]): PipelineUpsertStep[] {
 }
 
 /** Remove step `index` and re-point every route / data link that referenced steps by index. */
-export function removeStepAt(steps: BoardStep[], index: number, paramLinks: BoardParamLink[] = []): void {
+export function removeStepAt(steps: BoardStep[], index: number, inputLinks: BoardInputLink[] = []): void {
   steps.splice(index, 1)
-  const survivingParamLinks = paramLinks
+  const survivingInputLinks = inputLinks
     .filter((l) => l.targetStepIndex !== index)
-    .map((l) => ({ ...l, targetStepIndex: l.targetStepIndex > index ? l.targetStepIndex - 1 : l.targetStepIndex }))
-  paramLinks.splice(0, paramLinks.length, ...survivingParamLinks)
+    .map((l) => ({
+      ...l,
+      targetStepIndex: l.targetStepIndex !== null && l.targetStepIndex > index ? l.targetStepIndex - 1 : l.targetStepIndex,
+    }))
+  inputLinks.splice(0, inputLinks.length, ...survivingInputLinks)
   steps.forEach((step) => {
     step.routes = step.routes.map((r) => {
       if (r.target === index) return { ...r, target: null }
@@ -374,9 +456,13 @@ export function stripDataToken(text: string | null, token: string): string {
 // ---------------------------------------------------------------------------------------------
 
 export interface GraphAnalysis {
-  /** Indexes of steps the backend would treat as a starting step. */
+  /**
+   * Indexes with no incoming transition. Once the start is explicit this is no longer "the start" -
+   * it is just the set of blocks nothing leads to, which is how the board offers a sensible start
+   * for a pipeline saved before the start existed.
+   */
   roots: number[]
-  /** Indexes reachable from the (first) root via wired transitions. */
+  /** Indexes reachable from the start via wired transitions (the start itself included). */
   reachable: Set<number>
   /** Indexes of steps with no incoming and no outgoing wires at all. */
   isolated: Set<number>
@@ -388,7 +474,7 @@ function wiredAdjacency(steps: BoardStep[]): number[][] {
   )
 }
 
-export function analyzeGraph(steps: BoardStep[]): GraphAnalysis {
+export function analyzeGraph(steps: BoardStep[], startStepIndex: number | null): GraphAnalysis {
   const n = steps.length
   const inDegree = new Array<number>(n).fill(0)
   const outDegree = new Array<number>(n).fill(0)
@@ -414,9 +500,12 @@ export function analyzeGraph(steps: BoardStep[]): GraphAnalysis {
     else if (entryInDegree[i] === 0) roots.push(i)
   }
   const reachable = new Set<number>()
-  if (roots.length > 0) {
-    const stack = [roots[0]]
-    reachable.add(roots[0])
+  const entry = startStepIndex !== null && startStepIndex >= 0 && startStepIndex < n
+    ? startStepIndex
+    : roots.length > 0 ? roots[0] : null
+  if (entry !== null) {
+    const stack = [entry]
+    reachable.add(entry)
     while (stack.length) {
       const current = stack.pop()!
       for (const next of adjacency[current]) {
@@ -497,29 +586,57 @@ export interface BoardIssue {
   text: string
 }
 
-export function collectIssues(steps: BoardStep[], paramLinks: BoardParamLink[] = [], parameterNames: string[] = []): BoardIssue[] {
+export interface BoardState {
+  steps: BoardStep[]
+  inputLinks: BoardInputLink[]
+  parameterNames: string[]
+  variables: BoardVariable[]
+  startStepIndex: number | null
+}
+
+export function collectIssues(board: BoardState): BoardIssue[] {
+  const { steps, inputLinks, parameterNames, variables, startStepIndex } = board
   const issues: BoardIssue[] = []
-  if (steps.length === 0) return issues
-  const knownParameters = new Set(parameterNames)
-  paramLinks.forEach((link) => {
-    if (!knownParameters.has(link.parameterName)) {
-      issues.push({ stepIndex: link.targetStepIndex, severity: 'error', text: `Параметр «${link.parameterName}» больше не существует — отсоедините его провод` })
+
+  // Variables live on the input plate, so their problems are reported even on an empty board.
+  const seenVariableNames = new Set<string>()
+  const wiredIntoVariable = new Set(inputLinks.map((l) => l.targetVariableName).filter((n): n is string => n !== null))
+  variables.forEach((variable, index) => {
+    const shown = variable.name.trim() || `Переменная ${index + 1}`
+    if (!variable.name.trim()) {
+      issues.push({ stepIndex: null, severity: 'error', text: `${shown}: задайте имя` })
+    } else if (seenVariableNames.has(variable.name.trim())) {
+      issues.push({ stepIndex: null, severity: 'error', text: `Переменная «${shown}» объявлена дважды — имена должны быть разными` })
+    } else {
+      seenVariableNames.add(variable.name.trim())
+    }
+    if (!variable.value.trim() && !wiredIntoVariable.has(variable.name)) {
+      issues.push({ stepIndex: null, severity: 'error', text: `Переменная «${shown}»: нет значения и ничего не подключено на вход` })
     }
   })
-  const { roots, reachable, isolated } = analyzeGraph(steps)
-  if (roots.length === 0 && steps.length > 0 && isolated.size < steps.length) {
-    issues.push({ stepIndex: null, severity: 'error', text: 'Нет стартового блока: у каждого блока есть входящий переход' })
-  }
-  if (roots.length > 1) {
-    issues.push({
-      stepIndex: null,
-      severity: 'error',
-      text: `Несколько стартовых блоков: ${roots.map((i) => stepDisplayTitle(steps[i], i)).join(', ')}. Оставьте один без входящих переходов`,
-    })
+
+  if (steps.length === 0) return issues
+
+  const knownParameters = new Set(parameterNames)
+  const knownVariables = new Set(variables.map((v) => v.name))
+  inputLinks.forEach((link) => {
+    const known = link.source.kind === 'param' ? knownParameters : knownVariables
+    const what = link.source.kind === 'param' ? 'Параметр' : 'Переменная'
+    if (!known.has(link.source.name)) {
+      issues.push({ stepIndex: link.targetStepIndex, severity: 'error', text: `${what} «${link.source.name}» больше не существует — отсоедините его провод` })
+    }
+    if (link.targetVariableName !== null && !knownVariables.has(link.targetVariableName)) {
+      issues.push({ stepIndex: null, severity: 'error', text: `Провод ведёт в переменную «${link.targetVariableName}», которой больше нет — отсоедините его` })
+    }
+  })
+
+  const { reachable } = analyzeGraph(steps, startStepIndex)
+  if (startStepIndex === null) {
+    issues.push({ stepIndex: null, severity: 'error', text: 'Старт не подключён: протяните провод от порта «Старт» на плашке входа к первому блоку' })
   }
   const incomingData = new Array<number>(steps.length).fill(0)
-  // Step outputs counted apart from parameters: a COMMAND watcher may take a value the user typed
-  // at run start, but never one a model produced on an earlier step.
+  // Step outputs counted apart from the input plate: a COMMAND watcher may take a value the user
+  // typed at run start, but never one a model produced on an earlier step.
   const incomingStepData = new Array<number>(steps.length).fill(0)
   steps.forEach((step) => step.dataLinksOut.forEach((l) => {
     if (l.targetStepIndex !== null) {
@@ -527,12 +644,12 @@ export function collectIssues(steps: BoardStep[], paramLinks: BoardParamLink[] =
       incomingStepData[l.targetStepIndex]++
     }
   }))
-  paramLinks.forEach((l) => {
-    if (l.targetStepIndex >= 0 && l.targetStepIndex < steps.length) incomingData[l.targetStepIndex]++
+  inputLinks.forEach((l) => {
+    if (l.targetStepIndex !== null && l.targetStepIndex >= 0 && l.targetStepIndex < steps.length) incomingData[l.targetStepIndex]++
   })
   steps.forEach((step, i) => {
     const title = stepDisplayTitle(step, i)
-    if (!reachable.has(i) && roots.length > 0 && steps.length > 1) {
+    if (!reachable.has(i) && startStepIndex !== null && steps.length > 1) {
       issues.push({ stepIndex: i, severity: 'warning', text: `«${title}» недостижим от старта и никогда не выполнится` })
     }
     if (step.contentType === 'CONDITION') {
@@ -611,9 +728,6 @@ export function collectIssues(steps: BoardStep[], paramLinks: BoardParamLink[] =
     }
     if (step.contentType === 'JOIN' && !steps.some((s) => s.routes.some((r) => r.target === i))) {
       issues.push({ stepIndex: i, severity: 'warning', text: `«${title}»: в блок не входит ни одна ветка — ждать нечего` })
-    }
-    if (step.contentType === 'VARIABLE' && (!step.promptText || !step.promptText.trim())) {
-      issues.push({ stepIndex: i, severity: 'error', text: `«${title}»: у переменной нет значения` })
     }
     if (step.contentType === 'MD_FILE' && step.assetId === null) {
       issues.push({ stepIndex: i, severity: 'error', text: `«${title}»: не загружен .md-файл` })

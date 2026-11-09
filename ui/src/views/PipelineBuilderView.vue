@@ -3,7 +3,14 @@ import { ref, toRef, watch, computed } from 'vue'
 import { useRouter } from 'vue-router'
 
 import { createPipeline, fetchPipeline, updatePipeline } from '@/api/client'
-import type { PipelineParameterType, PipelineUpsertParameter, PipelineUpsertParameterLink, PipelineUpsertStep } from '@/api/types'
+import type {
+  PipelineParameterType,
+  PipelineUpsertParameter,
+  PipelineUpsertParameterLink,
+  PipelineUpsertStep,
+  PipelineUpsertVariable,
+  PipelineUpsertVariableLink,
+} from '@/api/types'
 import AppIcon from '@/components/AppIcon.vue'
 import ErrorState from '@/components/ErrorState.vue'
 import PageHeader from '@/components/PageHeader.vue'
@@ -23,9 +30,14 @@ const parameters = ref<PipelineUpsertParameter[]>([])
 // updatePipeline replaces the whole pipeline definition - submitting an empty list here would
 // silently wipe out every step the author already built on the board.
 const steps = ref<PipelineUpsertStep[]>([])
-// Parameter -> step wires are drawn on the board; round-trip them here, dropping any whose
-// parameter was renamed or removed on this screen (the backend rejects links to unknown names).
+// Parameter wires are drawn on the board; round-trip them here, dropping any whose parameter was
+// renamed or removed on this screen (the backend rejects links to unknown names).
 const parameterLinks = ref<PipelineUpsertParameterLink[]>([])
+// Variables, their wires and the start step are all authored on the board. They are carried through
+// save() untouched for the same reason the steps are: an update replaces the whole definition.
+const variables = ref<PipelineUpsertVariable[]>([])
+const variableLinks = ref<PipelineUpsertVariableLink[]>([])
+const startStepIndex = ref<number | null>(null)
 const existingProjectScope = ref<string | null>(null)
 const saving = ref(false)
 const saveError = ref<string | null>(null)
@@ -35,7 +47,20 @@ async function loadForEdit() {
   const pipeline = await fetchPipeline(editingSlug.value)
   slug.value = pipeline.slug
   existingProjectScope.value = pipeline.projectScope
-  parameterLinks.value = pipeline.parameterLinks.map((l) => ({ token: l.token, parameterName: l.parameterName, targetStepIndex: l.targetStepOrderIndex }))
+  parameterLinks.value = pipeline.parameterLinks.map((l) => ({
+    token: l.token,
+    parameterName: l.parameterName,
+    targetStepIndex: l.targetStepOrderIndex,
+    targetVariableName: l.targetVariableName,
+  }))
+  variables.value = pipeline.variables.map((v) => ({ name: v.name, value: v.value }))
+  variableLinks.value = pipeline.variableLinks.map((l) => ({
+    token: l.token,
+    variableName: l.variableName,
+    targetStepIndex: l.targetStepOrderIndex,
+    targetVariableName: l.targetVariableName,
+  }))
+  startStepIndex.value = pipeline.startStepOrderIndex
   name.value = pipeline.name
   description.value = pipeline.description ?? ''
   parameters.value = pipeline.parameters.map((p) => ({
@@ -91,6 +116,9 @@ async function save() {
       parameters: parameters.value,
       steps: steps.value,
       parameterLinks: parameterLinks.value.filter((link) => parameters.value.some((p) => p.name === link.parameterName)),
+      variables: variables.value,
+      variableLinks: variableLinks.value,
+      startStepIndex: startStepIndex.value,
     }
     const result = isEditing.value ? await updatePipeline(editingSlug.value!, request) : await createPipeline(request)
     // Both creating a new pipeline and editing an existing one's metadata land on the board next -
