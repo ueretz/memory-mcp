@@ -784,4 +784,23 @@ class PipelineServiceTest {
                 .isInstanceOf(PipelineInvalidGraphException.class)
                 .hasMessageContaining("PARALLEL");
     }
+
+    @Test
+    void getForExecutionExposesTheWatcherConfigTheAgentNeeds() {
+        pipelineService.create(withSteps("watcher-exec-1",
+                watcher("Wait for review", PipelineStep.WatchSource.GITLAB_MR, PipelineStep.WatchAspect.REVIEW,
+                        "https://gitlab.example.com/g/p/-/merge_requests/7", 120, 7200,
+                        List.of(route("approved", 1), route("comments", null), route("timeout", null))),
+                prompt("Merge it", "merge", List.of())), "Tester");
+
+        ru.iuribabalin.memorymcp.dto.PipelineExecutionDetail detail =
+                pipelineService.getForExecution("watcher-exec-1");
+
+        ru.iuribabalin.memorymcp.dto.PipelineExecutionDetail.StepView step = detail.steps().get(0);
+        assertThat(step.watchSource()).isEqualTo(PipelineStep.WatchSource.GITLAB_MR);
+        assertThat(step.watchAspect()).isEqualTo(PipelineStep.WatchAspect.REVIEW);
+        assertThat(step.checkIntervalSeconds()).isEqualTo(120);
+        assertThat(step.watchTimeoutSeconds()).isEqualTo(7200);
+        assertThat(step.instructionText()).isEqualTo("https://gitlab.example.com/g/p/-/merge_requests/7");
+    }
 }

@@ -168,7 +168,10 @@ public class PipelineService {
                                 .toList(),
                         pipelineStepOutputRepository.findByStepId(step.getId()).stream()
                                 .map(PipelineStepOutput::getName)
-                                .toList()))
+                                .toList(),
+                        step.getContentType(),
+                        step.getWatchSource(), step.getWatchAspect(),
+                        step.getCheckIntervalSeconds(), step.getWatchTimeoutSeconds()))
                 .toList();
         return new PipelineExecutionDetail(pipeline.getSlug(), pipeline.getName(), pipeline.getDescription(), parameters, stepViews);
     }

@@ -8,6 +8,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import ru.iuribabalin.memorymcp.dto.PipelineExecutionDetail;
 import ru.iuribabalin.memorymcp.dto.PipelineRunDetail;
+import ru.iuribabalin.memorymcp.dto.PipelineRunStepCheckResult;
 import ru.iuribabalin.memorymcp.entity.PipelineRun;
 import ru.iuribabalin.memorymcp.entity.PipelineRunStep;
 import ru.iuribabalin.memorymcp.service.PipelineFeatureDisabledException;
@@ -97,5 +98,28 @@ class PipelineMcpToolsTest {
         PipelineRunDetail result = pipelineMcpTools.pipelineRunStepUpdate(1L, 0, PipelineRunStep.Status.DONE, "ok", "success", "{\"summary\":\"x\"}");
 
         assertThat(result).isEqualTo(runDetail);
+    }
+
+    @Test
+    void runStepCheckDelegatesAndRecordsUsage() {
+        when(settingsService.isEnabled(SettingsService.PIPELINES_ENABLED)).thenReturn(true);
+        Instant deadline = Instant.now().plusSeconds(3600);
+        PipelineRunStepCheckResult checkResult = new PipelineRunStepCheckResult(1, deadline, false);
+        when(pipelineRunService.checkStep(1L, 0, "running")).thenReturn(checkResult);
+
+        PipelineRunStepCheckResult result = pipelineMcpTools.pipelineRunStepCheck(1L, 0, "running");
+
+        assertThat(result.checkCount()).isEqualTo(1);
+        assertThat(result.deadlineAt()).isEqualTo(deadline);
+        assertThat(result.expired()).isFalse();
+        verify(usageEventRecorder).record(ru.iuribabalin.memorymcp.entity.UsageEvent.Action.PIPELINE_RUN_STEP_CHECK, "1", null, null, null);
+    }
+
+    @Test
+    void runStepCheckIsRefusedWhenPipelinesAreDisabled() {
+        when(settingsService.isEnabled(SettingsService.PIPELINES_ENABLED)).thenReturn(false);
+
+        assertThatThrownBy(() -> pipelineMcpTools.pipelineRunStepCheck(1L, 0, "running"))
+                .isInstanceOf(PipelineFeatureDisabledException.class);
     }
 }
