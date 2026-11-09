@@ -162,6 +162,62 @@ class TaskServiceTest {
         assertThat(taskService.cancel("task-cancel-project-2", "NO-SUCH-TASK")).isFalse();
     }
 
+
+    @Test
+    void resumingACancelledTaskMakesItActiveAgain() {
+        taskService.start("task-resume-project", "TR-1", "Test task", Task.Source.MANUAL);
+        taskService.cancel("task-resume-project", "TR-1");
+
+        taskService.start("task-resume-project", "TR-1", "Test task", Task.Source.MANUAL);
+
+        // Without this there is no way back from a mistaken cancellation short of SQL.
+        assertThat(taskService.get("task-resume-project", "TR-1").status()).isEqualTo(Task.Status.ACTIVE);
+    }
+
+    @Test
+    void resumingADoneTaskLeavesItDone() {
+        taskService.start("task-resume-done-project", "TR-2", "Test task", Task.Source.MANUAL);
+        taskService.close("task-resume-done-project", "TR-2");
+
+        taskService.start("task-resume-done-project", "TR-2", "Test task", Task.Source.MANUAL);
+
+        assertThat(taskService.get("task-resume-done-project", "TR-2").status()).isEqualTo(Task.Status.DONE);
+    }
+
+    @Test
+    void linkingAnEntryFromAnotherProjectAsSpecFails() {
+        taskService.start("task-spec-scope-project", "TSS-1", "Test task", Task.Source.MANUAL);
+        taskService.start("task-spec-other-project", "TSS-2", "Other task", Task.Source.MANUAL);
+        saveEntry("task-spec-foreign-entry", "task-spec-other-project", "TSS-2");
+
+        // Entry names are globally unique, so the wrong name resolves cleanly - and the UI would
+        // then present another project's document as this task's spec.
+        assertThatThrownBy(() -> taskService.setSpec("task-spec-scope-project", "TSS-1", "task-spec-foreign-entry"))
+                .isInstanceOf(SpecEntryScopeMismatchException.class);
+    }
+
+    @Test
+    void linkingAnEntryScopedToAnotherTaskOfTheSameProjectFails() {
+        taskService.start("task-spec-sibling-project", "TSS-3", "Test task", Task.Source.MANUAL);
+        taskService.start("task-spec-sibling-project", "TSS-4", "Sibling task", Task.Source.MANUAL);
+        saveEntry("task-spec-sibling-entry", "task-spec-sibling-project", "TSS-4");
+
+        assertThatThrownBy(() -> taskService.setSpec("task-spec-sibling-project", "TSS-3", "task-spec-sibling-entry"))
+                .isInstanceOf(SpecEntryScopeMismatchException.class);
+    }
+
+    @Test
+    void aProjectCommonEntryCanBeLinkedAsSpec() {
+        taskService.start("task-spec-common-project", "TSS-5", "Test task", Task.Source.MANUAL);
+        memoryService.save(new SaveMemoryRequest("task-spec-common-entry", MemoryNode.Type.PROJECT,
+                "spec", "# spec", "task-spec-common-project", null, null, null, null));
+
+        TaskDetail linked = taskService.setSpec("task-spec-common-project", "TSS-5", "task-spec-common-entry");
+
+        // Not task-scoped is fine - it still belongs to this project, so the link isn't misleading.
+        assertThat(linked.spec().name()).isEqualTo("task-spec-common-entry");
+    }
+
     private void saveEntry(String name, String projectScope, String taskKey) {
         memoryService.save(new SaveMemoryRequest(
                 name, MemoryNode.Type.PROJECT, "spec", "# spec", projectScope, taskKey, null, null, null));

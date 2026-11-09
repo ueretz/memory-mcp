@@ -17,6 +17,7 @@ import ru.iuribabalin.memorymcp.service.PipelineRunStepNotFoundException;
 import ru.iuribabalin.memorymcp.service.PipelineRunUnknownOutputException;
 import ru.iuribabalin.memorymcp.service.PipelineSlugTakenException;
 import ru.iuribabalin.memorymcp.service.PipelineUnsupportedFormatVersionException;
+import ru.iuribabalin.memorymcp.service.SpecEntryScopeMismatchException;
 import ru.iuribabalin.memorymcp.service.TaskNotFoundException;
 import ru.iuribabalin.memorymcp.service.UnsupportedExportException;
 
@@ -33,6 +34,11 @@ public class ApiExceptionHandler {
     @ExceptionHandler(TaskNotFoundException.class)
     public ResponseEntity<Map<String, String>> handleTaskNotFound(TaskNotFoundException ex) {
         return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", ex.getMessage()));
+    }
+
+    @ExceptionHandler(SpecEntryScopeMismatchException.class)
+    public ResponseEntity<Map<String, String>> handleSpecScopeMismatch(SpecEntryScopeMismatchException ex) {
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Map.of("error", ex.getMessage()));
     }
 
     @ExceptionHandler(UnsupportedExportException.class)
