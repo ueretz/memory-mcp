@@ -1,0 +1,214 @@
+{
+    "formatVersion": 1,
+    "pipeline": {
+        "slug": "orchestrator",
+        "name": "Директор и дешёвые модели",
+        "description": "Дорогая модель не пишет черновики сама, а раздаёт их локальным моделям и принимает работу. Пример пары «Оркестратор» / «Приёмка».",
+        "projectScope": null,
+        "parameters": [
+            {
+                "name": "topic",
+                "label": "Про что готовим материал",
+                "type": "STRING",
+                "required": true,
+                "defaultValue": "последние изменения в репозитории"
+            }
+        ],
+        "steps": [
+            {
+                "title": "Оркестратор",
+                "contentType": "ORCHESTRATOR",
+                "promptText": null,
+                "assetId": null,
+                "referenceAssetId": null,
+                "positionX": 0.0,
+                "positionY": 0.0,
+                "routes": [
+                    {
+                        "outcomeKey": null,
+                        "targetStepIndex": 1
+                    }
+                ],
+                "outputs": [],
+                "dataLinksOut": [],
+                "conditionOperator": null,
+                "conditionValue": null,
+                "conditionMode": "VALUE",
+                "maxIterations": 2,
+                "watchSource": null,
+                "watchAspect": null,
+                "checkIntervalSeconds": null,
+                "watchTimeoutSeconds": null,
+                "regionStartStepIndex": null,
+                "delegationHint": null
+            },
+            {
+                "title": "Собрать факты",
+                "contentType": "PROMPT",
+                "promptText": "Собери сухие факты по теме «{{topic}}»: что изменилось, где, когда. Без выводов и оценок, только список.",
+                "assetId": null,
+                "referenceAssetId": null,
+                "positionX": 420.0,
+                "positionY": 0.0,
+                "routes": [
+                    {
+                        "outcomeKey": null,
+                        "targetStepIndex": 2
+                    }
+                ],
+                "outputs": [
+                    {
+                        "name": "facts"
+                    }
+                ],
+                "dataLinksOut": [
+                    {
+                        "token": "facts",
+                        "sourceOutputName": "facts",
+                        "targetStepIndex": 3
+                    }
+                ],
+                "conditionOperator": null,
+                "conditionValue": null,
+                "conditionMode": "VALUE",
+                "maxIterations": null,
+                "watchSource": null,
+                "watchAspect": null,
+                "checkIntervalSeconds": null,
+                "watchTimeoutSeconds": null,
+                "regionStartStepIndex": null,
+                "delegationHint": "CHEAPEST"
+            },
+            {
+                "title": "Черновик текста",
+                "contentType": "PROMPT",
+                "promptText": "Напиши черновик абзацев по собранным фактам. Коротко, по делу, без воды.",
+                "assetId": null,
+                "referenceAssetId": null,
+                "positionX": 840.0,
+                "positionY": 0.0,
+                "routes": [
+                    {
+                        "outcomeKey": null,
+                        "targetStepIndex": 3
+                    }
+                ],
+                "outputs": [
+                    {
+                        "name": "draft"
+                    }
+                ],
+                "dataLinksOut": [
+                    {
+                        "token": "draft",
+                        "sourceOutputName": "draft",
+                        "targetStepIndex": 3
+                    }
+                ],
+                "conditionOperator": null,
+                "conditionValue": null,
+                "conditionMode": "VALUE",
+                "maxIterations": null,
+                "watchSource": null,
+                "watchAspect": null,
+                "checkIntervalSeconds": null,
+                "watchTimeoutSeconds": null,
+                "regionStartStepIndex": null,
+                "delegationHint": "CHEAPEST"
+            },
+            {
+                "title": "Вычитать черновик",
+                "contentType": "PROMPT",
+                "promptText": "Вычитай черновик: убери повторы, проверь, что каждое утверждение подтверждается фактами.\nФакты: {{data:facts}}\nЧерновик: {{data:draft}}",
+                "assetId": null,
+                "referenceAssetId": null,
+                "positionX": 1260.0,
+                "positionY": 0.0,
+                "routes": [
+                    {
+                        "outcomeKey": null,
+                        "targetStepIndex": 4
+                    }
+                ],
+                "outputs": [
+                    {
+                        "name": "text"
+                    }
+                ],
+                "dataLinksOut": [
+                    {
+                        "token": "text",
+                        "sourceOutputName": "text",
+                        "targetStepIndex": 5
+                    }
+                ],
+                "conditionOperator": null,
+                "conditionValue": null,
+                "conditionMode": "VALUE",
+                "maxIterations": null,
+                "watchSource": null,
+                "watchAspect": null,
+                "checkIntervalSeconds": null,
+                "watchTimeoutSeconds": null,
+                "regionStartStepIndex": null,
+                "delegationHint": "BALANCED"
+            },
+            {
+                "title": "Приёмка",
+                "contentType": "ORCHESTRATOR_END",
+                "promptText": null,
+                "assetId": null,
+                "referenceAssetId": null,
+                "positionX": 1680.0,
+                "positionY": 0.0,
+                "routes": [
+                    {
+                        "outcomeKey": null,
+                        "targetStepIndex": 5
+                    }
+                ],
+                "outputs": [],
+                "dataLinksOut": [],
+                "conditionOperator": null,
+                "conditionValue": null,
+                "conditionMode": "VALUE",
+                "maxIterations": null,
+                "watchSource": null,
+                "watchAspect": null,
+                "checkIntervalSeconds": null,
+                "watchTimeoutSeconds": null,
+                "regionStartStepIndex": 0,
+                "delegationHint": null
+            },
+            {
+                "title": "Выводы",
+                "contentType": "PROMPT",
+                "promptText": "Это делает сам директор: прочитай готовый текст и скажи, что из этого важно и что делать дальше.\nТекст: {{data:text}}",
+                "assetId": null,
+                "referenceAssetId": null,
+                "positionX": 420.0,
+                "positionY": 260.0,
+                "routes": [
+                    {
+                        "outcomeKey": null,
+                        "targetStepIndex": null
+                    }
+                ],
+                "outputs": [],
+                "dataLinksOut": [],
+                "conditionOperator": null,
+                "conditionValue": null,
+                "conditionMode": "VALUE",
+                "maxIterations": null,
+                "watchSource": null,
+                "watchAspect": null,
+                "checkIntervalSeconds": null,
+                "watchTimeoutSeconds": null,
+                "regionStartStepIndex": null,
+                "delegationHint": null
+            }
+        ],
+        "parameterLinks": []
+    },
+    "warnings": []
+}

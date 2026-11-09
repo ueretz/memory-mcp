@@ -853,8 +853,8 @@ class PipelineRunServiceTest {
 
     @Test
     void loopRegionRunsItsBodyOncePerIterationWithoutADrawnBackEdge() {
-        createLoopRegionPipeline("loop-region-1", 2);
-        PipelineRunDetail run = pipelineRunService.start("loop-region-1", "{}", "Tester");
+        createLoopRegionPipeline("loop-region-run-1", 2);
+        PipelineRunDetail run = pipelineRunService.start("loop-region-run-1", "{}", "Tester");
         assertThat(run.activeStepOrderIndexes()).containsExactly(1);
 
         pipelineRunService.updateStep(run.id(), 1, PipelineRunStep.Status.DONE, "red", null, null);
@@ -873,8 +873,8 @@ class PipelineRunServiceTest {
 
     @Test
     void loopRegionBodyStepsCountEveryIteration() {
-        createLoopRegionPipeline("loop-region-2", 2);
-        PipelineRunDetail run = pipelineRunService.start("loop-region-2", "{}", "Tester");
+        createLoopRegionPipeline("loop-region-run-2", 2);
+        PipelineRunDetail run = pipelineRunService.start("loop-region-run-2", "{}", "Tester");
         for (int iteration = 0; iteration < 2; iteration++) {
             pipelineRunService.updateStep(run.id(), 1, PipelineRunStep.Status.DONE, "ran", null, null);
             run = pipelineRunService.updateStep(run.id(), 2, PipelineRunStep.Status.DONE, "fixed", null, null);
@@ -886,9 +886,9 @@ class PipelineRunServiceTest {
 
     @Test
     void loopRegionWhoseLoopStartsThePipelineHasTheLoopAsItsRoot() {
-        createLoopRegionPipeline("loop-region-3", 1);
+        createLoopRegionPipeline("loop-region-run-3", 1);
 
-        PipelineRunDetail run = pipelineRunService.start("loop-region-3", "{}", "Tester");
+        PipelineRunDetail run = pipelineRunService.start("loop-region-run-3", "{}", "Tester");
 
         assertThat(run.steps().get(0).contentType()).isEqualTo(PipelineStep.ContentType.LOOP);
         assertThat(run.activeStepOrderIndexes()).containsExactly(1);

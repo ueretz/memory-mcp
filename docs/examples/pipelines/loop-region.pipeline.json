@@ -1,0 +1,166 @@
+{
+    "formatVersion": 1,
+    "pipeline": {
+        "slug": "loop-region",
+        "name": "Зелёные тесты в цикле",
+        "description": "Колбаска «прогнать тесты → починить упавшее» крутится до трёх раз, возврат делает сервер. Пример пары «Цикл» / «Конец цикла».",
+        "projectScope": null,
+        "parameters": [
+            {
+                "name": "command",
+                "label": "Чем прогонять тесты",
+                "type": "STRING",
+                "required": true,
+                "defaultValue": "./gradlew test"
+            }
+        ],
+        "steps": [
+            {
+                "title": "Цикл починки",
+                "contentType": "LOOP",
+                "promptText": null,
+                "assetId": null,
+                "referenceAssetId": null,
+                "positionX": 0.0,
+                "positionY": 0.0,
+                "routes": [
+                    {
+                        "outcomeKey": null,
+                        "targetStepIndex": 1
+                    },
+                    {
+                        "outcomeKey": "done",
+                        "targetStepIndex": 4
+                    }
+                ],
+                "outputs": [],
+                "dataLinksOut": [],
+                "conditionOperator": null,
+                "conditionValue": null,
+                "conditionMode": "VALUE",
+                "maxIterations": 3,
+                "watchSource": null,
+                "watchAspect": null,
+                "checkIntervalSeconds": null,
+                "watchTimeoutSeconds": null,
+                "regionStartStepIndex": null,
+                "delegationHint": null
+            },
+            {
+                "title": "Прогнать тесты",
+                "contentType": "PROMPT",
+                "promptText": "Прогони тесты командой {{command}} и перечисли, что упало. Если всё зелено, так и скажи.",
+                "assetId": null,
+                "referenceAssetId": null,
+                "positionX": 420.0,
+                "positionY": 0.0,
+                "routes": [
+                    {
+                        "outcomeKey": null,
+                        "targetStepIndex": 2
+                    }
+                ],
+                "outputs": [
+                    {
+                        "name": "failures"
+                    }
+                ],
+                "dataLinksOut": [
+                    {
+                        "token": "failures",
+                        "sourceOutputName": "failures",
+                        "targetStepIndex": 2
+                    }
+                ],
+                "conditionOperator": null,
+                "conditionValue": null,
+                "conditionMode": "VALUE",
+                "maxIterations": null,
+                "watchSource": null,
+                "watchAspect": null,
+                "checkIntervalSeconds": null,
+                "watchTimeoutSeconds": null,
+                "regionStartStepIndex": null,
+                "delegationHint": null
+            },
+            {
+                "title": "Починить упавшее",
+                "contentType": "PROMPT",
+                "promptText": "Разберись, почему упали эти тесты, и починись причину, а не симптом.\nУпало: {{data:failures}}\nЕсли упавших нет — ничего не делай и так и напиши.",
+                "assetId": null,
+                "referenceAssetId": null,
+                "positionX": 840.0,
+                "positionY": 0.0,
+                "routes": [
+                    {
+                        "outcomeKey": null,
+                        "targetStepIndex": 3
+                    }
+                ],
+                "outputs": [],
+                "dataLinksOut": [],
+                "conditionOperator": null,
+                "conditionValue": null,
+                "conditionMode": "VALUE",
+                "maxIterations": null,
+                "watchSource": null,
+                "watchAspect": null,
+                "checkIntervalSeconds": null,
+                "watchTimeoutSeconds": null,
+                "regionStartStepIndex": null,
+                "delegationHint": null
+            },
+            {
+                "title": "Конец цикла",
+                "contentType": "LOOP_END",
+                "promptText": null,
+                "assetId": null,
+                "referenceAssetId": null,
+                "positionX": 1260.0,
+                "positionY": 0.0,
+                "routes": [],
+                "outputs": [],
+                "dataLinksOut": [],
+                "conditionOperator": null,
+                "conditionValue": null,
+                "conditionMode": "VALUE",
+                "maxIterations": null,
+                "watchSource": null,
+                "watchAspect": null,
+                "checkIntervalSeconds": null,
+                "watchTimeoutSeconds": null,
+                "regionStartStepIndex": 0,
+                "delegationHint": null
+            },
+            {
+                "title": "Отчёт",
+                "contentType": "PROMPT",
+                "promptText": "Подведи итог: сколько итераций понадобилось, что починено, что осталось красным.",
+                "assetId": null,
+                "referenceAssetId": null,
+                "positionX": 420.0,
+                "positionY": 260.0,
+                "routes": [
+                    {
+                        "outcomeKey": null,
+                        "targetStepIndex": null
+                    }
+                ],
+                "outputs": [],
+                "dataLinksOut": [],
+                "conditionOperator": null,
+                "conditionValue": null,
+                "conditionMode": "VALUE",
+                "maxIterations": null,
+                "watchSource": null,
+                "watchAspect": null,
+                "checkIntervalSeconds": null,
+                "watchTimeoutSeconds": null,
+                "regionStartStepIndex": null,
+                "delegationHint": null
+            }
+        ],
+        "parameterLinks": []
+    },
+    "warnings": []
+}

@@ -1,0 +1,86 @@
+{
+    "formatVersion": 1,
+    "pipeline": {
+        "slug": "review-loop",
+        "name": "Ревью в цикле",
+        "description": "Пять проходов «проведи ревью, после поправь ошибки» одним блоком, затем отчёт. Пример блока «Цикл с промптом».",
+        "projectScope": null,
+        "parameters": [
+            {
+                "name": "folder",
+                "label": "Что ревьюить (папка или файл)",
+                "type": "STRING",
+                "required": true,
+                "defaultValue": "src"
+            }
+        ],
+        "steps": [
+            {
+                "title": "Ревью и правки",
+                "contentType": "PROMPT_LOOP",
+                "promptText": "Проведи ревью кода в {{folder}}, после поправь найденные ошибки. На каждом проходе смотри свежим взглядом: что осталось после прошлых правок.",
+                "assetId": null,
+                "referenceAssetId": null,
+                "positionX": 0.0,
+                "positionY": 0.0,
+                "routes": [
+                    {
+                        "outcomeKey": null,
+                        "targetStepIndex": 1
+                    }
+                ],
+                "outputs": [
+                    {
+                        "name": "verdict"
+                    }
+                ],
+                "dataLinksOut": [
+                    {
+                        "token": "verdict",
+                        "sourceOutputName": "verdict",
+                        "targetStepIndex": 1
+                    }
+                ],
+                "conditionOperator": null,
+                "conditionValue": null,
+                "conditionMode": "VALUE",
+                "maxIterations": 5,
+                "watchSource": null,
+                "watchAspect": null,
+                "checkIntervalSeconds": null,
+                "watchTimeoutSeconds": null,
+                "regionStartStepIndex": null,
+                "delegationHint": null
+            },
+            {
+                "title": "Отчёт о ревью",
+                "contentType": "PROMPT",
+                "promptText": "Сохрани в память отчёт: что было найдено за проходы ревью и что исправлено.\nИтог последнего прохода: {{data:verdict}}",
+                "assetId": null,
+                "referenceAssetId": null,
+                "positionX": 460.0,
+                "positionY": 0.0,
+                "routes": [
+                    {
+                        "outcomeKey": null,
+                        "targetStepIndex": null
+                    }
+                ],
+                "outputs": [],
+                "dataLinksOut": [],
+                "conditionOperator": null,
+                "conditionValue": null,
+                "conditionMode": "VALUE",
+                "maxIterations": null,
+                "watchSource": null,
+                "watchAspect": null,
+                "checkIntervalSeconds": null,
+                "watchTimeoutSeconds": null,
+                "regionStartStepIndex": null,
+                "delegationHint": null
+            }
+        ],
+        "parameterLinks": []
+    },
+    "warnings": []
+}
