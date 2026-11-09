@@ -73,9 +73,11 @@ not skip asking just because it seems obvious - it must be an explicit question 
   3. Call `task_start` with the resolved `projectScope`, `taskKey`, and `title`. This is
      idempotent - safe to call again if the task already exists (use `task_list` first if you
      want to check without creating anything).
-  4. Save task-specific working notes via `memory_save` with both `projectScope` and
-     `taskKey` set. This keeps the task's context in its own "folder", separate from the
-     product's durable knowledge.
+  4. Save the task's **MD spec** - what the task is and what has to be done - via `memory_save`
+     with both `projectScope` and `taskKey` set, then link it with `task_spec_set` (or pass
+     `specEntryName` to `task_start`). The dashboard turns that link into a card on the task page,
+     and progress written into the same entry as the work proceeds is what anyone reads later.
+     Further task-specific working notes go the same way: task-scoped entries, never local files.
   5. When the task's work is done, call `task_close`.
 - If the user says no: proceed without a `taskKey`. Anything you save is project-level
   "common" context (durable knowledge about the product, not tied to one unit of work).
@@ -196,25 +198,35 @@ specific classes, you can also save/update a single location directly via
 - `folder_list(projectScope, taskKey?, parentFolder?)` - list folders directly under a project's
   common space, a task, or another folder. Omitting `parentFolder` lists top-level folders. Use
   before `folder_create` to avoid duplicates.
-- `task_start(projectScope, taskKey, title?, source?)` - create or resume a task.
+- `task_start(projectScope, taskKey, title?, source?, specEntryName?)` - create or resume a task,
+  optionally linking the entry that holds its MD spec right away.
+- `task_spec_set(projectScope, taskKey, entryName)` - link an existing entry to the task as its MD
+  spec (replaces any previous link; the previous entry is left alone).
+- `task_cancel(projectScope, taskKey, reason?)` - mark a task `CANCELLED` instead of done; the
+  dashboard shows a red cross for it rather than a progress ring.
 - `task_list(projectScope)` - list a project's tasks; check before creating a duplicate.
-- `task_close(projectScope, taskKey)` - mark a task done.
+- `task_close(projectScope, taskKey)` - mark a task done. A task's progress bar and the ring on
+  its card are derived from its subtask board (share of `DONE` subtasks), so there is no progress
+  value to set by hand.
 - `location_scan(projectScope, rootPath)` - index a project's files/classes as `LOCATION`
   entries (see "Code locations" above).
-- `agent_task_create(projectScope, taskKey, title, type, description?, dependsOnId?)` - create a
-  subtask on a task's agent task board (`type`:
+- `agent_task_create(projectScope, taskKey, title, type, description?, dependsOnId?, specEntryName?)` -
+  create a subtask on a task's agent task board (`type`:
   `ANALYSIS`/`IMPLEMENTATION`/`TESTING`/`REVIEW`/`REPORTING`). Work that breaks into more than one
-  step is always decomposed here before its code is written, and `description` carries the
-  subtask's full spec inline (goal, scope, steps, acceptance) - not a link to an entry and never a
-  local file. Not idempotent - check `agent_task_list` first to avoid duplicates. See the
-  `agent-task-board` skill for how these get driven end to end, including running independent
-  subtasks in parallel.
+  step is always decomposed here before its code is written. The subtask's spec (goal, scope,
+  steps, acceptance) goes into a `memory_save` entry linked via `specEntryName` or
+  `agent_task_spec_set`; `description` keeps only a one- or two-line label. Not idempotent - check
+  `agent_task_list` first to avoid duplicates. See the `agent-task-board` skill for how these get
+  driven end to end, including running independent subtasks in parallel.
 - `agent_task_list(projectScope, taskKey, type?, status?, claimable?)` - list a task's subtasks,
   optionally filtered by category or status; `claimable: true` returns only what can be picked up
   right now (`TODO`, no unfinished dependency).
 - `agent_task_claim(projectScope, taskKey, agentTaskId)` - atomically claim a `TODO` subtask -
   use this instead of `agent_task_update` when several agents work the same board concurrently.
 - `agent_task_update(projectScope, taskKey, agentTaskId, status?, title?, description?)` - move a
-  subtask's status (`TODO`/`IN_PROGRESS`/`DONE`/`BLOCKED`) and/or replace its description (on
-  `DONE`: the real result - what changed, files touched, how it was verified).
+  subtask's status (`TODO`/`IN_PROGRESS`/`DONE`/`BLOCKED`) and/or replace its one-line description.
+  The real result on `DONE` - what changed, files touched, how it was verified - is written into
+  the subtask's linked spec entry, not into this field.
+- `agent_task_spec_set(projectScope, taskKey, agentTaskId, entryName)` - link an existing entry to
+  a subtask as its MD spec, replacing any previous link.
 - `agent_task_delete(projectScope, taskKey, agentTaskId)` - remove a stale/duplicate subtask.

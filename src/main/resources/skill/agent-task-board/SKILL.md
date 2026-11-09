@@ -1,6 +1,6 @@
 ---
 name: agent-task-board
-description: TRIGGER - invoke automatically, without being asked, the moment you are about to call task_start for a substantive, multi-step piece of work (breaks into more than one concrete step). Decomposing such work into a tracked subtask board (agent_task_* MCP tools) is mandatory, never optional, and independent subtasks are executed by parallel subagents. Drives the board through two phases, Planning then Execution, with a report (via the agent-task-report skill) and an explicit user checkpoint between them. Do not wait for the user to ask for "a board" or "subtasks" - that's this skill's job to set up unprompted. SKIP only for a one-line fix or a pure question with no implementation steps.
+description: TRIGGER - invoke automatically, without being asked, the moment you are about to call task_start for a substantive, multi-step piece of work (breaks into more than one concrete step). Decomposing such work into a tracked subtask board (agent_task_* MCP tools) is mandatory, never optional. Each unit's description lives in a linked MD spec entry rather than in the card itself, and independent subtasks are executed by parallel subagents. Drives the board through two phases, Planning then Execution, with a report (via the agent-task-report skill) and an explicit user checkpoint between them. Do not wait for the user to ask for "a board" or "subtasks" - that's this skill's job to set up unprompted. SKIP only for a one-line fix or a pure question with no implementation steps.
 ---
 
 # agent-task-board: Jira-like subtask board for one MCP task
@@ -18,9 +18,9 @@ the project, not in a scratch/temp directory, not in `docs/`. This is not "prefe
 an unconditional rule, with the same single exception as the main `memory-mcp` skill: a real
 source file the user explicitly asked for as part of the application. Concretely:
 
-- The plan from the ANALYSIS subtask -> `agent_task_update(..., description: ...)`, not a file.
-- Each IMPLEMENTATION/TESTING/REVIEW subtask's result summary -> its `description` via
-  `agent_task_update`, not a `*.md`/`*.txt` next to the code.
+- The plan from the ANALYSIS subtask -> a `memory_save` entry linked to that subtask, not a file.
+- Each IMPLEMENTATION/TESTING/REVIEW subtask's spec and result -> a `memory_save` entry linked
+  with `agent_task_spec_set`, not a `*.md`/`*.txt` next to the code.
 - Both reports (Phase 1 planning, Phase 2 final) -> built and saved by the `agent-task-report`
   skill, which itself never touches a local file.
 
@@ -52,43 +52,59 @@ exists to capture are the decisions *as they were made*.
 Only a genuine one-liner (a typo, a single-line config value) or a pure question with no
 implementation steps skips this skill entirely.
 
-## MANDATORY: the description lives in the subtask, not behind a link
+## MANDATORY: the spec lives in an MD entry, linked to the task and the subtask
 
-A subtask's `description` is the subtask's spec and, later, its result - it is written **into the
-subtask** via `agent_task_create`/`agent_task_update`. The dashboard card collapses to two lines
-and expands into fully rendered markdown (`ui/src/components/AgentTaskCard.vue`), so a normal
-multi-paragraph description is exactly what the UI expects - length is not a problem, emptiness
-and indirection are.
+A task and each of its subtasks carry their description as a **memory entry - the MD spec** - and
+link it, instead of holding the whole text in their own body. The dashboard renders that link as a
+card you click through to read (on the task page, and in miniature on a subtask card), and
+progress is appended to the same entry as work moves, so one document carries the whole story of
+that unit of work.
 
-**At creation, a subtask's `description` contains these parts, in this order:**
+**The order, every time:**
 
-1. **Goal** - one or two sentences: what this subtask changes and why.
-2. **Scope** - the concrete files/modules/classes this subtask owns (`path:line` where known),
-   and anything explicitly out of scope.
-3. **Steps** - the ordered steps to carry it out, as a short list.
-4. **Acceptance** - how to tell it's done (behaviour, test, command to run).
-5. **Dependencies** - what must be DONE first (and set `dependsOnId` accordingly), or
-   "independent - parallelizable with: <other subtask titles>".
+1. **Save the spec**: `memory_save(type: "PROJECT", name: "<task-key>-<short-slug>", ...)` with
+   goal, scope (the files/modules this unit owns, and what is explicitly out of scope), steps,
+   acceptance criteria and dependencies. Always pass `projectScope` **and** `taskKey` - an entry
+   saved without them isn't reachable from the task page at all.
+2. **Link it**: `task_spec_set(projectScope, taskKey, entryName)` for the task,
+   `agent_task_spec_set(projectScope, taskKey, agentTaskId, entryName)` for a subtask. Both
+   replace the link when called again, leaving the previous entry alone. `task_start` and
+   `agent_task_create` also accept `specEntryName`, so a unit whose spec already exists is linked
+   in a single call.
+3. **Keep `description` to one or two lines** - what this unit is, and nothing that belongs in the
+   spec. It is the label on the card, not the document.
+4. **Append progress to the linked entry** as the work proceeds (`memory_save` upserts by name):
+   what is done, what is next, what got in the way. This is what makes a long-running task
+   readable afterwards, and it is where a second agent picks up context.
+5. **On `DONE`/`BLOCKED`** the real outcome - result, files touched, verification, deviations,
+   follow-ups, or for `BLOCKED` the exact blocker and what is needed to clear it - goes into the
+   linked entry; `description` gets the closing line (e.g. "Готово: эндпоинт одной задачи и
+   автопрогресс, детали в спеке").
 
-**When moving it to `DONE`/`BLOCKED`, the `description` is rewritten (not appended to by hand -
-`agent_task_update` replaces the field) to contain, in this order:**
+**Red flags - the subtask is broken, fix it:**
 
-1. **Result** - what actually changed, in prose.
-2. **Files touched** - a list of `path` entries with a half-line each on what changed in it.
-3. **Verification** - the command/test that was run and its outcome, or why nothing was run.
-4. **Deviations** - where the implementation differed from the spec above, and why.
-5. **Follow-ups / blocker** - what's left, or for `BLOCKED` the exact reason and what's needed.
+- A `description` carrying the full spec or the full result. That was the previous contract and is
+  no longer how this works.
+- A subtask moved to `DONE` with no linked spec, or with a spec that still describes only what was
+  planned and says nothing about what happened.
+- A spec entry saved without `taskKey`, invisible from the task page.
+- Progress that exists only in the conversation instead of the entry.
 
-A description may *additionally* link a related entry with `[[entry-name]]` for bulk material -
-and only these count as bulk: the Phase 1/Phase 2 reports, a raw research dump, a long reference
-listing (40+ lines of findings). Everything from the two lists above still stays inline, so the
-card is understandable without opening anything. A `description` that is a bare `[[link]]`, a
-link plus one line, a path to a file, or empty on a `DONE` subtask is a broken subtask - fix it.
+One unit of work means one spec entry, updated in place - check for a near-duplicate
+(`memory_search`/`memory_list` with `taskKey` set) before creating another. Inside the spec, a
+`[[entry-name]]` link is still the right way to point at the Phase 1/Phase 2 reports or a raw
+research dump.
 
-When you do save such an entry, pass the same `projectScope`/`taskKey` as the subtask: the
-dashboard only resolves `[[links]]` in a subtask description against that task's own entries, and
-an entry saved without them isn't reachable from the task page at all. Check for a near-duplicate
-first (`memory_search`/`memory_list` with `taskKey` set) before creating a new entry.
+## Progress is computed, never typed
+
+A task's progress bar and the ring on its card are derived from this board: the share of its
+subtasks that are `DONE`, with `TODO`/`IN_PROGRESS`/`BLOCKED` all counting as not done. There is
+no progress field to set - moving a subtask's status *is* how progress is reported, which is
+another reason a subtask must never be left silently `IN_PROGRESS`.
+
+A task that is abandoned rather than finished gets `task_cancel(projectScope, taskKey, reason?)`,
+not `task_close` - the dashboard then shows a red cross instead of a stale progress ring, and the
+reason belongs in the task's own MD spec.
 
 ## When this runs
 
@@ -106,9 +122,8 @@ a multi-step task from now on.
    large or architecturally uncertain task, invoke the `task-planner` skill to get a reviewed
    plan; for a smaller task, a lighter inline analysis is enough. The plan must name, for every
    planned subtask: its title, the files it owns, its dependencies, and which subtasks it can run
-   in parallel with (Phase 2 steps 5-6). Write the plan into the subtask's
-   `description` via `agent_task_update` following the description contract above, then
-   `status: "DONE"`.
+   in parallel with (Phase 2 steps 5-6). Save the plan as this subtask's MD spec and link it per
+   the spec contract above, leave the one-line summary in `description`, then `status: "DONE"`.
 2. **Build and save the Phase 1 (planning) report.** Invoke the `agent-task-report` skill with
    `reportKind: "planning"`, the task title/description, and the architecture/plan content from
    step 1. It returns the dashboard link to the saved report.
@@ -124,7 +139,7 @@ a multi-step task from now on.
 
 4. **Create the whole implementation board up front.** One
    `agent_task_create(type: "IMPLEMENTATION")` per concrete step of the confirmed plan, each with
-   a full `description` per the contract above and `dependsOnId` set wherever a step genuinely
+   its own linked MD spec per the contract above and `dependsOnId` set wherever a step genuinely
    needs another one finished first. Creating them all now (not one at a time as you go) is what
    makes the dependency graph - and therefore parallelism - visible.
 5. **Group the board into waves.** A wave is the set of subtasks that are claimable at the same
@@ -139,19 +154,22 @@ a multi-step task from now on.
    collects.
    Each dispatch prompt contains these slots, in this order:
    1. **Identity** - `projectScope`, `taskKey`, `agentTaskId`, the subtask title.
-   2. **The subtask's `description`, verbatim** - the subagent has none of this conversation's
-      context, so its spec has to travel with it.
+   2. **The subtask's MD spec, verbatim** - the subagent has none of this conversation's context
+      and may have no MCP access at all, so the spec's text has to travel inside the prompt, not
+      as a link to it.
    3. **Ownership** - the files it may change, and an explicit list of files/areas owned by
       sibling subtasks that it must not touch.
    4. **Protocol** - claim first with `agent_task_claim(projectScope, taskKey, agentTaskId)`; if
-      that fails, stop and report "already claimed" instead of working; when finished,
-      `agent_task_update(status: "DONE" | "BLOCKED", description: ...)` filled in per the
-      description contract (the DONE/BLOCKED list above, quoted into the prompt).
+      that fails, stop and report "already claimed" instead of working; when finished, write the
+      outcome into the linked spec entry and `agent_task_update(status: "DONE" | "BLOCKED")` with
+      the closing line. An agent without MCP access reports back instead, and the orchestrator
+      writes both the entry and the status on its behalf - say so in the dispatch prompt.
    5. **Constraints** - no local notes/plan/report files (MCP only); don't touch other subtasks
       on the board; return a short summary of what changed to the orchestrator.
-7. **Collect the wave.** Re-read the board with `agent_task_list` - a subtask left `IN_PROGRESS`
-   or with an empty `description` means its agent didn't finish the protocol: finish it yourself
-   or mark it `BLOCKED` with the reason. Then start the next wave.
+7. **Collect the wave.** Re-read the board with `agent_task_list` - a subtask left `IN_PROGRESS`,
+   with no linked spec, or with a spec that never got its outcome written, means its agent didn't
+   finish the protocol: finish it yourself or mark it `BLOCKED` with the reason. Then start the
+   next wave.
    **Sequential fallback** - run a step inline instead of dispatching when, and only when: the
    wave has a single subtask; every remaining subtask touches the same files; or the harness has
    no subagent dispatch tool. Say which of these applied in the final report.
@@ -165,7 +183,7 @@ a multi-step task from now on.
    with `reportKind: "final"` and the real outcomes from steps 6-8, mark this subtask `DONE`
    once it returns the dashboard link, then call `task_close`.
 
-Before marking any subtask `DONE`, always fill `description` with the actual result - an empty
+Before marking any subtask `DONE`, always write the actual result into its linked spec - an empty
 `description` on a `DONE` subtask means the analytics this board exists to capture never got
 written down.
 
@@ -186,9 +204,9 @@ more than one session might grab the same `TODO` subtask at once.
    If it throws - someone else claimed it first, or its dependency just changed - that's expected
    under concurrency, not an error to surface to the user. Just pick the next candidate from step
    2's list (re-list if needed) and try again.
-4. **Do the work**, then `agent_task_update(status: "DONE" | "BLOCKED", description: ...)` - same
-   description contract as everywhere else; `agent_task_update` is still how you move something
-   you already own.
+4. **Do the work**, write the outcome into the subtask's linked spec, then
+   `agent_task_update(status: "DONE" | "BLOCKED")` with the closing line - same spec contract as
+   everywhere else; `agent_task_update` is still how you move something you already own.
 5. **Implementer, right after marking your own subtask `DONE`**: immediately
    `agent_task_create(type: "REVIEW", dependsOnId: <your own subtask's id>, title: "Review: <your title>")`
    so review work for that piece becomes claimable the moment it's ready - this is what lets a
