@@ -32,6 +32,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -325,29 +326,44 @@ public class PipelineService {
 
     /**
      * Reachability for data links uses the same adjacency PipelineRunService executes with:
-     * explicit routes if any step declares one, otherwise implicit orderIndex+1 chaining.
+     * explicit routes if any step declares one, otherwise implicit orderIndex+1 chaining - plus the
+     * implicit {@code LOOP_END -> LOOP} returns, which are edges nobody draws.
      */
     private List<List<Integer>> buildExecutionAdjacency(List<PipelineUpsertRequest.StepRequest> steps) {
         int n = steps.size();
-        List<List<Integer>> adjacency = new ArrayList<>();
+        List<List<Integer>> routeTargets = new ArrayList<>();
         for (int i = 0; i < n; i++) {
-            adjacency.add(new ArrayList<>());
+            routeTargets.add(new ArrayList<>());
         }
         boolean anyRoutes = steps.stream().anyMatch(s -> !s.routes().isEmpty());
         if (!anyRoutes) {
             for (int i = 0; i < n - 1; i++) {
-                adjacency.get(i).add(i + 1);
+                routeTargets.get(i).add(i + 1);
             }
-            return adjacency;
-        }
-        for (int i = 0; i < n; i++) {
-            for (PipelineUpsertRequest.StepRequest.RouteRequest route : steps.get(i).routes()) {
-                if (route.targetStepIndex() != null) {
-                    adjacency.get(i).add(route.targetStepIndex());
+        } else {
+            for (int i = 0; i < n; i++) {
+                for (PipelineUpsertRequest.StepRequest.RouteRequest route : steps.get(i).routes()) {
+                    if (route.targetStepIndex() != null && route.targetStepIndex() >= 0 && route.targetStepIndex() < n) {
+                        routeTargets.get(i).add(route.targetStepIndex());
+                    }
                 }
             }
         }
-        return adjacency;
+        return PipelineGraph.adjacency(routeTargets, implicitReturnTargets(steps));
+    }
+
+    /** Where each step hands control back without an edge: a LOOP_END's loop, null everywhere else. */
+    private List<Integer> implicitReturnTargets(List<PipelineUpsertRequest.StepRequest> steps) {
+        int n = steps.size();
+        List<Integer> returns = new ArrayList<>(n);
+        for (PipelineUpsertRequest.StepRequest step : steps) {
+            Integer start = step.regionStartStepIndex();
+            boolean closesALoop = step.contentType() == PipelineStep.ContentType.LOOP_END
+                    && start != null && start >= 0 && start < n
+                    && steps.get(start).contentType() == PipelineStep.ContentType.LOOP;
+            returns.add(closesALoop ? start : null);
+        }
+        return returns;
     }
 
     private Set<Integer> reachableFrom(int start, List<List<Integer>> adjacency) {
@@ -470,9 +486,92 @@ public class PipelineService {
                 validateLoopStep(step, incomingDataLinkCount[i]);
             } else if (step.contentType() == PipelineStep.ContentType.WATCHER) {
                 validateWatcherStep(step, incomingStepDataLinkCount[i]);
+            } else if (step.contentType() == PipelineStep.ContentType.LOOP_END) {
+                validateLoopEndStep(step, steps, incomingDataLinkCount[i]);
             }
         }
         validateNoWatcherInsideAParallelFanOut(steps);
+        validateLoopRegions(steps);
+    }
+
+    /**
+     * Rules that span more than one step, in the order the author needs to hear them: whose LOOP a
+     * LOOP_END claims (checked per step, above), then that no loop is claimed twice, then that each
+     * LOOP_END actually sits in the body it closes, then that every loop closes at all.
+     */
+    private void validateLoopRegions(List<PipelineUpsertRequest.StepRequest> steps) {
+        int n = steps.size();
+        Map<Integer, Integer> loopEndByLoopIndex = new HashMap<>();
+        for (int i = 0; i < n; i++) {
+            if (steps.get(i).contentType() != PipelineStep.ContentType.LOOP_END) {
+                continue;
+            }
+            int loopIndex = steps.get(i).regionStartStepIndex();
+            Integer existing = loopEndByLoopIndex.putIfAbsent(loopIndex, i);
+            if (existing != null) {
+                throw new PipelineInvalidGraphException(
+                        "Step '" + steps.get(i).title() + "': loop '" + steps.get(loopIndex).title()
+                                + "' already has a LOOP_END ('" + steps.get(existing).title()
+                                + "') - one loop returns from one place.");
+            }
+        }
+        List<List<Integer>> adjacency = buildExecutionAdjacency(steps);
+        for (Map.Entry<Integer, Integer> entry : loopEndByLoopIndex.entrySet()) {
+            int loopIndex = entry.getKey();
+            int endIndex = entry.getValue();
+            Set<Integer> body = PipelineGraph.loopBody(loopIndex, bodyTargetOf(steps.get(loopIndex)), adjacency);
+            if (!body.contains(endIndex)) {
+                throw new PipelineInvalidGraphException(
+                        "Step '" + steps.get(endIndex).title() + "' is not reachable from the body of the LOOP it "
+                                + "closes ('" + steps.get(loopIndex).title() + "') - wire it after the loop's last body step.");
+            }
+        }
+        for (int i = 0; i < n; i++) {
+            if (steps.get(i).contentType() != PipelineStep.ContentType.LOOP || loopEndByLoopIndex.containsKey(i)) {
+                continue;
+            }
+            int loopIndex = i;
+            boolean drawnBackEdge = steps.stream()
+                    .flatMap(step -> step.routes().stream())
+                    .anyMatch(route -> route.targetStepIndex() != null && route.targetStepIndex() == loopIndex);
+            if (!drawnBackEdge) {
+                throw new PipelineInvalidGraphException(
+                        "Step '" + steps.get(i).title() + "' is type LOOP and its body never returns: wire its last "
+                                + "step back into the loop, or close the body with a LOOP_END step.");
+            }
+        }
+    }
+
+    private Integer bodyTargetOf(PipelineUpsertRequest.StepRequest loop) {
+        return loop.routes().stream()
+                .filter(route -> route.outcomeKey() == null)
+                .map(PipelineUpsertRequest.StepRequest.RouteRequest::targetStepIndex)
+                .filter(Objects::nonNull)
+                .findFirst()
+                .orElse(null);
+    }
+
+    /**
+     * A LOOP_END has no routes of its own - its only transition is the implicit return - and carries
+     * no data, exactly like the JOIN it mirrors.
+     */
+    private void validateLoopEndStep(PipelineUpsertRequest.StepRequest step,
+                                      List<PipelineUpsertRequest.StepRequest> steps, int incomingDataLinkCount) {
+        Integer loopIndex = step.regionStartStepIndex();
+        if (loopIndex == null || loopIndex < 0 || loopIndex >= steps.size()
+                || steps.get(loopIndex).contentType() != PipelineStep.ContentType.LOOP) {
+            throw new PipelineInvalidGraphException(
+                    "Step '" + step.title() + "' is type LOOP_END and must point at a LOOP step - pick the loop it closes.");
+        }
+        if (!step.routes().isEmpty()) {
+            throw new PipelineInvalidGraphException(
+                    "Step '" + step.title() + "' is type LOOP_END and has no transitions of its own - the flow returns "
+                            + "to its loop, which decides where to go next.");
+        }
+        if (!step.outputs().isEmpty() || incomingDataLinkCount != 0) {
+            throw new PipelineInvalidGraphException(
+                    "Step '" + step.title() + "' is type LOOP_END and carries no data - it can have neither outputs nor incoming data links");
+        }
     }
 
     /**
@@ -503,21 +602,17 @@ public class PipelineService {
     /** Steps reachable from {@code start} without passing through a JOIN - i.e. the open fan-out. */
     private Set<Integer> reachableBeforeAnyJoin(int start, List<List<Integer>> adjacency,
                                                  List<PipelineUpsertRequest.StepRequest> steps) {
-        Set<Integer> visited = new HashSet<>();
-        Deque<Integer> stack = new ArrayDeque<>();
-        stack.push(start);
-        while (!stack.isEmpty()) {
-            int current = stack.pop();
-            for (int next : adjacency.get(current)) {
-                if (steps.get(next).contentType() == PipelineStep.ContentType.JOIN) {
-                    continue;
-                }
-                if (visited.add(next)) {
-                    stack.push(next);
-                }
+        return PipelineGraph.reachableUntil(start, adjacency, indexesOfKind(steps, PipelineStep.ContentType.JOIN));
+    }
+
+    private Set<Integer> indexesOfKind(List<PipelineUpsertRequest.StepRequest> steps, PipelineStep.ContentType kind) {
+        Set<Integer> indexes = new HashSet<>();
+        for (int i = 0; i < steps.size(); i++) {
+            if (steps.get(i).contentType() == kind) {
+                indexes.add(i);
             }
         }
-        return visited;
+        return indexes;
     }
 
     /** The outcome keys a watcher's routes must cover - fixed by its source and aspect. */

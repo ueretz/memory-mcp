@@ -892,4 +892,97 @@ class PipelineServiceTest {
         assertThat(saved.steps().get(5).delegationHint()).isEqualTo(PipelineStep.DelegationHint.CHEAPEST);
         assertThat(saved.steps().get(6).regionStartStepOrderIndex()).isEqualTo(4);
     }
+
+    // ---- Loop regions (V24) -------------------------------------------------------------------
+
+    private PipelineUpsertRequest.StepRequest loop(String title, int max, Integer bodyTarget, Integer doneTarget) {
+        return step(title, PipelineStep.ContentType.LOOP, null,
+                List.of(route(null, bodyTarget), route("done", doneTarget)), max, null, null);
+    }
+
+    private PipelineUpsertRequest.StepRequest loopEnd(String title, Integer loopIndex) {
+        return step(title, PipelineStep.ContentType.LOOP_END, null, List.of(), null, loopIndex, null);
+    }
+
+    @Test
+    void loopEndMustPointAtALoopStep() {
+        PipelineUpsertRequest request = withSteps("loop-end-1",
+                loop("Цикл", 2, 1, null),
+                prompt("Тело", "do", List.of(route(null, 2))),
+                loopEnd("Конец цикла", 1));
+
+        assertThatThrownBy(() -> pipelineService.create(request, "Tester"))
+                .isInstanceOf(PipelineInvalidGraphException.class)
+                .hasMessageContaining("is type LOOP_END and must point at a LOOP step");
+    }
+
+    @Test
+    void loopEndMustPointAtAnExistingStep() {
+        PipelineUpsertRequest request = withSteps("loop-end-2",
+                loop("Цикл", 2, 1, null),
+                prompt("Тело", "do", List.of(route(null, 2))),
+                loopEnd("Конец цикла", 99));
+
+        assertThatThrownBy(() -> pipelineService.create(request, "Tester"))
+                .isInstanceOf(PipelineInvalidGraphException.class)
+                .hasMessageContaining("is type LOOP_END and must point at a LOOP step");
+    }
+
+    @Test
+    void oneLoopTakesAtMostOneLoopEnd() {
+        PipelineUpsertRequest request = withSteps("loop-end-3",
+                loop("Цикл", 2, 1, null),
+                step("Развилка", PipelineStep.ContentType.PARALLEL, null, List.of(route(null, 2), route(null, 3)), null, null, null),
+                loopEnd("Конец A", 0),
+                loopEnd("Конец B", 0));
+
+        assertThatThrownBy(() -> pipelineService.create(request, "Tester"))
+                .isInstanceOf(PipelineInvalidGraphException.class)
+                .hasMessageContaining("already has a LOOP_END");
+    }
+
+    @Test
+    void loopEndMustBeReachableFromItsLoopBody() {
+        PipelineUpsertRequest request = withSteps("loop-end-4",
+                loop("Цикл", 2, 1, 2),
+                prompt("Тело", "do", List.of(route(null, 0))),
+                prompt("После цикла", "report", List.of(route(null, 3))),
+                loopEnd("Конец цикла", 0));
+
+        assertThatThrownBy(() -> pipelineService.create(request, "Tester"))
+                .isInstanceOf(PipelineInvalidGraphException.class)
+                .hasMessageContaining("is not reachable from the body of the LOOP");
+    }
+
+    @Test
+    void loopMustBeClosedEitherByAnEdgeOrByALoopEnd() {
+        PipelineUpsertRequest request = withSteps("loop-end-5",
+                loop("Цикл", 2, 1, null),
+                prompt("Тело", "do", List.of(route(null, null))));
+
+        assertThatThrownBy(() -> pipelineService.create(request, "Tester"))
+                .isInstanceOf(PipelineInvalidGraphException.class)
+                .hasMessageContaining("is type LOOP and its body never returns");
+    }
+
+    @Test
+    void loopClosedByALoopEndSavesWithoutABackEdge() {
+        PipelineDetail saved = pipelineService.create(withSteps("loop-end-6",
+                loop("Цикл", 3, 1, null),
+                prompt("Тело", "do", List.of(route(null, 2))),
+                loopEnd("Конец цикла", 0)), "Tester");
+
+        assertThat(saved.steps()).hasSize(3);
+        assertThat(saved.steps().get(2).regionStartStepOrderIndex()).isEqualTo(0);
+    }
+
+    @Test
+    void loopClosedByADrawnBackEdgeStillSaves() {
+        PipelineDetail saved = pipelineService.create(withSteps("loop-end-7",
+                loop("Цикл", 3, 1, 2),
+                prompt("Тело", "do", List.of(route(null, 0))),
+                prompt("Отчёт", "report", List.of(route(null, null)))), "Tester");
+
+        assertThat(saved.steps()).hasSize(3);
+    }
 }
