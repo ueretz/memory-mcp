@@ -161,7 +161,11 @@ export interface SettingSummary {
 }
 
 export type PipelineParameterType = 'STRING' | 'NUMBER' | 'BOOLEAN'
-export type PipelineStepContentType = 'PROMPT' | 'MD_FILE' | 'CONDITION' | 'VARIABLE' | 'PARALLEL' | 'JOIN' | 'LOOP' | 'WATCHER'
+export type PipelineStepContentType =
+  | 'PROMPT' | 'MD_FILE' | 'CONDITION' | 'VARIABLE' | 'PARALLEL' | 'JOIN' | 'LOOP' | 'WATCHER'
+  | 'LOOP_END' | 'PROMPT_LOOP' | 'ORCHESTRATOR' | 'ORCHESTRATOR_END'
+/** Author's hint about who a delegated step should go to; the director decides when it is null. */
+export type PipelineDelegationHint = 'CHEAPEST' | 'BALANCED' | 'SELF'
 export type PipelineWatchSource = 'GITLAB_MR' | 'COMMAND'
 export type PipelineWatchAspect = 'PIPELINE' | 'REVIEW'
 export type PipelineConditionOperator = 'EQUALS' | 'GREATER_THAN' | 'LESS_THAN' | 'GREATER_OR_EQUAL' | 'LESS_OR_EQUAL'
@@ -241,6 +245,9 @@ export interface PipelineStepView {
   watchAspect: PipelineWatchAspect | null
   checkIntervalSeconds: number | null
   watchTimeoutSeconds: number | null
+  /** orderIndex of the step opening the region this one closes (LOOP_END, ORCHESTRATOR_END). */
+  regionStartStepOrderIndex: number | null
+  delegationHint: PipelineDelegationHint | null
 }
 
 export interface PipelineSummary {
@@ -313,6 +320,9 @@ export interface PipelineUpsertStep {
   watchAspect: PipelineWatchAspect | null
   checkIntervalSeconds: number | null
   watchTimeoutSeconds: number | null
+  /** Index in this same step list of the step opening the region this one closes. */
+  regionStartStepIndex: number | null
+  delegationHint: PipelineDelegationHint | null
 }
 
 export interface PipelineUpsertRequest {
@@ -368,6 +378,13 @@ export interface PipelineRunStepView {
   watchLastState: string | null
   watchDeadlineAt: string | null
   watchExpired: boolean | null
+  /** LOOP and PROMPT_LOOP steps only: the iteration this step is on, and how many it gets. */
+  loopIteration: number | null
+  loopMaxIterations: number | null
+  /** Whether the leading model should delegate this step, with the author's hint and attempt budget. */
+  orchestrated: boolean | null
+  delegationHint: PipelineDelegationHint | null
+  orchestratorMaxAttempts: number | null
 }
 
 export interface PipelineRunDetail {

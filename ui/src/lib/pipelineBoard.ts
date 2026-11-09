@@ -1,6 +1,7 @@
 import type {
   PipelineConditionMode,
   PipelineConditionOperator,
+  PipelineDelegationHint,
   PipelineDetail,
   PipelineParameterType,
   PipelineStepContentType,
@@ -47,6 +48,9 @@ export interface BoardStep {
   watchAspect: PipelineWatchAspect | null
   checkIntervalSeconds: number | null
   watchTimeoutSeconds: number | null
+  /** Index of the block that opens the region this block closes (LOOP_END, ORCHESTRATOR_END). */
+  regionStartStepIndex: number | null
+  delegationHint: PipelineDelegationHint | null
 }
 
 /** A wire from the board's "input parameters" node into a step's data input. */
@@ -82,8 +86,28 @@ export const BLOCK_KINDS: BlockKindMeta[] = [
   { kind: 'VARIABLE', label: 'Переменная', description: 'Фиксированное значение как выход', icon: 'variable', color: '#0d9488' },
   { kind: 'PARALLEL', label: 'Параллельно', description: 'Запускает все ветки одновременно, каждую — суб-агентом', icon: 'fanout', color: '#0ea5e9' },
   { kind: 'JOIN', label: 'Ожидать все', description: 'Продолжает, когда все ветки завершились', icon: 'join', color: '#6366f1' },
-  { kind: 'LOOP', label: 'Цикл', description: 'Повторяет блоки по обратному переходу, не больше заданного числа раз', icon: 'refresh', color: '#c026d3' },
+  { kind: 'LOOP', label: 'Цикл', description: 'Повторяет тело заданное число раз; тело замыкает блок «Конец цикла»', icon: 'refresh', color: '#c026d3' },
+  { kind: 'LOOP_END', label: 'Конец цикла', description: 'Замыкает тело цикла: поток сам возвращается в начало', icon: 'refresh', color: '#c026d3' },
+  { kind: 'PROMPT_LOOP', label: 'Цикл с промптом', description: 'Повторяет один промпт заданное число раз сам в себе', icon: 'refresh', color: '#a21caf' },
+  { kind: 'ORCHESTRATOR', label: 'Оркестратор', description: 'Дорогая модель раздаёт шаги региона дешёвым и принимает работу', icon: 'fanout', color: '#ea580c' },
+  { kind: 'ORCHESTRATOR_END', label: 'Приёмка', description: 'Конец региона оркестрации: дальше работает сам ведущий агент', icon: 'join', color: '#ea580c' },
   { kind: 'WATCHER', label: 'Наблюдатель', description: 'Ждёт внешнее событие и ветвится по результату', icon: 'eye', color: '#0891b2' },
+]
+
+/** Blocks that only mark a region boundary: no prompt, no data, at most one transition. */
+export const REGION_MARKERS: PipelineStepContentType[] = ['LOOP_END', 'ORCHESTRATOR', 'ORCHESTRATOR_END']
+
+/** The kind a region marker must point at, for the "which block does this close?" picker. */
+export const REGION_START_KIND: Partial<Record<PipelineStepContentType, PipelineStepContentType>> = {
+  LOOP_END: 'LOOP',
+  ORCHESTRATOR_END: 'ORCHESTRATOR',
+}
+
+export const DELEGATION_HINTS: { value: PipelineDelegationHint | null; label: string }[] = [
+  { value: null, label: 'решает директор' },
+  { value: 'CHEAPEST', label: 'подешевле' },
+  { value: 'BALANCED', label: 'средняя' },
+  { value: 'SELF', label: 'только директор' },
 ]
 
 /**
@@ -144,17 +168,20 @@ export const TEMPLATE_TOKEN = /\{\{[^}]+\}\}/
 
 /** Can this kind of step have named (outcome-keyed) transition ports added by the author? */
 export function supportsNamedBranches(kind: PipelineStepContentType): boolean {
-  return kind === 'PROMPT' || kind === 'MD_FILE'
+  return kind === 'PROMPT' || kind === 'MD_FILE' || kind === 'PROMPT_LOOP'
 }
+
+/** Blocks that carry no data at all: pure control flow or region boundaries. */
+const CARRIES_NO_DATA: PipelineStepContentType[] = ['PARALLEL', 'JOIN', 'LOOP', 'LOOP_END', 'ORCHESTRATOR', 'ORCHESTRATOR_END']
 
 /** Does this kind of step take a data input wire? */
 export function acceptsDataInput(kind: PipelineStepContentType): boolean {
-  return kind !== 'VARIABLE' && kind !== 'PARALLEL' && kind !== 'JOIN' && kind !== 'LOOP'
+  return kind !== 'VARIABLE' && !CARRIES_NO_DATA.includes(kind)
 }
 
 /** Does this kind of step publish data outputs at all? */
 export function hasOutputs(kind: PipelineStepContentType): boolean {
-  return kind !== 'CONDITION' && kind !== 'PARALLEL' && kind !== 'JOIN' && kind !== 'LOOP'
+  return kind !== 'CONDITION' && !CARRIES_NO_DATA.includes(kind)
 }
 
 /** Can the author add/remove transition ports? (PROMPT/MD_FILE add keyed branches, PARALLEL adds unkeyed ones.) */
@@ -164,7 +191,7 @@ export function supportsAddingPorts(kind: PipelineStepContentType): boolean {
 
 /** Can the author add/remove data outputs on this kind of step? */
 export function hasEditableOutputs(kind: PipelineStepContentType): boolean {
-  return kind === 'PROMPT' || kind === 'MD_FILE' || kind === 'WATCHER'
+  return kind === 'PROMPT' || kind === 'MD_FILE' || kind === 'WATCHER' || kind === 'PROMPT_LOOP'
 }
 
 export function stepDisplayTitle(step: { title: string }, index: number): string {
@@ -186,11 +213,13 @@ export function newBoardStep(kind: PipelineStepContentType, position: { x: numbe
     conditionOperator: null,
     conditionValue: null,
     conditionMode: 'VALUE',
-    maxIterations: kind === 'LOOP' ? 5 : null,
+    maxIterations: kind === 'LOOP' || kind === 'PROMPT_LOOP' ? 5 : kind === 'ORCHESTRATOR' ? 2 : null,
     watchSource: kind === 'WATCHER' ? 'GITLAB_MR' : null,
     watchAspect: kind === 'WATCHER' ? 'PIPELINE' : null,
     checkIntervalSeconds: kind === 'WATCHER' ? 60 : null,
     watchTimeoutSeconds: kind === 'WATCHER' ? 3600 : null,
+    regionStartStepIndex: null,
+    delegationHint: null,
   }
   if (kind === 'CONDITION') {
     step.conditionOperator = 'EQUALS'
@@ -224,6 +253,11 @@ export function ensureFixedPorts(step: BoardStep): void {
     ]
     return
   }
+  if (step.contentType === 'LOOP_END') {
+    // Its only transition is the implicit return to its loop, which the server walks.
+    step.routes = []
+    return
+  }
   if (step.contentType === 'WATCHER') {
     // The port set follows the source/aspect; a port whose key survives the change keeps its wire,
     // the rest (and their wires) go, and newly appearing keys start unwired.
@@ -241,7 +275,8 @@ export function ensureFixedPorts(step: BoardStep): void {
   const named = step.routes.filter((r) => r.outcomeKey !== null)
   const defaults = step.routes.filter((r) => r.outcomeKey === null)
   const defaultRoute = defaults[0] ?? { outcomeKey: null, target: null }
-  step.routes = step.contentType === 'VARIABLE' || step.contentType === 'JOIN' ? [defaultRoute] : [...named, defaultRoute]
+  const singlePortKinds: PipelineStepContentType[] = ['VARIABLE', 'JOIN', 'ORCHESTRATOR', 'ORCHESTRATOR_END']
+  step.routes = singlePortKinds.includes(step.contentType) ? [defaultRoute] : [...named, defaultRoute]
 }
 
 export function fromDetail(pipeline: PipelineDetail): BoardStep[] {
@@ -271,6 +306,8 @@ export function fromDetail(pipeline: PipelineDetail): BoardStep[] {
     watchAspect: s.watchAspect,
     checkIntervalSeconds: s.checkIntervalSeconds,
     watchTimeoutSeconds: s.watchTimeoutSeconds,
+    regionStartStepIndex: s.regionStartStepOrderIndex,
+    delegationHint: s.delegationHint,
   }))
   materializeLegacyChain(steps)
   steps.forEach(ensureFixedPorts)
@@ -287,7 +324,7 @@ export function fromDetail(pipeline: PipelineDetail): BoardStep[] {
 export function materializeLegacyChain(steps: BoardStep[]): void {
   if (steps.length === 0 || steps.some((s) => s.routes.length > 0)) return
   steps.forEach((step, index) => {
-    if (step.contentType === 'CONDITION') return
+    if (step.contentType === 'CONDITION' || step.contentType === 'LOOP_END') return
     step.routes = [{ outcomeKey: null, target: index + 1 < steps.length ? index + 1 : 'end' }]
   })
 }
@@ -322,7 +359,8 @@ export function toUpsertSteps(steps: BoardStep[]): PipelineUpsertStep[] {
         // Unwired ports are board-only, except fixed branches that the backend requires even when
         // they end the run: CONDITION's true/false and LOOP's body/done.
         .filter((r) => r.target !== null || step.contentType === 'CONDITION' || step.contentType === 'LOOP'
-          || step.contentType === 'WATCHER')
+          || step.contentType === 'WATCHER' || step.contentType === 'ORCHESTRATOR'
+          || step.contentType === 'ORCHESTRATOR_END')
         .map((r) => ({
           outcomeKey: r.outcomeKey && r.outcomeKey.trim() !== '' ? r.outcomeKey.trim() : null,
           targetStepIndex: r.target === 'end' || r.target === null ? null : r.target,
@@ -337,6 +375,8 @@ export function toUpsertSteps(steps: BoardStep[]): PipelineUpsertStep[] {
       watchAspect: step.watchAspect,
       checkIntervalSeconds: step.checkIntervalSeconds,
       watchTimeoutSeconds: step.watchTimeoutSeconds,
+      regionStartStepIndex: step.regionStartStepIndex,
+      delegationHint: step.delegationHint,
     }
   })
 }
@@ -360,6 +400,10 @@ export function removeStepAt(steps: BoardStep[], index: number, paramLinks: Boar
         ...l,
         targetStepIndex: l.targetStepIndex !== null && l.targetStepIndex > index ? l.targetStepIndex - 1 : l.targetStepIndex,
       }))
+    // A marker whose opening block is gone loses its pointer rather than silently closing the
+    // block that slid into that index.
+    if (step.regionStartStepIndex === index) step.regionStartStepIndex = null
+    else if (step.regionStartStepIndex !== null && step.regionStartStepIndex > index) step.regionStartStepIndex--
   })
 }
 
@@ -388,17 +432,92 @@ function wiredAdjacency(steps: BoardStep[]): number[][] {
   )
 }
 
+/**
+ * The adjacency the engine actually walks: drawn transitions plus the implicit `LOOP_END -> LOOP`
+ * return nobody draws. Reachability questions use this; `wouldCreateCycle` deliberately does NOT,
+ * because inside a loop body every step already reaches every other through that return, and asking
+ * it would refuse every new wire in the body.
+ */
+export function executionAdjacency(steps: BoardStep[]): number[][] {
+  const adjacency = wiredAdjacency(steps)
+  steps.forEach((step, i) => {
+    const start = step.regionStartStepIndex
+    if (step.contentType !== 'LOOP_END' || start === null) return
+    if (steps[start]?.contentType === 'LOOP' && !adjacency[i].includes(start)) adjacency[i].push(start)
+  })
+  return adjacency
+}
+
+/** The marker closing the region `startIndex` opens, or -1 when the author has not placed one. */
+export function regionEndIndex(steps: BoardStep[], startIndex: number): number {
+  const endKind: PipelineStepContentType = steps[startIndex]?.contentType === 'LOOP' ? 'LOOP_END' : 'ORCHESTRATOR_END'
+  return steps.findIndex((s) => s.contentType === endKind && s.regionStartStepIndex === startIndex)
+}
+
+/**
+ * Steps an ORCHESTRATOR delegates: reachable from it without going past its «Приёмка». The end
+ * marker itself is excluded - the badge belongs on the work, not on the boundary.
+ */
+export function regionStepsOf(steps: BoardStep[], orchestratorIndex: number): Set<number> {
+  const endIndex = regionEndIndex(steps, orchestratorIndex)
+  const adjacency = executionAdjacency(steps)
+  const region = new Set<number>()
+  const stack = [orchestratorIndex]
+  while (stack.length) {
+    const current = stack.pop()!
+    for (const next of adjacency[current] ?? []) {
+      if (region.has(next)) continue
+      region.add(next)
+      if (next !== endIndex) stack.push(next)
+    }
+  }
+  region.delete(orchestratorIndex)
+  if (endIndex >= 0) region.delete(endIndex)
+  return region
+}
+
+/** Every step inside any orchestrated region, which is where a delegation hint may be set. */
+export function orchestratedSteps(steps: BoardStep[]): Set<number> {
+  const all = new Set<number>()
+  steps.forEach((step, i) => {
+    if (step.contentType !== 'ORCHESTRATOR') return
+    regionStepsOf(steps, i).forEach((index) => all.add(index))
+  })
+  return all
+}
+
+/** The body of a loop: its body route onward, without passing through the loop again. */
+export function loopBodyOf(steps: BoardStep[], loopIndex: number): Set<number> {
+  const bodyTarget = steps[loopIndex]?.routes.find((r) => r.outcomeKey === null)?.target
+  if (typeof bodyTarget !== 'number') return new Set()
+  const adjacency = executionAdjacency(steps)
+  const body = new Set<number>([bodyTarget])
+  const stack = [bodyTarget]
+  while (stack.length) {
+    const current = stack.pop()!
+    for (const next of adjacency[current] ?? []) {
+      if (next === loopIndex || body.has(next)) continue
+      body.add(next)
+      stack.push(next)
+    }
+  }
+  return body
+}
+
 export function analyzeGraph(steps: BoardStep[]): GraphAnalysis {
   const n = steps.length
   const inDegree = new Array<number>(n).fill(0)
   const outDegree = new Array<number>(n).fill(0)
-  const adjacency = wiredAdjacency(steps)
+  const adjacency = executionAdjacency(steps)
   steps.forEach((step, i) => {
     step.routes.forEach((r) => {
       if (r.target === null) return
       outDegree[i]++
       if (typeof r.target === 'number' && r.target >= 0 && r.target < n) inDegree[r.target]++
     })
+    // A LOOP_END has no drawn route, but it does lead somewhere - without this it reads as a step
+    // with no way out and the "dead end" warnings fire on a correctly wired loop.
+    if (step.contentType === 'LOOP_END' && step.regionStartStepIndex !== null) outDegree[i]++
   })
   const entryInDegree = [...inDegree]
   steps.forEach((step, i) => step.routes.forEach((route) => {
@@ -456,7 +575,7 @@ export function wouldCreateCycle(steps: BoardStep[], from: number, to: number): 
  * back to a single step worked by the leading agent. Mirrors PipelineService.reachableBeforeAnyJoin.
  */
 export function reachableBeforeAnyJoin(steps: BoardStep[], start: number): Set<number> {
-  const adjacency = wiredAdjacency(steps)
+  const adjacency = executionAdjacency(steps)
   const seen = new Set<number>()
   const stack = [start]
   while (stack.length) {
@@ -474,7 +593,7 @@ export function reachableBeforeAnyJoin(steps: BoardStep[], start: number): Set<n
 
 export function isAncestor(steps: BoardStep[], source: number, target: number): boolean {
   if (source === target) return false
-  const adjacency = wiredAdjacency(steps)
+  const adjacency = executionAdjacency(steps)
   const stack = [source]
   const seen = new Set<number>([source])
   while (stack.length) {
@@ -530,6 +649,7 @@ export function collectIssues(steps: BoardStep[], paramLinks: BoardParamLink[] =
   paramLinks.forEach((l) => {
     if (l.targetStepIndex >= 0 && l.targetStepIndex < steps.length) incomingData[l.targetStepIndex]++
   })
+  const orchestrated = orchestratedSteps(steps)
   steps.forEach((step, i) => {
     const title = stepDisplayTitle(step, i)
     if (!reachable.has(i) && roots.length > 0 && steps.length > 1) {
@@ -605,6 +725,72 @@ export function collectIssues(steps: BoardStep[], paramLinks: BoardParamLink[] =
       if (step.routes.find((r) => r.outcomeKey === 'done')?.target === null) {
         issues.push({ stepIndex: i, severity: 'warning', text: `«${title}»: выход при лимите не подключён — этот путь завершится` })
       }
+      const ends = steps.filter((s) => s.contentType === 'LOOP_END' && s.regionStartStepIndex === i).length
+      const backEdge = steps.some((s) => s.routes.some((r) => r.target === i))
+      if (ends === 0 && !backEdge) {
+        issues.push({
+          stepIndex: i,
+          severity: 'error',
+          text: `«${title}»: тело цикла не замкнуто — поставьте блок «Конец цикла» в конце тела или верните последний шаг в этот блок`,
+        })
+      }
+      if (ends > 1) {
+        issues.push({ stepIndex: i, severity: 'error', text: `«${title}»: на один цикл только один «Конец цикла»` })
+      }
+    }
+    if (step.contentType === 'LOOP_END') {
+      const start = step.regionStartStepIndex
+      if (start === null || steps[start]?.contentType !== 'LOOP') {
+        issues.push({ stepIndex: i, severity: 'error', text: `«${title}»: выберите цикл, который этот блок замыкает` })
+      } else if (!loopBodyOf(steps, start).has(i)) {
+        issues.push({
+          stepIndex: i,
+          severity: 'error',
+          text: `«${title}»: блок не стоит в теле цикла «${stepDisplayTitle(steps[start], start)}» — подключите его после последнего шага тела`,
+        })
+      }
+    }
+    if (step.contentType === 'PROMPT_LOOP') {
+      if (!step.promptText || !step.promptText.trim()) {
+        issues.push({ stepIndex: i, severity: 'error', text: `«${title}»: напишите промпт, который блок будет повторять` })
+      }
+      if (step.maxIterations === null || step.maxIterations < 1 || step.maxIterations > 100) {
+        issues.push({ stepIndex: i, severity: 'error', text: `«${title}»: задайте число итераций от 1 до 100` })
+      }
+    }
+    if (step.contentType === 'ORCHESTRATOR') {
+      if (step.maxIterations === null || step.maxIterations < 1 || step.maxIterations > 5) {
+        issues.push({ stepIndex: i, severity: 'error', text: `«${title}»: задайте число попыток на шаг от 1 до 5` })
+      }
+      const endIndex = regionEndIndex(steps, i)
+      if (endIndex < 0) {
+        issues.push({ stepIndex: i, severity: 'error', text: `«${title}»: поставьте блок «Приёмка» в конце региона — без него не видно, что отдаётся дешёвым моделям` })
+      } else {
+        const region = regionStepsOf(steps, i)
+        if (region.size === 0) {
+          issues.push({ stepIndex: i, severity: 'warning', text: `«${title}»: между оркестратором и приёмкой нет ни одного шага — раздавать нечего` })
+        }
+        for (const inside of region) {
+          if (steps[inside].contentType === 'ORCHESTRATOR') {
+            issues.push({ stepIndex: inside, severity: 'error', text: `«${stepDisplayTitle(steps[inside], inside)}»: оркестратор внутри оркестратора — директор на прогон один` })
+          }
+        }
+      }
+      const fanOut = steps.findIndex((other, j) => other.contentType === 'PARALLEL' && reachableBeforeAnyJoin(steps, j).has(i))
+      if (fanOut >= 0) {
+        issues.push({
+          stepIndex: i,
+          severity: 'error',
+          text: `«${title}»: оркестратор не может стоять внутри развилки «${stepDisplayTitle(steps[fanOut], fanOut)}» — регион ведёт одна модель, а ветки выполняют суб-агенты. Перенесите его за блок «Ожидать все»`,
+        })
+      }
+    }
+    if (step.contentType === 'ORCHESTRATOR_END' && (step.regionStartStepIndex === null
+        || steps[step.regionStartStepIndex]?.contentType !== 'ORCHESTRATOR')) {
+      issues.push({ stepIndex: i, severity: 'error', text: `«${title}»: выберите оркестратор, регион которого этот блок закрывает` })
+    }
+    if (step.delegationHint !== null && !orchestrated.has(i)) {
+      issues.push({ stepIndex: i, severity: 'error', text: `«${title}»: подсказка «кому» работает только внутри региона оркестрации` })
     }
     if (step.contentType === 'PARALLEL' && !step.routes.some((r) => typeof r.target === 'number')) {
       issues.push({ stepIndex: i, severity: 'error', text: `«${title}»: ни одна ветка не подключена к блоку` })

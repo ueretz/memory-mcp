@@ -64,6 +64,8 @@ async function loadForEdit() {
     watchAspect: s.watchAspect,
     checkIntervalSeconds: s.checkIntervalSeconds,
     watchTimeoutSeconds: s.watchTimeoutSeconds,
+    regionStartStepIndex: s.regionStartStepOrderIndex,
+    delegationHint: s.delegationHint,
   }))
 }
 
