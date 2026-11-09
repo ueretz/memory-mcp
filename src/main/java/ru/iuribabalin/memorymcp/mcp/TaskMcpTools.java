@@ -42,7 +42,7 @@ public class TaskMcpTools {
         if (specEntryName != null) {
             TaskDetail detail = taskService.setSpec(projectScope, taskKey, specEntryName);
             result = new TaskSummary(detail.taskKey(), detail.title(), detail.source(), detail.status(),
-                    detail.progress(), detail.spec().name(), detail.updatedAt());
+                    detail.progress(), detail.spec() == null ? null : detail.spec().name(), detail.updatedAt());
         }
         usageEventRecorder.record(UsageEvent.Action.TASK_START, null, projectScope, taskKey, null);
         return result;
