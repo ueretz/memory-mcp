@@ -829,4 +829,68 @@ class PipelineRunServiceTest {
         assertThat(result.deadlineAt()).isBetween(
                 Instant.now().plusSeconds(3500), Instant.now().plusSeconds(3700));
     }
+
+    // ---- Loop regions (V24): body wired as a chain, the server owns the return ------------------
+
+    /** LOOP(max) -> «Прогнать тесты» -> «Починить» -> LOOP_END; LOOP's done route -> «Отчёт». */
+    private void createLoopRegionPipeline(String slug, int maxIterations) {
+        pipelineService.create(new PipelineUpsertRequest(
+                slug, "Loop region", "desc", "pipeline-run-svc-test-project", List.of(),
+                List.of(
+                        new PipelineUpsertRequest.StepRequest("Цикл", PipelineStep.ContentType.LOOP, null,
+                                null, null, 0, 0,
+                                List.of(new PipelineUpsertRequest.StepRequest.RouteRequest(null, 1),
+                                        new PipelineUpsertRequest.StepRequest.RouteRequest("done", 4)),
+                                List.of(), List.of(), null, null, maxIterations),
+                        prompt("Прогнать тесты", List.of(new PipelineUpsertRequest.StepRequest.RouteRequest(null, 2))),
+                        prompt("Починить", List.of(new PipelineUpsertRequest.StepRequest.RouteRequest(null, 3))),
+                        new PipelineUpsertRequest.StepRequest("Конец цикла", PipelineStep.ContentType.LOOP_END, null,
+                                null, null, 0, 0, List.of(), List.of(), List.of(), null, null,
+                                PipelineStep.ConditionMode.VALUE, null, null, null, null, null, 0, null),
+                        prompt("Отчёт", List.of(new PipelineUpsertRequest.StepRequest.RouteRequest(null, null))))
+        ), "Tester");
+    }
+
+    @Test
+    void loopRegionRunsItsBodyOncePerIterationWithoutADrawnBackEdge() {
+        createLoopRegionPipeline("loop-region-1", 2);
+        PipelineRunDetail run = pipelineRunService.start("loop-region-1", "{}", "Tester");
+        assertThat(run.activeStepOrderIndexes()).containsExactly(1);
+
+        pipelineRunService.updateStep(run.id(), 1, PipelineRunStep.Status.DONE, "red", null, null);
+        run = pipelineRunService.updateStep(run.id(), 2, PipelineRunStep.Status.DONE, "fixed", null, null);
+
+        assertThat(run.activeStepOrderIndexes()).containsExactly(1);
+        assertThat(run.steps().get(1).status()).isEqualTo(PipelineRunStep.Status.PENDING);
+        assertThat(run.steps().get(0).note()).isEqualTo("Итерация 2 из 2");
+
+        pipelineRunService.updateStep(run.id(), 1, PipelineRunStep.Status.DONE, "green", null, null);
+        run = pipelineRunService.updateStep(run.id(), 2, PipelineRunStep.Status.DONE, "nothing to fix", null, null);
+
+        assertThat(run.activeStepOrderIndexes()).containsExactly(4);
+        assertThat(run.steps().get(0).note()).isEqualTo("Лимит итераций: 2 — выход из цикла");
+    }
+
+    @Test
+    void loopRegionBodyStepsCountEveryIteration() {
+        createLoopRegionPipeline("loop-region-2", 2);
+        PipelineRunDetail run = pipelineRunService.start("loop-region-2", "{}", "Tester");
+        for (int iteration = 0; iteration < 2; iteration++) {
+            pipelineRunService.updateStep(run.id(), 1, PipelineRunStep.Status.DONE, "ran", null, null);
+            run = pipelineRunService.updateStep(run.id(), 2, PipelineRunStep.Status.DONE, "fixed", null, null);
+        }
+
+        assertThat(run.steps().get(1).executionCount()).isEqualTo(2);
+        assertThat(run.steps().get(2).executionCount()).isEqualTo(2);
+    }
+
+    @Test
+    void loopRegionWhoseLoopStartsThePipelineHasTheLoopAsItsRoot() {
+        createLoopRegionPipeline("loop-region-3", 1);
+
+        PipelineRunDetail run = pipelineRunService.start("loop-region-3", "{}", "Tester");
+
+        assertThat(run.steps().get(0).contentType()).isEqualTo(PipelineStep.ContentType.LOOP);
+        assertThat(run.activeStepOrderIndexes()).containsExactly(1);
+    }
 }

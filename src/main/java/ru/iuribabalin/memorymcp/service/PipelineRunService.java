@@ -437,9 +437,7 @@ public class PipelineRunService {
             PipelineRunStep runStep = prepareStepForActivation(run, step, reactivatable.contains(index));
             boolean promptCondition = step.getContentType() == PipelineStep.ContentType.CONDITION
                     && step.getConditionMode() == PipelineStep.ConditionMode.PROMPT;
-            if (step.getContentType() != PipelineStep.ContentType.PROMPT
-                    && step.getContentType() != PipelineStep.ContentType.MD_FILE
-                    && step.getContentType() != PipelineStep.ContentType.WATCHER && !promptCondition) {
+            if (!isWorkedByClaude(step.getContentType()) && !promptCondition) {
                 active.remove(Integer.valueOf(index));
             }
             switch (step.getContentType()) {
@@ -456,6 +454,7 @@ public class PipelineRunService {
                 case PARALLEL -> executeParallelStep(run, step, orderedSteps).forEach(queue::add);
                 case JOIN -> enqueue(queue, executeJoinStep(run, step, orderedSteps));
                 case LOOP -> enqueue(queue, executeLoopStep(run, step));
+                case LOOP_END -> enqueue(queue, executeLoopEndStep(run, step, orderedSteps));
                 default -> {
                     if (runStep.getStatus() == PipelineRunStep.Status.PENDING && !active.contains(index)) {
                         active.add(index);
@@ -494,16 +493,7 @@ public class PipelineRunService {
     }
 
     private Set<Integer> loopCycleSteps(List<PipelineStep> orderedSteps) {
-        Map<Long, Integer> indexById = orderedSteps.stream()
-                .collect(Collectors.toMap(PipelineStep::getId, PipelineStep::getOrderIndex));
-        List<List<Integer>> adjacency = orderedSteps.stream().map(step -> {
-            List<Integer> targets = pipelineStepRouteRepository.findByStepId(step.getId()).stream()
-                    .map(PipelineStepRoute::getTargetStepId)
-                    .map(indexById::get)
-                    .filter(Objects::nonNull)
-                    .toList();
-            return targets;
-        }).toList();
+        List<List<Integer>> adjacency = executionAdjacency(orderedSteps);
         Set<Integer> result = new java.util.HashSet<>();
         for (PipelineStep loop : orderedSteps) {
             if (loop.getContentType() != PipelineStep.ContentType.LOOP) {
@@ -517,6 +507,29 @@ public class PipelineRunService {
             }
         }
         return result;
+    }
+
+    /**
+     * Route edges plus the implicit {@code LOOP_END -> LOOP} returns, in order index space. Built
+     * through PipelineGraph so the engine and the save-time validation agree on what the graph is.
+     */
+    private List<List<Integer>> executionAdjacency(List<PipelineStep> orderedSteps) {
+        Map<Long, Integer> indexById = orderedSteps.stream()
+                .collect(Collectors.toMap(PipelineStep::getId, PipelineStep::getOrderIndex));
+        List<List<Integer>> routeTargets = orderedSteps.stream()
+                .map(step -> pipelineStepRouteRepository.findByStepId(step.getId()).stream()
+                        .map(PipelineStepRoute::getTargetStepId)
+                        .map(indexById::get)
+                        .filter(Objects::nonNull)
+                        .toList())
+                .map(targets -> (List<Integer>) new ArrayList<>(targets))
+                .toList();
+        List<Integer> implicitReturns = orderedSteps.stream()
+                .map(step -> step.getContentType() == PipelineStep.ContentType.LOOP_END
+                        ? indexById.get(step.getRegionStartStepId())
+                        : null)
+                .toList();
+        return PipelineGraph.adjacency(routeTargets, implicitReturns);
     }
 
     private boolean reaches(List<List<Integer>> adjacency, int source, int target) {
@@ -551,6 +564,45 @@ public class PipelineRunService {
                 : "Итерация " + iteration + " из " + step.getMaxIterations());
         pipelineRunStepRepository.save(runStep);
         return resolveNextOrderIndex(run.getPipelineId(), step.getId(), step.getOrderIndex(), limitReached ? "done" : null);
+    }
+
+    /**
+     * Hands the flow back to the LOOP this step closes. The return is not a drawn route, so there is
+     * nothing to resolve an outcome against: the loop itself decides, on arrival, whether the next
+     * iteration starts or the done route is taken.
+     */
+    private Integer executeLoopEndStep(PipelineRun run, PipelineStep step, List<PipelineStep> orderedSteps) {
+        PipelineRunStep runStep = pipelineRunStepRepository.findByRunIdAndOrderIndex(run.getId(), step.getOrderIndex())
+                .orElseThrow(() -> new PipelineRunStepNotFoundException(run.getId(), step.getOrderIndex()));
+        PipelineStep loop = orderedSteps.stream()
+                .filter(candidate -> candidate.getId().equals(step.getRegionStartStepId()))
+                .filter(candidate -> candidate.getContentType() == PipelineStep.ContentType.LOOP)
+                .findFirst()
+                .orElse(null);
+        Instant now = Instant.now();
+        runStep.setStatus(PipelineRunStep.Status.DONE);
+        runStep.setStartedAt(now);
+        runStep.setFinishedAt(now);
+        if (loop == null) {
+            // The pipeline was saved while this run was in flight and the loop this step closed is
+            // gone. Ending the path beats throwing at the agent mid-run - same call as a watcher
+            // whose timeout configuration disappeared.
+            log.warn("LOOP_END step {} of run {} no longer points at a LOOP (its pipeline was edited mid-run); "
+                            + "ending this path instead of looping", step.getOrderIndex(), run.getId());
+            runStep.setNote("Цикл этого блока больше не существует — путь завершён");
+            pipelineRunStepRepository.save(runStep);
+            return null;
+        }
+        runStep.setNote("Возврат в цикл «" + loop.getTitle() + "»");
+        pipelineRunStepRepository.save(runStep);
+        return loop.getOrderIndex();
+    }
+
+    /** Steps the agent works on; everything else the server executes the moment it is reached. */
+    private static boolean isWorkedByClaude(PipelineStep.ContentType contentType) {
+        return contentType == PipelineStep.ContentType.PROMPT
+                || contentType == PipelineStep.ContentType.MD_FILE
+                || contentType == PipelineStep.ContentType.WATCHER;
     }
 
     private static void enqueue(Deque<Integer> queue, Integer index) {
