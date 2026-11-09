@@ -201,12 +201,20 @@ specific classes, you can also save/update a single location directly via
 - `task_close(projectScope, taskKey)` - mark a task done.
 - `location_scan(projectScope, rootPath)` - index a project's files/classes as `LOCATION`
   entries (see "Code locations" above).
-- `agent_task_create(projectScope, taskKey, title, type, description?)` - create a subtask on a
-  task's agent task board (`type`: `ANALYSIS`/`IMPLEMENTATION`/`TESTING`/`REVIEW`/`REPORTING`).
-  Not idempotent - check `agent_task_list` first to avoid duplicates. See the `agent-task-board`
-  skill for how these get driven end to end.
-- `agent_task_list(projectScope, taskKey, type?, status?)` - list a task's subtasks, optionally
-  filtered by category or status.
+- `agent_task_create(projectScope, taskKey, title, type, description?, dependsOnId?)` - create a
+  subtask on a task's agent task board (`type`:
+  `ANALYSIS`/`IMPLEMENTATION`/`TESTING`/`REVIEW`/`REPORTING`). Work that breaks into more than one
+  step is always decomposed here before its code is written, and `description` carries the
+  subtask's full spec inline (goal, scope, steps, acceptance) - not a link to an entry and never a
+  local file. Not idempotent - check `agent_task_list` first to avoid duplicates. See the
+  `agent-task-board` skill for how these get driven end to end, including running independent
+  subtasks in parallel.
+- `agent_task_list(projectScope, taskKey, type?, status?, claimable?)` - list a task's subtasks,
+  optionally filtered by category or status; `claimable: true` returns only what can be picked up
+  right now (`TODO`, no unfinished dependency).
+- `agent_task_claim(projectScope, taskKey, agentTaskId)` - atomically claim a `TODO` subtask -
+  use this instead of `agent_task_update` when several agents work the same board concurrently.
 - `agent_task_update(projectScope, taskKey, agentTaskId, status?, title?, description?)` - move a
-  subtask's status (`TODO`/`IN_PROGRESS`/`DONE`/`BLOCKED`) and/or update its notes.
+  subtask's status (`TODO`/`IN_PROGRESS`/`DONE`/`BLOCKED`) and/or replace its description (on
+  `DONE`: the real result - what changed, files touched, how it was verified).
 - `agent_task_delete(projectScope, taskKey, agentTaskId)` - remove a stale/duplicate subtask.
