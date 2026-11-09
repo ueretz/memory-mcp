@@ -34,8 +34,10 @@ class AgentTaskClaimConcurrencyTest {
     @Test
     void exactlyOneConcurrentClaimSucceedsOnTheSameSubtask() throws Exception {
         // Random suffix: this test is deliberately not @Transactional (see class comment), so the
-        // Task row it creates is committed for real and survives the test. A fixed key would
-        // collide with the ux_tasks_project_key unique constraint on any re-run.
+        // Task row it creates is committed for real. A fixed key would collide with the
+        // ux_tasks_project_key unique constraint on any re-run; the rows are deleted in the
+        // finally block below, because a committed fixture would otherwise show up in the
+        // dashboard as a junk project on every run.
         String uniqueSuffix = UUID.randomUUID().toString();
         Task task = new Task();
         task.setProjectScope("agent-task-claim-race-project-" + uniqueSuffix);
@@ -58,21 +60,22 @@ class AgentTaskClaimConcurrencyTest {
 
         int attempts = 8;
         ExecutorService pool = Executors.newFixedThreadPool(attempts);
-        int totalClaimed;
         try {
             List<Callable<Integer>> tasks = Collections.nCopies(attempts, (Callable<Integer>) () ->
                     repository.claimIfAvailable(savedAgentTask.getId(), savedTask.getId(), Instant.now()));
             List<Future<Integer>> futures = pool.invokeAll(tasks);
-            totalClaimed = 0;
+            int totalClaimed = 0;
             for (Future<Integer> future : futures) {
                 totalClaimed += future.get();
             }
+
+            assertThat(totalClaimed).isEqualTo(1);
+            assertThat(repository.findByIdAndTaskId(savedAgentTask.getId(), savedTask.getId()).orElseThrow().getStatus())
+                    .isEqualTo(AgentTask.Status.IN_PROGRESS);
         } finally {
             pool.shutdown();
+            repository.deleteById(savedAgentTask.getId());
+            taskRepository.deleteById(savedTask.getId());
         }
-
-        assertThat(totalClaimed).isEqualTo(1);
-        assertThat(repository.findByIdAndTaskId(savedAgentTask.getId(), savedTask.getId()).orElseThrow().getStatus())
-                .isEqualTo(AgentTask.Status.IN_PROGRESS);
     }
 }
