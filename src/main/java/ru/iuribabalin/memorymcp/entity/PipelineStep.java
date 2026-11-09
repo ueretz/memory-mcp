@@ -14,10 +14,16 @@ import jakarta.persistence.Table;
 public class PipelineStep {
 
     /**
-     * PROMPT / MD_FILE and PROMPT-mode CONDITION steps are worked on by Claude. VALUE-mode
+     * PROMPT / MD_FILE, PROMPT-mode CONDITION and WATCHER steps are worked on by Claude. VALUE-mode
      * CONDITION, VARIABLE, PARALLEL, JOIN and LOOP are executed by the server.
      */
-    public enum ContentType { PROMPT, MD_FILE, CONDITION, VARIABLE, PARALLEL, JOIN, LOOP }
+    public enum ContentType { PROMPT, MD_FILE, CONDITION, VARIABLE, PARALLEL, JOIN, LOOP, WATCHER }
+
+    /** What a WATCHER step watches. Its outcome keys follow from this (and the aspect). */
+    public enum WatchSource { GITLAB_MR, COMMAND }
+
+    /** Which side of a merge request a GITLAB_MR watcher follows. */
+    public enum WatchAspect { PIPELINE, REVIEW }
 
     public enum ConditionMode { VALUE, PROMPT }
 
@@ -62,6 +68,20 @@ public class PipelineStep {
 
     @Column(name = "max_iterations")
     private Integer maxIterations;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "watch_source", length = 20)
+    private WatchSource watchSource;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "watch_aspect", length = 20)
+    private WatchAspect watchAspect;
+
+    @Column(name = "check_interval_seconds")
+    private Integer checkIntervalSeconds;
+
+    @Column(name = "watch_timeout_seconds")
+    private Integer watchTimeoutSeconds;
 
     @Column(name = "position_x", nullable = false)
     private double positionX;
@@ -159,6 +179,38 @@ public class PipelineStep {
 
     public void setMaxIterations(Integer maxIterations) {
         this.maxIterations = maxIterations;
+    }
+
+    public WatchSource getWatchSource() {
+        return watchSource;
+    }
+
+    public void setWatchSource(WatchSource watchSource) {
+        this.watchSource = watchSource;
+    }
+
+    public WatchAspect getWatchAspect() {
+        return watchAspect;
+    }
+
+    public void setWatchAspect(WatchAspect watchAspect) {
+        this.watchAspect = watchAspect;
+    }
+
+    public Integer getCheckIntervalSeconds() {
+        return checkIntervalSeconds;
+    }
+
+    public void setCheckIntervalSeconds(Integer checkIntervalSeconds) {
+        this.checkIntervalSeconds = checkIntervalSeconds;
+    }
+
+    public Integer getWatchTimeoutSeconds() {
+        return watchTimeoutSeconds;
+    }
+
+    public void setWatchTimeoutSeconds(Integer watchTimeoutSeconds) {
+        this.watchTimeoutSeconds = watchTimeoutSeconds;
     }
 
     public double getPositionX() {

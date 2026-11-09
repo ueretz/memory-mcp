@@ -26,16 +26,21 @@ import tools.jackson.databind.ObjectMapper;
 import java.time.Instant;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.Deque;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 @Service
 public class PipelineService {
+
+    /** A GITLAB_MR watcher's target must name a merge request; the project and iid come from it. */
+    private static final Pattern MERGE_REQUEST_URL = Pattern.compile("/merge_requests/\\d+");
 
     private final PipelineRepository pipelineRepository;
     private final PipelineParameterRepository pipelineParameterRepository;
@@ -440,7 +445,97 @@ public class PipelineService {
                 validateJoinStep(step, incomingDataLinkCount[i]);
             } else if (step.contentType() == PipelineStep.ContentType.LOOP) {
                 validateLoopStep(step, incomingDataLinkCount[i]);
+            } else if (step.contentType() == PipelineStep.ContentType.WATCHER) {
+                validateWatcherStep(step, incomingDataLinkCount[i]);
             }
+        }
+        validateNoWatcherInsideAParallelFanOut(steps);
+    }
+
+    /**
+     * A watcher waits by holding one background poller owned by the leading agent, while a PARALLEL
+     * branch is worked by a sub-agent that must not call pipeline tools at all - so a watcher can
+     * never live inside a fan-out. Rejecting it at save time is what lets the skill's parallel
+     * section stay as it is.
+     */
+    private void validateNoWatcherInsideAParallelFanOut(List<PipelineUpsertRequest.StepRequest> steps) {
+        List<List<Integer>> adjacency = buildExecutionAdjacency(steps);
+        for (int i = 0; i < steps.size(); i++) {
+            if (steps.get(i).contentType() != PipelineStep.ContentType.PARALLEL) {
+                continue;
+            }
+            for (int reachable : reachableFrom(i, adjacency)) {
+                if (steps.get(reachable).contentType() == PipelineStep.ContentType.WATCHER) {
+                    throw new PipelineInvalidGraphException(
+                            "Step '" + steps.get(reachable).title() + "' is type WATCHER and cannot be reached from "
+                                    + "the PARALLEL step '" + steps.get(i).title()
+                                    + "' - a watcher waits in the leading agent's session, not in a parallel branch");
+                }
+            }
+        }
+    }
+
+    /** The outcome keys a watcher's routes must cover - fixed by its source and aspect. */
+    static List<String> watcherOutcomeKeys(PipelineStep.WatchSource source, PipelineStep.WatchAspect aspect) {
+        if (source == PipelineStep.WatchSource.COMMAND) {
+            return List.of("success", "timeout");
+        }
+        return aspect == PipelineStep.WatchAspect.REVIEW
+                ? List.of("approved", "comments", "timeout")
+                : List.of("success", "failed", "timeout");
+    }
+
+    private void validateWatcherStep(PipelineUpsertRequest.StepRequest step, int incomingDataLinkCount) {
+        if (step.watchSource() == null) {
+            throw new PipelineInvalidParametersException(
+                    "Step '" + step.title() + "' is type WATCHER and needs a watch source (GITLAB_MR or COMMAND)");
+        }
+        boolean gitlab = step.watchSource() == PipelineStep.WatchSource.GITLAB_MR;
+        if (gitlab == (step.watchAspect() == null)) {
+            throw new PipelineInvalidParametersException(
+                    "Step '" + step.title() + "' is type WATCHER: a GITLAB_MR watcher needs an aspect "
+                            + "(PIPELINE or REVIEW) and a COMMAND watcher must not have one");
+        }
+        if (step.promptText() == null || step.promptText().isBlank()) {
+            throw new PipelineInvalidParametersException(
+                    "Step '" + step.title() + "' is type WATCHER but has no watch target"
+                            + (gitlab ? " - give it a merge request URL" : " - give it a probe command"));
+        }
+        if (gitlab && !MERGE_REQUEST_URL.matcher(step.promptText()).find()) {
+            throw new PipelineInvalidGraphException(
+                    "Step '" + step.title() + "' is a GITLAB_MR watcher, so its target must be a merge request URL "
+                            + "containing '/merge_requests/<number>'");
+        }
+        Integer interval = step.checkIntervalSeconds();
+        if (interval == null || interval < 10 || interval > 3600) {
+            throw new PipelineInvalidParametersException(
+                    "Step '" + step.title() + "' is type WATCHER and needs a check interval between 10 and 3600 seconds");
+        }
+        Integer timeout = step.watchTimeoutSeconds();
+        if (timeout == null || timeout < 60 || timeout > 86400) {
+            throw new PipelineInvalidParametersException(
+                    "Step '" + step.title() + "' is type WATCHER and needs a timeout between 60 and 86400 seconds");
+        }
+        if (timeout < interval) {
+            throw new PipelineInvalidParametersException(
+                    "Step '" + step.title() + "' is type WATCHER: предельное время ожидания должно быть "
+                            + "не меньше интервала проверки");
+        }
+        if (!gitlab && incomingDataLinkCount > 0) {
+            throw new PipelineInvalidGraphException(
+                    "Step '" + step.title() + "' is a COMMAND watcher and cannot take an incoming data link - a "
+                            + "value produced by an earlier step must never land in the position of a command this "
+                            + "watcher re-runs on every check");
+        }
+        List<String> expected = watcherOutcomeKeys(step.watchSource(), step.watchAspect());
+        List<String> actual = step.routes().stream()
+                .map(PipelineUpsertRequest.StepRequest.RouteRequest::outcomeKey)
+                .sorted(Comparator.nullsFirst(Comparator.naturalOrder()))
+                .toList();
+        if (!actual.equals(expected.stream().sorted().toList())) {
+            throw new PipelineInvalidGraphException(
+                    "Step '" + step.title() + "' is type WATCHER and must have exactly these outcome routes: "
+                            + String.join(", ", expected));
         }
     }
 
@@ -603,6 +698,10 @@ public class PipelineService {
             step.setConditionValue(stepRequest.conditionValue());
             step.setConditionMode(stepRequest.conditionMode());
             step.setMaxIterations(stepRequest.maxIterations());
+            step.setWatchSource(stepRequest.watchSource());
+            step.setWatchAspect(stepRequest.watchAspect());
+            step.setCheckIntervalSeconds(stepRequest.checkIntervalSeconds());
+            step.setWatchTimeoutSeconds(stepRequest.watchTimeoutSeconds());
             step.setPositionX(stepRequest.positionX());
             step.setPositionY(stepRequest.positionY());
             savedSteps.add(pipelineStepRepository.save(step));
@@ -693,7 +792,9 @@ public class PipelineService {
                                             link.getId(), link.getToken(), outputsById.get(link.getSourceOutputId()).getName(),
                                             orderIndexById.get(link.getTargetStepId()), titleById.get(link.getTargetStepId())))
                                     .toList(),
-                            s.getConditionOperator(), s.getConditionValue(), s.getConditionMode(), s.getMaxIterations());
+                            s.getConditionOperator(), s.getConditionValue(), s.getConditionMode(), s.getMaxIterations(),
+                            s.getWatchSource(), s.getWatchAspect(), s.getCheckIntervalSeconds(),
+                            s.getWatchTimeoutSeconds());
                 })
                 .toList();
         Map<Long, String> parameterNameById = parameters.stream()

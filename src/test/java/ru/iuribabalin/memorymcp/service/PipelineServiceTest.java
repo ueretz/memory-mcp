@@ -672,4 +672,116 @@ class PipelineServiceTest {
                 .isInstanceOf(PipelineInvalidParametersException.class)
                 .hasMessageContaining("between 1 and 100");
     }
+
+    private PipelineUpsertRequest.StepRequest watcher(
+            String title, PipelineStep.WatchSource source, PipelineStep.WatchAspect aspect,
+            String target, Integer interval, Integer timeout,
+            List<PipelineUpsertRequest.StepRequest.RouteRequest> routes) {
+        return new PipelineUpsertRequest.StepRequest(title, PipelineStep.ContentType.WATCHER, target,
+                null, null, 0, 0, routes, List.of(), List.of(), null, null,
+                PipelineStep.ConditionMode.VALUE, null, source, aspect, interval, timeout);
+    }
+
+    private PipelineUpsertRequest.StepRequest.RouteRequest route(String key, Integer target) {
+        return new PipelineUpsertRequest.StepRequest.RouteRequest(key, target);
+    }
+
+    private PipelineUpsertRequest withSteps(String slug, PipelineUpsertRequest.StepRequest... steps) {
+        return new PipelineUpsertRequest(slug, "Watcher pipeline", "desc", "pipeline-svc-test-project",
+                List.of(), List.of(steps));
+    }
+
+    private PipelineUpsertRequest.StepRequest prompt(String title, String text,
+                                                      List<PipelineUpsertRequest.StepRequest.RouteRequest> routes) {
+        return new PipelineUpsertRequest.StepRequest(title, PipelineStep.ContentType.PROMPT, text,
+                null, null, 0, 0, routes, List.of(), List.of(), null, null);
+    }
+
+    @Test
+    void savesAWatcherWithItsSourceAspectIntervalAndTimeout() {
+        PipelineUpsertRequest request = withSteps("watcher-1",
+                watcher("Wait for the build", PipelineStep.WatchSource.GITLAB_MR, PipelineStep.WatchAspect.PIPELINE,
+                        "https://gitlab.example.com/g/p/-/merge_requests/42", 60, 3600,
+                        List.of(route("success", 1), route("failed", null), route("timeout", null))),
+                prompt("Hand over to review", "ask for review", List.of()));
+
+        PipelineDetail detail = pipelineService.create(request, "Tester");
+
+        PipelineDetail.PipelineStepView step = detail.steps().get(0);
+        assertThat(step.watchSource()).isEqualTo(PipelineStep.WatchSource.GITLAB_MR);
+        assertThat(step.watchAspect()).isEqualTo(PipelineStep.WatchAspect.PIPELINE);
+        assertThat(step.checkIntervalSeconds()).isEqualTo(60);
+        assertThat(step.watchTimeoutSeconds()).isEqualTo(3600);
+        assertThat(step.routes()).extracting(PipelineDetail.PipelineStepView.RouteView::outcomeKey)
+                .containsExactlyInAnyOrder("success", "failed", "timeout");
+    }
+
+    @Test
+    void rejectsAWatcherWhoseRouteKeysDoNotMatchItsSource() {
+        PipelineUpsertRequest request = withSteps("watcher-2",
+                watcher("Wait", PipelineStep.WatchSource.COMMAND, null, "curl -f http://localhost:8080/health", 60, 600,
+                        List.of(route("success", 1), route("failed", null), route("timeout", null))),
+                prompt("Next", "go", List.of()));
+
+        assertThatThrownBy(() -> pipelineService.create(request, "Tester"))
+                .isInstanceOf(PipelineInvalidGraphException.class)
+                .hasMessageContaining("success, timeout");
+    }
+
+    @Test
+    void rejectsAWatcherWithATimeoutShorterThanItsCheckInterval() {
+        PipelineUpsertRequest request = withSteps("watcher-3",
+                watcher("Wait", PipelineStep.WatchSource.COMMAND, null, "curl -f http://localhost:8080/health", 600, 60,
+                        List.of(route("success", 1), route("timeout", null))),
+                prompt("Next", "go", List.of()));
+
+        assertThatThrownBy(() -> pipelineService.create(request, "Tester"))
+                .isInstanceOf(PipelineInvalidParametersException.class)
+                .hasMessageContaining("не меньше интервала");
+    }
+
+    @Test
+    void rejectsAGitlabWatcherWhoseTargetIsNotAMergeRequestUrl() {
+        PipelineUpsertRequest request = withSteps("watcher-4",
+                watcher("Wait", PipelineStep.WatchSource.GITLAB_MR, PipelineStep.WatchAspect.REVIEW,
+                        "https://gitlab.example.com/g/p", 60, 3600,
+                        List.of(route("approved", 1), route("comments", null), route("timeout", null))),
+                prompt("Next", "go", List.of()));
+
+        assertThatThrownBy(() -> pipelineService.create(request, "Tester"))
+                .isInstanceOf(PipelineInvalidGraphException.class)
+                .hasMessageContaining("merge_requests");
+    }
+
+    @Test
+    void rejectsACommandWatcherWithAnIncomingDataLink() {
+        PipelineUpsertRequest.StepRequest source = new PipelineUpsertRequest.StepRequest(
+                "Build the command", PipelineStep.ContentType.PROMPT, "decide the probe", null, null, 0, 0,
+                List.of(route(null, 1)),
+                List.of(new PipelineUpsertRequest.StepRequest.OutputRequest("cmd")),
+                List.of(new PipelineUpsertRequest.StepRequest.DataLinkRequest("cmd", "cmd", 1)),
+                null, null);
+        PipelineUpsertRequest request = withSteps("watcher-5", source,
+                watcher("Wait", PipelineStep.WatchSource.COMMAND, null, "{{data:cmd}}", 60, 600,
+                        List.of(route("success", null), route("timeout", null))));
+
+        assertThatThrownBy(() -> pipelineService.create(request, "Tester"))
+                .isInstanceOf(PipelineInvalidGraphException.class)
+                .hasMessageContaining("COMMAND");
+    }
+
+    @Test
+    void rejectsAWatcherReachableFromAParallelFanOut() {
+        PipelineUpsertRequest request = withSteps("watcher-6",
+                new PipelineUpsertRequest.StepRequest("Fan out", PipelineStep.ContentType.PARALLEL, null,
+                        null, null, 0, 0, List.of(route(null, 1), route(null, 2)),
+                        List.of(), List.of(), null, null),
+                watcher("Wait", PipelineStep.WatchSource.COMMAND, null, "curl -f http://localhost:8080/health", 60, 600,
+                        List.of(route("success", null), route("timeout", null))),
+                prompt("Other branch", "go", List.of()));
+
+        assertThatThrownBy(() -> pipelineService.create(request, "Tester"))
+                .isInstanceOf(PipelineInvalidGraphException.class)
+                .hasMessageContaining("PARALLEL");
+    }
 }
