@@ -1,5 +1,6 @@
 package ru.iuribabalin.memorymcp.repository;
 
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -31,13 +32,30 @@ class AgentTaskClaimConcurrencyTest {
     @Autowired
     private TaskRepository taskRepository;
 
+    private Long committedTaskId;
+    private Long committedAgentTaskId;
+
+    /**
+     * The fixture below is committed for real (see the class comment), so it outlives the test and
+     * would otherwise surface in the dashboard as a junk project. Cleaning up here rather than in
+     * the test body covers the paths where the test never reaches its own cleanup.
+     */
+    @AfterEach
+    void removeCommittedFixture() {
+        if (committedAgentTaskId != null) {
+            repository.deleteById(committedAgentTaskId);
+        }
+        if (committedTaskId != null) {
+            taskRepository.deleteById(committedTaskId);
+        }
+    }
+
     @Test
     void exactlyOneConcurrentClaimSucceedsOnTheSameSubtask() throws Exception {
         // Random suffix: this test is deliberately not @Transactional (see class comment), so the
         // Task row it creates is committed for real. A fixed key would collide with the
-        // ux_tasks_project_key unique constraint on any re-run; the rows are deleted in the
-        // finally block below, because a committed fixture would otherwise show up in the
-        // dashboard as a junk project on every run.
+        // ux_tasks_project_key unique constraint on any re-run; removeCommittedFixture() deletes
+        // the rows afterwards.
         String uniqueSuffix = UUID.randomUUID().toString();
         Task task = new Task();
         task.setProjectScope("agent-task-claim-race-project-" + uniqueSuffix);
@@ -48,6 +66,7 @@ class AgentTaskClaimConcurrencyTest {
         task.setCreatedAt(Instant.now());
         task.setUpdatedAt(Instant.now());
         Task savedTask = taskRepository.saveAndFlush(task);
+        committedTaskId = savedTask.getId();
 
         AgentTask agentTask = new AgentTask();
         agentTask.setTaskId(savedTask.getId());
@@ -57,6 +76,7 @@ class AgentTaskClaimConcurrencyTest {
         agentTask.setCreatedAt(Instant.now());
         agentTask.setUpdatedAt(Instant.now());
         AgentTask savedAgentTask = repository.saveAndFlush(agentTask);
+        committedAgentTaskId = savedAgentTask.getId();
 
         int attempts = 8;
         ExecutorService pool = Executors.newFixedThreadPool(attempts);
@@ -74,8 +94,6 @@ class AgentTaskClaimConcurrencyTest {
                     .isEqualTo(AgentTask.Status.IN_PROGRESS);
         } finally {
             pool.shutdown();
-            repository.deleteById(savedAgentTask.getId());
-            taskRepository.deleteById(savedTask.getId());
         }
     }
 }
