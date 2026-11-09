@@ -49,11 +49,12 @@ const headline = computed(() => {
     <div class="flex min-w-0 flex-1 flex-col gap-2">
       <div class="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
         <span class="text-[13px] font-medium text-content">{{ headline }}</span>
-        <!-- Not for a closed task: the ring reads 100% from the status while the board may still
-             hold unfinished subtasks, and printing both numbers side by side just contradicts
-             itself. The counts in the headline stay honest either way. -->
+        <!-- Not for a closed task, and not once the board is fully done: the ring already shows
+             a check there, and a "100%" beside it is noise - while for a closed task with
+             unfinished subtasks the two numbers would contradict each other outright. The counts
+             in the headline stay honest either way. -->
         <span
-          v-if="status === 'ACTIVE' && progress.total > 0"
+          v-if="status === 'ACTIVE' && progress.total > 0 && progress.percent < 100"
           class="text-[12.5px] text-muted tabular-nums"
         >
           {{ progress.percent }}%
