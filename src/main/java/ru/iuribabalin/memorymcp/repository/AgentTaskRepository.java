@@ -8,6 +8,7 @@ import org.springframework.transaction.annotation.Transactional;
 import ru.iuribabalin.memorymcp.entity.AgentTask;
 
 import java.time.Instant;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 
@@ -18,6 +19,16 @@ public interface AgentTaskRepository extends JpaRepository<AgentTask, Long> {
     long countByTaskId(Long taskId);
 
     long countByTaskIdAndStatus(Long taskId, AgentTask.Status status);
+
+    /**
+     * {@code task_id, total, done} for a whole project's tasks in one query. The task list renders
+     * a progress ring per card, so counting task by task made the project page issue two queries
+     * per task; this keeps it at one regardless of how many tasks the project has.
+     */
+    @Query(value = "SELECT task_id, COUNT(*) AS total, COUNT(*) FILTER (WHERE status = 'DONE') AS done " +
+            "FROM agent_tasks WHERE task_id IN (:taskIds) GROUP BY task_id",
+            nativeQuery = true)
+    List<Object[]> countsByTaskIds(@Param("taskIds") Collection<Long> taskIds);
 
     Optional<AgentTask> findByIdAndTaskId(Long id, Long taskId);
 

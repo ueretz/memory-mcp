@@ -11,7 +11,10 @@ import ru.iuribabalin.memorymcp.repository.MemoryNodeRepository;
 import ru.iuribabalin.memorymcp.repository.TaskRepository;
 
 import java.time.Instant;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Objects;
 
 @Service
 public class TaskService {
@@ -49,9 +52,40 @@ public class TaskService {
 
     @Transactional(readOnly = true)
     public List<TaskSummary> list(String projectScope) {
-        return taskRepository.findByProjectScopeOrderByUpdatedAtDesc(projectScope).stream()
-                .map(this::toSummary)
+        List<Task> tasks = taskRepository.findByProjectScopeOrderByUpdatedAtDesc(projectScope);
+        // Two batch queries for the whole page instead of three per task: every card carries a
+        // progress ring and a spec name, and a project here can hold dozens of tasks.
+        Map<Long, long[]> counts = countsByTask(tasks);
+        Map<Long, String> specNames = specNamesByEntryId(tasks);
+        return tasks.stream()
+                .map(task -> toSummary(task, counts, specNames))
                 .toList();
+    }
+
+    private Map<Long, long[]> countsByTask(List<Task> tasks) {
+        if (tasks.isEmpty()) {
+            return Map.of();
+        }
+        List<Long> taskIds = tasks.stream().map(Task::getId).toList();
+        Map<Long, long[]> counts = new HashMap<>();
+        for (Object[] row : agentTaskRepository.countsByTaskIds(taskIds)) {
+            counts.put(((Number) row[0]).longValue(),
+                    new long[] {((Number) row[1]).longValue(), ((Number) row[2]).longValue()});
+        }
+        return counts;
+    }
+
+    private Map<Long, String> specNamesByEntryId(List<Task> tasks) {
+        List<Long> entryIds = tasks.stream()
+                .map(Task::getSpecEntryId)
+                .filter(Objects::nonNull)
+                .toList();
+        if (entryIds.isEmpty()) {
+            return Map.of();
+        }
+        Map<Long, String> names = new HashMap<>();
+        memoryNodeRepository.findAllById(entryIds).forEach(node -> names.put(node.getId(), node.getName()));
+        return names;
     }
 
     @Transactional(readOnly = true)
@@ -121,6 +155,19 @@ public class TaskService {
                 task.getUpdatedAt());
     }
 
+    /** Same shape as {@link #toSummary(Task)}, but served from the batch lookups of {@link #list}. */
+    private TaskSummary toSummary(Task task, Map<Long, long[]> counts, Map<Long, String> specNames) {
+        long[] totalAndDone = counts.getOrDefault(task.getId(), new long[] {0, 0});
+        return new TaskSummary(
+                task.getTaskKey(),
+                task.getTitle(),
+                task.getSource(),
+                task.getStatus(),
+                progress(task.getStatus(), totalAndDone[0], totalAndDone[1]),
+                task.getSpecEntryId() == null ? null : specNames.get(task.getSpecEntryId()),
+                task.getUpdatedAt());
+    }
+
     private TaskDetail toDetail(Task task) {
         return new TaskDetail(
                 task.getTaskKey(),
@@ -143,10 +190,14 @@ public class TaskService {
     }
 
     private TaskDetail.Progress progress(Task task) {
-        long total = agentTaskRepository.countByTaskId(task.getId());
-        long done = agentTaskRepository.countByTaskIdAndStatus(task.getId(), AgentTask.Status.DONE);
+        return progress(task.getStatus(),
+                agentTaskRepository.countByTaskId(task.getId()),
+                agentTaskRepository.countByTaskIdAndStatus(task.getId(), AgentTask.Status.DONE));
+    }
+
+    private TaskDetail.Progress progress(Task.Status status, long total, long done) {
         int percent = total == 0
-                ? task.getStatus() == Task.Status.DONE ? 100 : 0
+                ? status == Task.Status.DONE ? 100 : 0
                 : (int) Math.round(100.0 * done / total);
         return new TaskDetail.Progress(done, total, percent);
     }
