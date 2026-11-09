@@ -133,7 +133,9 @@ export interface SettingSummary {
 }
 
 export type PipelineParameterType = 'STRING' | 'NUMBER' | 'BOOLEAN'
-export type PipelineStepContentType = 'PROMPT' | 'MD_FILE' | 'CONDITION' | 'VARIABLE' | 'PARALLEL' | 'JOIN' | 'LOOP'
+export type PipelineStepContentType = 'PROMPT' | 'MD_FILE' | 'CONDITION' | 'VARIABLE' | 'PARALLEL' | 'JOIN' | 'LOOP' | 'WATCHER'
+export type PipelineWatchSource = 'GITLAB_MR' | 'COMMAND'
+export type PipelineWatchAspect = 'PIPELINE' | 'REVIEW'
 export type PipelineConditionOperator = 'EQUALS' | 'GREATER_THAN' | 'LESS_THAN' | 'GREATER_OR_EQUAL' | 'LESS_OR_EQUAL'
 export type PipelineConditionMode = 'VALUE' | 'PROMPT'
 export type PipelineRunStatus = 'RUNNING' | 'DONE' | 'FAILED' | 'ABORTED'
@@ -207,6 +209,10 @@ export interface PipelineStepView {
   conditionValue: string | null
   conditionMode: PipelineConditionMode
   maxIterations: number | null
+  watchSource: PipelineWatchSource | null
+  watchAspect: PipelineWatchAspect | null
+  checkIntervalSeconds: number | null
+  watchTimeoutSeconds: number | null
 }
 
 export interface PipelineSummary {
@@ -275,6 +281,10 @@ export interface PipelineUpsertStep {
   conditionValue: string | null
   conditionMode: PipelineConditionMode
   maxIterations: number | null
+  watchSource: PipelineWatchSource | null
+  watchAspect: PipelineWatchAspect | null
+  checkIntervalSeconds: number | null
+  watchTimeoutSeconds: number | null
 }
 
 export interface PipelineUpsertRequest {
@@ -324,6 +334,12 @@ export interface PipelineRunStepView {
   finishedAt: string | null
   resolvedInstructionText: string | null
   executionCount: number
+  /** WATCHER steps only. watchExpired is derived server-side on every read. */
+  watchCheckCount: number | null
+  watchLastCheckedAt: string | null
+  watchLastState: string | null
+  watchDeadlineAt: string | null
+  watchExpired: boolean | null
 }
 
 export interface PipelineRunDetail {

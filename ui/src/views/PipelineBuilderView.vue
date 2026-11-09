@@ -60,6 +60,10 @@ async function loadForEdit() {
     conditionValue: s.conditionValue,
     conditionMode: s.conditionMode,
     maxIterations: s.maxIterations,
+    watchSource: s.watchSource,
+    watchAspect: s.watchAspect,
+    checkIntervalSeconds: s.checkIntervalSeconds,
+    watchTimeoutSeconds: s.watchTimeoutSeconds,
   }))
 }
 

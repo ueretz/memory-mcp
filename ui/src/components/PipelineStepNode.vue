@@ -8,7 +8,9 @@ import AppIcon from '@/components/AppIcon.vue'
 import {
   BLOCK_KIND_BY_TYPE,
   DEFAULT_ROUTE_LABEL,
+  WATCHER_PORT_LABELS,
   acceptsDataInput,
+  ensureFixedPorts,
   hasEditableOutputs,
   hasOutputs,
   supportsAddingPorts,
@@ -72,6 +74,43 @@ const showDataIn = computed(() => acceptsDataInput(props.data.step.contentType))
 const editableOutputs = computed(() => hasEditableOutputs(props.data.step.contentType))
 const isCondition = computed(() => props.data.step.contentType === 'CONDITION')
 const isLoop = computed(() => props.data.step.contentType === 'LOOP')
+const isWatcher = computed(() => props.data.step.contentType === 'WATCHER')
+
+/** Minutes are what an author thinks in; the model and the API stay in seconds. */
+function minutesField(secondsKey: 'checkIntervalSeconds' | 'watchTimeoutSeconds') {
+  return computed({
+    get: () => {
+      const seconds = props.data.step[secondsKey]
+      return seconds === null ? null : Math.round((seconds / 60) * 100) / 100
+    },
+    set: (minutes: number | null) => {
+      props.data.step[secondsKey] = minutes === null || Number.isNaN(minutes)
+        ? null
+        : Math.round(minutes * 60)
+    },
+  })
+}
+
+const checkIntervalMinutes = minutesField('checkIntervalSeconds')
+const watchTimeoutMinutes = minutesField('watchTimeoutSeconds')
+
+/**
+ * Changing what a watcher watches changes which outcome ports it has, so the port set (and any
+ * wire on a port that no longer exists) is rebuilt right here rather than on the next save.
+ */
+function watchTargetChanged(sourceChanged = false) {
+  if (props.data.step.watchSource === 'COMMAND') {
+    props.data.step.watchAspect = null
+  } else if (props.data.step.watchAspect === null) {
+    props.data.step.watchAspect = 'PIPELINE'
+  }
+  // An MR URL left behind in a probe-command field saves cleanly and then fails every single probe
+  // until the timeout fires hours later, so the target does not survive a change of source.
+  if (sourceChanged) {
+    props.data.step.promptText = ''
+  }
+  ensureFixedPorts(props.data.step)
+}
 
 const OPERATORS: { value: PipelineConditionOperator; label: string }[] = [
   { value: 'EQUALS', label: 'равно' },
@@ -80,6 +119,21 @@ const OPERATORS: { value: PipelineConditionOperator; label: string }[] = [
   { value: 'GREATER_OR_EQUAL', label: 'не меньше' },
   { value: 'LESS_OR_EQUAL', label: 'не больше' },
 ]
+
+/**
+ * Built in script rather than in the template: the GitLab half names the `{{data:...}}` token, and
+ * a literal `{{` inside a template interpolation ends it early.
+ */
+const watcherHint = computed(() => {
+  const source = props.data.step.watchSource === 'COMMAND'
+    ? 'Событие наступило, когда команда завершилась с кодом 0; любой другой код — ждём дальше. Подставлять данные с предыдущих шагов в команду нельзя.'
+    : 'Ссылку на MR можно подать выходом предыдущего шага через токен {{data:...}} — например того шага, который этот MR и создал.'
+  return `${source} Проверки идут фоновым поллером и почти не тратят токенов, но ожидание держится на открытой сессии агента: закроете терминал — прогон встанет и продолжится с того же места, когда его возобновят.`
+})
+
+function watcherPortLabel(outcomeKey: string | null): string {
+  return WATCHER_PORT_LABELS[outcomeKey ?? ''] ?? outcomeKey ?? DEFAULT_ROUTE_LABEL
+}
 
 function pinClassForRoute(outcomeKey: string | null): string {
   if (outcomeKey === 'true' && isCondition.value) return 'pl-pin-true'
@@ -182,6 +236,38 @@ function pinClassForRoute(outcomeKey: string | null): string {
         <p class="pl-hint">Соедините «тело цикла» с первым шагом, а последний шаг верните в этот блок. Для досрочного выхода направьте ветку результата мимо цикла.</p>
       </template>
 
+      <template v-else-if="data.step.contentType === 'WATCHER'">
+        <select v-model="data.step.watchSource" class="pl-select mb-2" @change="watchTargetChanged(true)">
+          <option value="GITLAB_MR">Merge request в GitLab</option>
+          <option value="COMMAND">Команда-проба</option>
+        </select>
+        <select
+          v-if="data.step.watchSource === 'GITLAB_MR'"
+          v-model="data.step.watchAspect"
+          class="pl-select mb-2"
+          @change="watchTargetChanged()"
+        >
+          <option value="PIPELINE">Сборка: прошла / упала</option>
+          <option value="REVIEW">Ревью: апрув / замечания</option>
+        </select>
+        <input
+          v-model="data.step.promptText"
+          :placeholder="data.step.watchSource === 'COMMAND' ? 'test -f /tmp/ready' : 'https://gitlab.example.com/group/project/-/merge_requests/42'"
+          class="pl-input mb-2"
+        />
+        <div class="pl-watch-timings">
+          <label class="pl-watch-timing">
+            <span class="text-[12px] text-muted">Проверять каждые, мин</span>
+            <input v-model.number="checkIntervalMinutes" type="number" min="0.17" step="0.5" class="pl-input" />
+          </label>
+          <label class="pl-watch-timing">
+            <span class="text-[12px] text-muted">Ждать не дольше, мин</span>
+            <input v-model.number="watchTimeoutMinutes" type="number" min="1" step="5" class="pl-input" />
+          </label>
+        </div>
+        <p class="pl-hint">{{ watcherHint }}</p>
+      </template>
+
       <label v-if="data.step.contentType === 'PROMPT' || data.step.contentType === 'MD_FILE'" class="pl-file pl-file-secondary">
         <input type="file" class="sr-only" @change="data.on.referenceFileChosen($event)" />
         <AppIcon name="link" class="size-3.5" />
@@ -231,6 +317,9 @@ function pinClassForRoute(outcomeKey: string | null): string {
           </template>
           <template v-else-if="isLoop">
             <span class="pl-branch-default">{{ route.outcomeKey === 'done' ? 'выход при лимите' : 'тело цикла' }}</span>
+          </template>
+          <template v-else-if="isWatcher">
+            <span class="pl-branch-default">{{ watcherPortLabel(route.outcomeKey) }}</span>
           </template>
           <template v-else-if="isParallel">
             <span class="pl-branch-default">ветка {{ routeIndex + 1 }}</span>

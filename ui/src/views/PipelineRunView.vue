@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, toRef } from 'vue'
 
 import { fetchPipeline, fetchPipelineRun } from '@/api/client'
+import type { PipelineRunStepView } from '@/api/types'
 import AppIcon from '@/components/AppIcon.vue'
 import ErrorState from '@/components/ErrorState.vue'
 import PageHeader from '@/components/PageHeader.vue'
@@ -40,6 +41,20 @@ const currentSteps = computed(() => (run.value ? activeSteps(run.value) : []))
 
 function kindLabel(contentType: string): string {
   return BLOCK_KIND_BY_TYPE[contentType as keyof typeof BLOCK_KIND_BY_TYPE]?.label ?? contentType
+}
+
+/**
+ * A watcher can sit in RUNNING for hours, so its row says what it has actually been doing rather
+ * than leaving the reader to guess whether anything is still happening.
+ */
+function watchProgress(step: PipelineRunStepView): string | null {
+  if (step.contentType !== 'WATCHER' || step.watchCheckCount === null) return null
+  if (step.watchCheckCount === 0) return 'ещё не проверял'
+  const parts = [`проверка ${step.watchCheckCount}`]
+  if (step.watchLastState) parts.push(`последнее состояние: ${step.watchLastState}`)
+  if (step.watchExpired) parts.push('ожидание просрочено')
+  else if (step.watchDeadlineAt) parts.push(`дедлайн в ${formatClock(step.watchDeadlineAt)}`)
+  return parts.join(' · ')
 }
 </script>
 
@@ -140,7 +155,14 @@ function kindLabel(contentType: string): string {
                 </td>
                 <td class="pl-runs-time">{{ formatClock(step.startedAt) }}</td>
                 <td class="pl-runs-time">{{ step.startedAt ? formatDuration(step.startedAt, step.finishedAt, now) : '' }}</td>
-                <td class="pl-runs-note">{{ step.note ?? '' }}</td>
+                <td class="pl-runs-note">
+                  <span
+                    v-if="watchProgress(step)"
+                    class="pl-runs-watch"
+                    :class="{ 'pl-runs-watch-expired': step.watchExpired }"
+                  >{{ watchProgress(step) }}</span>
+                  <template v-if="step.note">{{ step.note }}</template>
+                </td>
               </tr>
             </tbody>
           </table>

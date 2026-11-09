@@ -5,6 +5,7 @@ import org.springframework.ai.mcp.annotation.McpToolParam;
 import org.springframework.stereotype.Component;
 import ru.iuribabalin.memorymcp.dto.PipelineExecutionDetail;
 import ru.iuribabalin.memorymcp.dto.PipelineRunDetail;
+import ru.iuribabalin.memorymcp.dto.PipelineRunStepCheckResult;
 import ru.iuribabalin.memorymcp.dto.PipelineSummary;
 import ru.iuribabalin.memorymcp.entity.PipelineRun;
 import ru.iuribabalin.memorymcp.entity.PipelineRunStep;
@@ -96,6 +97,27 @@ public class PipelineMcpTools {
         PipelineRunDetail run = pipelineRunService.updateStep(runId, orderIndex, status, note, outcome, outputsJson);
         usageEventRecorder.record(UsageEvent.Action.PIPELINE_RUN_STEP_UPDATE, String.valueOf(runId), null, null, null);
         return run;
+    }
+
+    @McpTool(name = "pipeline_run_step_check",
+            description = "Report one probe of a WATCHER step - the step kind that waits for an external event (a " +
+                    "merge request's pipeline or review in GitLab, or any probe command). Call this once per check, " +
+                    "passing what you observed as 'observedState' verbatim (e.g. 'running', 'success', " +
+                    "'unresolved-comments'); it is shown in the dashboard while the watcher waits. The server owns " +
+                    "the deadline, which starts at your FIRST check, so you never have to do the arithmetic: while " +
+                    "the response says expired=false keep waiting (sleep this watcher's checkIntervalSeconds from " +
+                    "pipeline_get, ideally in one background poller rather than a loop in the conversation), and the " +
+                    "moment it says expired=true stop waiting and close the step with pipeline_run_step_update using " +
+                    "the outcome 'timeout'. When the event you are waiting for happens, close the step the same way " +
+                    "with the matching outcome instead.")
+    public PipelineRunStepCheckResult pipelineRunStepCheck(
+            @McpToolParam(description = "The run id, from pipeline_run_start", required = true) Long runId,
+            @McpToolParam(description = "0-based index of the watcher step in the run's step list", required = true) Integer orderIndex,
+            @McpToolParam(description = "What this probe observed, as a short literal value - stored as the watcher's last state", required = false) String observedState) {
+        requireEnabled();
+        PipelineRunStepCheckResult result = pipelineRunService.checkStep(runId, orderIndex, observedState);
+        usageEventRecorder.record(UsageEvent.Action.PIPELINE_RUN_STEP_CHECK, String.valueOf(runId), null, null, null);
+        return result;
     }
 
     @McpTool(name = "pipeline_run_complete",

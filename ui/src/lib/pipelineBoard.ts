@@ -7,6 +7,8 @@ import type {
   PipelineUpsertDataLink,
   PipelineUpsertOutput,
   PipelineUpsertStep,
+  PipelineWatchAspect,
+  PipelineWatchSource,
 } from '@/api/types'
 
 /**
@@ -41,6 +43,10 @@ export interface BoardStep {
   conditionValue: string | null
   conditionMode: PipelineConditionMode
   maxIterations: number | null
+  watchSource: PipelineWatchSource | null
+  watchAspect: PipelineWatchAspect | null
+  checkIntervalSeconds: number | null
+  watchTimeoutSeconds: number | null
 }
 
 /** A wire from the board's "input parameters" node into a step's data input. */
@@ -77,7 +83,28 @@ export const BLOCK_KINDS: BlockKindMeta[] = [
   { kind: 'PARALLEL', label: 'Параллельно', description: 'Запускает все ветки одновременно, каждую — суб-агентом', icon: 'fanout', color: '#0ea5e9' },
   { kind: 'JOIN', label: 'Ожидать все', description: 'Продолжает, когда все ветки завершились', icon: 'join', color: '#6366f1' },
   { kind: 'LOOP', label: 'Цикл', description: 'Повторяет блоки по обратному переходу, не больше заданного числа раз', icon: 'refresh', color: '#c026d3' },
+  { kind: 'WATCHER', label: 'Наблюдатель', description: 'Ждёт внешнее событие и ветвится по результату', icon: 'eye', color: '#0891b2' },
 ]
+
+/**
+ * A watcher's outcome ports are fixed by what it watches - the author never names them. Mirrors
+ * PipelineService.watcherOutcomeKeys on the server, which is the authority; keep the two in step.
+ */
+export function watcherOutcomeKeys(
+  source: PipelineWatchSource | null,
+  aspect: PipelineWatchAspect | null,
+): string[] {
+  if (source === 'COMMAND') return ['success', 'timeout']
+  return aspect === 'REVIEW' ? ['approved', 'comments', 'timeout'] : ['success', 'failed', 'timeout']
+}
+
+export const WATCHER_PORT_LABELS: Record<string, string> = {
+  success: 'событие наступило',
+  failed: 'сборка упала',
+  timeout: 'не дождались',
+  approved: 'апрув',
+  comments: 'есть замечания',
+}
 
 export const BLOCK_KIND_BY_TYPE: Record<PipelineStepContentType, BlockKindMeta> = Object.fromEntries(
   BLOCK_KINDS.map((k) => [k.kind, k]),
@@ -93,6 +120,12 @@ export const WIRE_COLORS = {
 }
 
 export const DEFAULT_ROUTE_LABEL = 'далее'
+
+/** A GITLAB_MR watcher's target must name a merge request - the project and iid come from it. */
+export const MERGE_REQUEST_URL = /\/merge_requests\/\d+/
+
+/** `{{data:token}}` / `{{param}}` - a target whose real value only exists at run time. */
+export const TEMPLATE_TOKEN = /\{\{[^}]+\}\}/
 
 /** Can this kind of step have named (outcome-keyed) transition ports added by the author? */
 export function supportsNamedBranches(kind: PipelineStepContentType): boolean {
@@ -116,7 +149,7 @@ export function supportsAddingPorts(kind: PipelineStepContentType): boolean {
 
 /** Can the author add/remove data outputs on this kind of step? */
 export function hasEditableOutputs(kind: PipelineStepContentType): boolean {
-  return kind === 'PROMPT' || kind === 'MD_FILE'
+  return kind === 'PROMPT' || kind === 'MD_FILE' || kind === 'WATCHER'
 }
 
 export function stepDisplayTitle(step: { title: string }, index: number): string {
@@ -139,6 +172,10 @@ export function newBoardStep(kind: PipelineStepContentType, position: { x: numbe
     conditionValue: null,
     conditionMode: 'VALUE',
     maxIterations: kind === 'LOOP' ? 5 : null,
+    watchSource: kind === 'WATCHER' ? 'GITLAB_MR' : null,
+    watchAspect: kind === 'WATCHER' ? 'PIPELINE' : null,
+    checkIntervalSeconds: kind === 'WATCHER' ? 60 : null,
+    watchTimeoutSeconds: kind === 'WATCHER' ? 3600 : null,
   }
   if (kind === 'CONDITION') {
     step.conditionOperator = 'EQUALS'
@@ -170,6 +207,14 @@ export function ensureFixedPorts(step: BoardStep): void {
       step.routes.find((r) => r.outcomeKey === null) ?? { outcomeKey: null, target: null },
       step.routes.find((r) => r.outcomeKey === 'done') ?? { outcomeKey: 'done', target: null },
     ]
+    return
+  }
+  if (step.contentType === 'WATCHER') {
+    // The port set follows the source/aspect; a port whose key survives the change keeps its wire,
+    // the rest (and their wires) go, and newly appearing keys start unwired.
+    const byKey = new Map(step.routes.map((r) => [r.outcomeKey, r]))
+    step.routes = watcherOutcomeKeys(step.watchSource, step.watchAspect)
+      .map((key) => byKey.get(key) ?? { outcomeKey: key, target: null })
     return
   }
   if (step.contentType === 'PARALLEL') {
@@ -207,6 +252,10 @@ export function fromDetail(pipeline: PipelineDetail): BoardStep[] {
     conditionValue: s.conditionValue,
     conditionMode: s.conditionMode,
     maxIterations: s.maxIterations,
+    watchSource: s.watchSource,
+    watchAspect: s.watchAspect,
+    checkIntervalSeconds: s.checkIntervalSeconds,
+    watchTimeoutSeconds: s.watchTimeoutSeconds,
   }))
   materializeLegacyChain(steps)
   steps.forEach(ensureFixedPorts)
@@ -257,7 +306,8 @@ export function toUpsertSteps(steps: BoardStep[]): PipelineUpsertStep[] {
       routes: step.routes
         // Unwired ports are board-only, except fixed branches that the backend requires even when
         // they end the run: CONDITION's true/false and LOOP's body/done.
-        .filter((r) => r.target !== null || step.contentType === 'CONDITION' || step.contentType === 'LOOP')
+        .filter((r) => r.target !== null || step.contentType === 'CONDITION' || step.contentType === 'LOOP'
+          || step.contentType === 'WATCHER')
         .map((r) => ({
           outcomeKey: r.outcomeKey && r.outcomeKey.trim() !== '' ? r.outcomeKey.trim() : null,
           targetStepIndex: r.target === 'end' || r.target === null ? null : r.target,
@@ -268,6 +318,10 @@ export function toUpsertSteps(steps: BoardStep[]): PipelineUpsertStep[] {
       conditionValue: step.conditionValue,
       conditionMode: step.conditionMode,
       maxIterations: step.maxIterations,
+      watchSource: step.watchSource,
+      watchAspect: step.watchAspect,
+      checkIntervalSeconds: step.checkIntervalSeconds,
+      watchTimeoutSeconds: step.watchTimeoutSeconds,
     }
   })
 }
@@ -381,6 +435,28 @@ export function wouldCreateCycle(steps: BoardStep[], from: number, to: number): 
 }
 
 /** Is `target` reachable from `source` over wired transitions (the backend's data-link rule)? */
+/**
+ * Steps reachable from `start` without passing through a JOIN - i.e. the open fan-out. A watcher is
+ * banned inside one (branches are worked by sub-agents) but welcome after the JOIN, where the run is
+ * back to a single step worked by the leading agent. Mirrors PipelineService.reachableBeforeAnyJoin.
+ */
+export function reachableBeforeAnyJoin(steps: BoardStep[], start: number): Set<number> {
+  const adjacency = wiredAdjacency(steps)
+  const seen = new Set<number>()
+  const stack = [start]
+  while (stack.length) {
+    const current = stack.pop()!
+    for (const next of adjacency[current]) {
+      if (steps[next]?.contentType === 'JOIN') continue
+      if (!seen.has(next)) {
+        seen.add(next)
+        stack.push(next)
+      }
+    }
+  }
+  return seen
+}
+
 export function isAncestor(steps: BoardStep[], source: number, target: number): boolean {
   if (source === target) return false
   const adjacency = wiredAdjacency(steps)
@@ -427,8 +503,14 @@ export function collectIssues(steps: BoardStep[], paramLinks: BoardParamLink[] =
     })
   }
   const incomingData = new Array<number>(steps.length).fill(0)
+  // Step outputs counted apart from parameters: a COMMAND watcher may take a value the user typed
+  // at run start, but never one a model produced on an earlier step.
+  const incomingStepData = new Array<number>(steps.length).fill(0)
   steps.forEach((step) => step.dataLinksOut.forEach((l) => {
-    if (l.targetStepIndex !== null) incomingData[l.targetStepIndex]++
+    if (l.targetStepIndex !== null) {
+      incomingData[l.targetStepIndex]++
+      incomingStepData[l.targetStepIndex]++
+    }
   }))
   paramLinks.forEach((l) => {
     if (l.targetStepIndex >= 0 && l.targetStepIndex < steps.length) incomingData[l.targetStepIndex]++
@@ -454,6 +536,47 @@ export function collectIssues(steps: BoardStep[], paramLinks: BoardParamLink[] =
       const unwired = step.routes.filter((r) => r.target === null).map((r) => r.outcomeKey)
       if (unwired.length > 0) {
         issues.push({ stepIndex: i, severity: 'warning', text: `«${title}»: ветка ${unwired.join(' и ')} не подключена — путь завершится` })
+      }
+    }
+    if (step.contentType === 'WATCHER') {
+      const gitlab = step.watchSource === 'GITLAB_MR'
+      if (!step.promptText || !step.promptText.trim()) {
+        issues.push({
+          stepIndex: i,
+          severity: 'error',
+          text: gitlab
+            ? `«${title}»: укажите ссылку на merge request, за которым следить`
+            : `«${title}»: укажите команду-пробу, по которой проверять событие`,
+        })
+      } else if (gitlab && !TEMPLATE_TOKEN.test(step.promptText) && !MERGE_REQUEST_URL.test(step.promptText)) {
+        // A templated target (the MR URL wired in from the step that opened it) can only be checked
+        // at run time, so only a literal one is held to the URL shape.
+        issues.push({ stepIndex: i, severity: 'error', text: `«${title}»: ссылка должна вести на merge request (содержать /merge_requests/<номер>) или собираться из подставляемого значения` })
+      }
+      const interval = step.checkIntervalSeconds
+      const timeout = step.watchTimeoutSeconds
+      if (interval === null || interval < 10 || interval > 3600) {
+        issues.push({ stepIndex: i, severity: 'error', text: `«${title}»: интервал проверки — от 10 секунд до 1 часа` })
+      }
+      if (timeout === null || timeout < 60 || timeout > 86400) {
+        issues.push({ stepIndex: i, severity: 'error', text: `«${title}»: предельное ожидание — от 1 минуты до 24 часов` })
+      } else if (interval !== null && timeout < interval) {
+        issues.push({ stepIndex: i, severity: 'error', text: `«${title}»: предельное ожидание не может быть меньше интервала проверки` })
+      }
+      if (!gitlab && incomingStepData[i] > 0) {
+        issues.push({ stepIndex: i, severity: 'error', text: `«${title}»: в команду нельзя подавать выход предыдущего шага — отсоедините этот провод (значение параметра подавать можно)` })
+      }
+      const fanOut = steps.findIndex((other, j) => other.contentType === 'PARALLEL' && reachableBeforeAnyJoin(steps, j).has(i))
+      if (fanOut >= 0) {
+        issues.push({
+          stepIndex: i,
+          severity: 'error',
+          text: `«${title}»: наблюдатель не может стоять внутри развилки «${stepDisplayTitle(steps[fanOut], fanOut)}» — ожидание держит ведущий агент, а ветки выполняют суб-агенты. Перенесите его за блок «Ожидать все»`,
+        })
+      }
+      const unwired = step.routes.filter((r) => r.target === null).map((r) => WATCHER_PORT_LABELS[r.outcomeKey ?? ''] ?? r.outcomeKey)
+      if (unwired.length > 0) {
+        issues.push({ stepIndex: i, severity: 'warning', text: `«${title}»: ветка «${unwired.join('», «')}» не подключена — путь завершится` })
       }
     }
     if (step.contentType === 'LOOP') {

@@ -34,7 +34,9 @@ public record PipelineDetail(
             double positionX, double positionY, List<RouteView> routes,
             List<OutputView> outputs, List<DataLinkView> dataLinksOut,
             PipelineStep.ConditionOperator conditionOperator, String conditionValue,
-            PipelineStep.ConditionMode conditionMode, Integer maxIterations) {
+            PipelineStep.ConditionMode conditionMode, Integer maxIterations,
+            PipelineStep.WatchSource watchSource, PipelineStep.WatchAspect watchAspect,
+            Integer checkIntervalSeconds, Integer watchTimeoutSeconds) {
 
         public record RouteView(String outcomeKey, Integer targetStepOrderIndex) {
         }

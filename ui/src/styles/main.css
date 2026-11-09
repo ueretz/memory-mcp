@@ -911,6 +911,29 @@
 .dark .pl-condition-lhs {
   color: #34d399;
 }
+.pl-runs-watch {
+  display: block;
+  font-size: 11px;
+  color: var(--color-faint);
+}
+.pl-runs-watch-expired {
+  color: #b45309;
+  font-weight: 500;
+}
+.dark .pl-runs-watch-expired {
+  color: #fbbf24;
+}
+.pl-watch-timings {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.pl-watch-timing {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
 .pl-hint {
   font-size: 11px;
   line-height: 1.45;

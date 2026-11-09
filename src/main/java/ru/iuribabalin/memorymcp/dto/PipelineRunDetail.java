@@ -35,6 +35,20 @@ public record PipelineRunDetail(
     public record PipelineRunStepView(
             Long id, int orderIndex, String title, PipelineStep.ContentType contentType,
             PipelineRunStep.Status status, String note, Instant startedAt, Instant finishedAt,
-            String resolvedInstructionText, int executionCount) {
+            String resolvedInstructionText, int executionCount,
+            /**
+             * WATCHER steps only (null elsewhere). {@code watchExpired} is derived on every read,
+             * not stored, so a run whose agent session died still shows an overdue watcher.
+             */
+            Integer watchCheckCount, Instant watchLastCheckedAt, String watchLastState,
+            Instant watchDeadlineAt, Boolean watchExpired) {
+
+        /** Pre-V22 shape: no watcher state. */
+        public PipelineRunStepView(Long id, int orderIndex, String title, PipelineStep.ContentType contentType,
+                                   PipelineRunStep.Status status, String note, Instant startedAt, Instant finishedAt,
+                                   String resolvedInstructionText, int executionCount) {
+            this(id, orderIndex, title, contentType, status, note, startedAt, finishedAt,
+                    resolvedInstructionText, executionCount, null, null, null, null, null);
+        }
     }
 }

@@ -39,10 +39,23 @@ public record PipelineUpsertRequest(
             Long assetId, Long referenceAssetId, double positionX, double positionY,
             List<RouteRequest> routes, List<OutputRequest> outputs, List<DataLinkRequest> dataLinksOut,
             PipelineStep.ConditionOperator conditionOperator, String conditionValue,
-            PipelineStep.ConditionMode conditionMode, Integer maxIterations) {
+            PipelineStep.ConditionMode conditionMode, Integer maxIterations,
+            PipelineStep.WatchSource watchSource, PipelineStep.WatchAspect watchAspect,
+            Integer checkIntervalSeconds, Integer watchTimeoutSeconds) {
 
         public StepRequest {
             conditionMode = conditionMode == null ? PipelineStep.ConditionMode.VALUE : conditionMode;
+        }
+
+        /** Pre-V22 shape: no watcher fields. */
+        public StepRequest(String title, PipelineStep.ContentType contentType, String promptText,
+                           Long assetId, Long referenceAssetId, double positionX, double positionY,
+                           List<RouteRequest> routes, List<OutputRequest> outputs, List<DataLinkRequest> dataLinksOut,
+                           PipelineStep.ConditionOperator conditionOperator, String conditionValue,
+                           PipelineStep.ConditionMode conditionMode, Integer maxIterations) {
+            this(title, contentType, promptText, assetId, referenceAssetId, positionX, positionY,
+                    routes, outputs, dataLinksOut, conditionOperator, conditionValue, conditionMode, maxIterations,
+                    null, null, null, null);
         }
 
         public StepRequest(String title, PipelineStep.ContentType contentType, String promptText,

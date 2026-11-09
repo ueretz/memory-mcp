@@ -26,16 +26,24 @@ import tools.jackson.databind.ObjectMapper;
 import java.time.Instant;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.Deque;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 @Service
 public class PipelineService {
+
+    /** A GITLAB_MR watcher's target must name a merge request; the project and iid come from it. */
+    private static final Pattern MERGE_REQUEST_URL = Pattern.compile("/merge_requests/\\d+");
+
+    /** {@code {{data:token}}} / {@code {{param}}} - a target whose real value only exists at run time. */
+    private static final Pattern TEMPLATE_TOKEN = Pattern.compile("\\{\\{[^}]+}}");
 
     private final PipelineRepository pipelineRepository;
     private final PipelineParameterRepository pipelineParameterRepository;
@@ -176,7 +184,10 @@ public class PipelineService {
                                 .toList(),
                         pipelineStepOutputRepository.findByStepId(step.getId()).stream()
                                 .map(PipelineStepOutput::getName)
-                                .toList()))
+                                .toList(),
+                        step.getContentType(),
+                        step.getWatchSource(), step.getWatchAspect(),
+                        step.getCheckIntervalSeconds(), step.getWatchTimeoutSeconds()))
                 .toList();
         return new PipelineExecutionDetail(pipeline.getSlug(), pipeline.getName(), pipeline.getDescription(), parameters, stepViews);
     }
@@ -429,10 +440,14 @@ public class PipelineService {
                                    List<PipelineUpsertRequest.ParameterLinkRequest> parameterLinks) {
         int n = steps.size();
         int[] incomingDataLinkCount = new int[n];
+        // Counted apart from parameter links: a COMMAND watcher may take a value the USER typed at
+        // run start, but never one a model produced on an earlier step (validateWatcherStep).
+        int[] incomingStepDataLinkCount = new int[n];
         for (PipelineUpsertRequest.StepRequest step : steps) {
             for (PipelineUpsertRequest.StepRequest.DataLinkRequest link : step.dataLinksOut()) {
                 if (link.targetStepIndex() != null) {
                     incomingDataLinkCount[link.targetStepIndex()]++;
+                    incomingStepDataLinkCount[link.targetStepIndex()]++;
                 }
             }
         }
@@ -453,7 +468,124 @@ public class PipelineService {
                 validateJoinStep(step, incomingDataLinkCount[i]);
             } else if (step.contentType() == PipelineStep.ContentType.LOOP) {
                 validateLoopStep(step, incomingDataLinkCount[i]);
+            } else if (step.contentType() == PipelineStep.ContentType.WATCHER) {
+                validateWatcherStep(step, incomingStepDataLinkCount[i]);
             }
+        }
+        validateNoWatcherInsideAParallelFanOut(steps);
+    }
+
+    /**
+     * A watcher waits by holding one background poller owned by the leading agent, while a branch of
+     * an open fan-out is worked by a sub-agent that must not call pipeline tools at all - so a
+     * watcher can never live inside a fan-out. It may perfectly well sit AFTER the branches have
+     * merged, though: past the JOIN the run is back to a single active step worked by the leading
+     * agent, which is why the walk below stops at JOIN steps instead of running to the end.
+     */
+    private void validateNoWatcherInsideAParallelFanOut(List<PipelineUpsertRequest.StepRequest> steps) {
+        List<List<Integer>> adjacency = buildExecutionAdjacency(steps);
+        for (int i = 0; i < steps.size(); i++) {
+            if (steps.get(i).contentType() != PipelineStep.ContentType.PARALLEL) {
+                continue;
+            }
+            for (int inFanOut : reachableBeforeAnyJoin(i, adjacency, steps)) {
+                if (steps.get(inFanOut).contentType() == PipelineStep.ContentType.WATCHER) {
+                    throw new PipelineInvalidGraphException(
+                            "Step '" + steps.get(inFanOut).title() + "' is type WATCHER and cannot sit inside the "
+                                    + "fan-out of the PARALLEL step '" + steps.get(i).title()
+                                    + "' - a watcher waits in the leading agent's session, not in a parallel branch. "
+                                    + "Move it after the JOIN that merges the branches.");
+                }
+            }
+        }
+    }
+
+    /** Steps reachable from {@code start} without passing through a JOIN - i.e. the open fan-out. */
+    private Set<Integer> reachableBeforeAnyJoin(int start, List<List<Integer>> adjacency,
+                                                 List<PipelineUpsertRequest.StepRequest> steps) {
+        Set<Integer> visited = new HashSet<>();
+        Deque<Integer> stack = new ArrayDeque<>();
+        stack.push(start);
+        while (!stack.isEmpty()) {
+            int current = stack.pop();
+            for (int next : adjacency.get(current)) {
+                if (steps.get(next).contentType() == PipelineStep.ContentType.JOIN) {
+                    continue;
+                }
+                if (visited.add(next)) {
+                    stack.push(next);
+                }
+            }
+        }
+        return visited;
+    }
+
+    /** The outcome keys a watcher's routes must cover - fixed by its source and aspect. */
+    static List<String> watcherOutcomeKeys(PipelineStep.WatchSource source, PipelineStep.WatchAspect aspect) {
+        if (source == PipelineStep.WatchSource.COMMAND) {
+            return List.of("success", "timeout");
+        }
+        return aspect == PipelineStep.WatchAspect.REVIEW
+                ? List.of("approved", "comments", "timeout")
+                : List.of("success", "failed", "timeout");
+    }
+
+    private void validateWatcherStep(PipelineUpsertRequest.StepRequest step, int incomingDataLinkCount) {
+        if (step.watchSource() == null) {
+            throw new PipelineInvalidParametersException(
+                    "Step '" + step.title() + "' is type WATCHER and needs a watch source (GITLAB_MR or COMMAND)");
+        }
+        boolean gitlab = step.watchSource() == PipelineStep.WatchSource.GITLAB_MR;
+        if (gitlab == (step.watchAspect() == null)) {
+            throw new PipelineInvalidParametersException(
+                    "Step '" + step.title() + "' is type WATCHER: a GITLAB_MR watcher needs an aspect "
+                            + "(PIPELINE or REVIEW) and a COMMAND watcher must not have one");
+        }
+        if (step.promptText() == null || step.promptText().isBlank()) {
+            throw new PipelineInvalidParametersException(
+                    "Step '" + step.title() + "' is type WATCHER but has no watch target"
+                            + (gitlab ? " - give it a merge request URL" : " - give it a probe command"));
+        }
+        // Only a literal target can be checked for shape. The headline composition feeds the URL in
+        // from the step that opened the MR ({{data:...}}), and a parameter token is filled in at run
+        // start - neither looks like a URL at save time, and rejecting them would block the feature's
+        // main use.
+        boolean templatedTarget = TEMPLATE_TOKEN.matcher(step.promptText()).find();
+        if (gitlab && !templatedTarget && !MERGE_REQUEST_URL.matcher(step.promptText()).find()) {
+            throw new PipelineInvalidGraphException(
+                    "Step '" + step.title() + "' is a GITLAB_MR watcher, so its target must be a merge request URL "
+                            + "containing '/merge_requests/<number>', or a token that resolves to one");
+        }
+        Integer interval = step.checkIntervalSeconds();
+        if (interval == null || interval < 10 || interval > 3600) {
+            throw new PipelineInvalidParametersException(
+                    "Step '" + step.title() + "' is type WATCHER and needs a check interval between 10 and 3600 seconds");
+        }
+        Integer timeout = step.watchTimeoutSeconds();
+        if (timeout == null || timeout < 60 || timeout > 86400) {
+            throw new PipelineInvalidParametersException(
+                    "Step '" + step.title() + "' is type WATCHER and needs a timeout between 60 and 86400 seconds");
+        }
+        if (timeout < interval) {
+            throw new PipelineInvalidParametersException(
+                    "Step '" + step.title() + "' is type WATCHER: предельное время ожидания должно быть "
+                            + "не меньше интервала проверки");
+        }
+        if (!gitlab && incomingDataLinkCount > 0) {
+            throw new PipelineInvalidGraphException(
+                    "Step '" + step.title() + "' is a COMMAND watcher and cannot take an incoming data link - a "
+                            + "value produced by an earlier step must never land in the position of a command this "
+                            + "watcher re-runs on every check");
+        }
+        List<String> expected = watcherOutcomeKeys(step.watchSource(), step.watchAspect());
+        List<String> actual = step.routes().stream()
+                .map(PipelineUpsertRequest.StepRequest.RouteRequest::outcomeKey)
+                .sorted(Comparator.nullsFirst(Comparator.naturalOrder()))
+                .toList();
+        if (!actual.equals(expected.stream().sorted().toList())) {
+            throw new PipelineInvalidGraphException(
+                    "Step '" + step.title() + "' is type WATCHER and must have exactly these outcome routes: "
+                            + String.join(", ", expected));
         }
     }
 
@@ -616,6 +748,10 @@ public class PipelineService {
             step.setConditionValue(stepRequest.conditionValue());
             step.setConditionMode(stepRequest.conditionMode());
             step.setMaxIterations(stepRequest.maxIterations());
+            step.setWatchSource(stepRequest.watchSource());
+            step.setWatchAspect(stepRequest.watchAspect());
+            step.setCheckIntervalSeconds(stepRequest.checkIntervalSeconds());
+            step.setWatchTimeoutSeconds(stepRequest.watchTimeoutSeconds());
             step.setPositionX(stepRequest.positionX());
             step.setPositionY(stepRequest.positionY());
             savedSteps.add(pipelineStepRepository.save(step));
@@ -706,7 +842,9 @@ public class PipelineService {
                                             link.getId(), link.getToken(), outputsById.get(link.getSourceOutputId()).getName(),
                                             orderIndexById.get(link.getTargetStepId()), titleById.get(link.getTargetStepId())))
                                     .toList(),
-                            s.getConditionOperator(), s.getConditionValue(), s.getConditionMode(), s.getMaxIterations());
+                            s.getConditionOperator(), s.getConditionValue(), s.getConditionMode(), s.getMaxIterations(),
+                            s.getWatchSource(), s.getWatchAspect(), s.getCheckIntervalSeconds(),
+                            s.getWatchTimeoutSeconds());
                 })
                 .toList();
         Map<Long, String> parameterNameById = parameters.stream()
