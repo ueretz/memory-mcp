@@ -829,6 +829,13 @@
 .dark .pl-chip-warn {
   color: #fbbf24;
 }
+.pl-chip-orchestrated {
+  background: color-mix(in srgb, #ea580c 16%, transparent);
+  color: #c2410c;
+}
+.dark .pl-chip-orchestrated {
+  color: #fb923c;
+}
 .pl-icon-btn {
   display: inline-flex;
   flex-shrink: 0;
@@ -941,6 +948,18 @@
   font-size: 11px;
   line-height: 1.45;
   color: var(--color-faint);
+  overflow-wrap: anywhere;
+}
+/* The orchestrator's "?" explainer: a paragraph, so it reads as a panel rather than a hint line. */
+.pl-help {
+  margin-top: 6px;
+  padding: 8px 9px;
+  border-radius: 7px;
+  border: 1px solid color-mix(in srgb, var(--kind) 35%, transparent);
+  background: color-mix(in srgb, var(--kind) 9%, transparent);
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--color-muted);
   overflow-wrap: anywhere;
 }
 .pl-file {

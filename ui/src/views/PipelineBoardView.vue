@@ -21,18 +21,20 @@ import AppIcon from '@/components/AppIcon.vue'
 import ErrorState from '@/components/ErrorState.vue'
 import PipelineEndNode from '@/components/PipelineEndNode.vue'
 import PipelineParamsNode from '@/components/PipelineParamsNode.vue'
-import PipelineStepNode, { type StepNodeActions, type WiredInput } from '@/components/PipelineStepNode.vue'
+import PipelineStepNode, { type RegionStartOption, type StepNodeActions, type WiredInput } from '@/components/PipelineStepNode.vue'
 import {
   BLOCK_KINDS,
   PARAMS_NODE_ID,
   PARAMS_SOURCE_TITLE,
   PARAM_PIN_COLORS,
+  REGION_START_KIND,
   WIRE_COLORS,
   analyzeGraph,
   collectIssues,
   fromDetail,
   isAncestor,
   newBoardStep,
+  orchestratedSteps,
   paramLinksFromDetail,
   removeStepAt,
   stepDisplayTitle,
@@ -245,11 +247,38 @@ function nextFreePosition(): { x: number; y: number } {
   return { x: rightmost.positionX + CARD_WIDTH + 80, y: rightmost.positionY }
 }
 
+/** A block that opens a region, and the marker that closes it - placed as a pair. */
+const REGION_PAIRS: Partial<Record<PipelineStepContentType, PipelineStepContentType>> = {
+  LOOP: 'LOOP_END',
+  ORCHESTRATOR: 'ORCHESTRATOR_END',
+}
+
 function addStep(kind: PipelineStepContentType, at?: { x: number; y: number }) {
   const position = at ?? nextFreePosition()
   const x = Math.round(position.x)
   const y = Math.round(position.y)
   steps.value.push(newBoardStep(kind, { x, y }))
+  // A region needs both ends to mean anything, and finding the second one in the palette is work
+  // the author should not have to do: placing the opening block places its closing marker too,
+  // already pointing back at it.
+  const closingKind = REGION_PAIRS[kind]
+  if (closingKind) {
+    const closing = newBoardStep(closingKind, { x: x + (CARD_WIDTH + 80) * 2, y })
+    closing.regionStartStepIndex = steps.value.length - 1
+    steps.value.push(closing)
+  } else {
+    // A marker placed on its own picks its block when there is exactly one candidate - the common
+    // case, and the only one where guessing cannot be wrong.
+    const startKind = REGION_START_KIND[kind]
+    if (startKind) {
+      const candidates = steps.value.flatMap((s, i) => (s.contentType === startKind ? [i] : []))
+      const taken = new Set(steps.value
+        .filter((s) => s.contentType === kind && s.regionStartStepIndex !== null)
+        .map((s) => s.regionStartStepIndex))
+      const free = candidates.filter((i) => !taken.has(i))
+      if (free.length === 1) steps.value[steps.value.length - 1].regionStartStepIndex = free[0]
+    }
+  }
   if (!at && endPosition.value.x < x + CARD_WIDTH + 60 && Math.abs(endPosition.value.y - y) < 420) {
     endPosition.value = { x: x + CARD_WIDTH + 100, y: y + 24 }
   }
@@ -402,6 +431,7 @@ async function onReferenceFileChosen(index: number, event: Event) {
 // ------------------------------------------------------------------------------------------
 
 const graph = computed(() => analyzeGraph(steps.value))
+const orchestrated = computed(() => orchestratedSteps(steps.value))
 
 function routeTargetLabel(target: BoardStep['routes'][number]['target']): string | null {
   if (target === null) return null
@@ -451,6 +481,11 @@ const flowNodes = computed(() => [
   ...steps.value.map((step, index) => {
     const size = nodeSizes.value[index]
     const { roots, reachable } = graph.value
+    const startKind = REGION_START_KIND[step.contentType]
+    const regionStartOptions: RegionStartOption[] = startKind
+      ? steps.value.flatMap((candidate, i) =>
+        candidate.contentType === startKind ? [{ index: i, label: stepDisplayTitle(candidate, i) }] : [])
+      : []
     return {
       id: String(index),
       type: 'step',
@@ -465,6 +500,8 @@ const flowNodes = computed(() => [
         flowInWired: flowInWired.value.has(index),
         wiredInputs: wiredInputsFor(index),
         routeTargets: step.routes.map((r) => routeTargetLabel(r.target)),
+        regionStartOptions,
+        orchestrated: orchestrated.value.has(index),
         on: actionsFor(index),
       },
     }

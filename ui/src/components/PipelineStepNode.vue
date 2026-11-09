@@ -1,13 +1,15 @@
 <script setup lang="ts">
 import { Handle, Position, type NodeProps } from '@vue-flow/core'
 import { NodeResizer, type OnResize } from '@vue-flow/node-resizer'
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
 
-import type { PipelineConditionOperator } from '@/api/types'
+import type { PipelineConditionOperator, PipelineStepContentType } from '@/api/types'
 import AppIcon from '@/components/AppIcon.vue'
 import {
   BLOCK_KIND_BY_TYPE,
   DEFAULT_ROUTE_LABEL,
+  DELEGATION_HINTS,
+  REGION_START_KIND,
   acceptsDataInput,
   ensureFixedPorts,
   hasEditableOutputs,
@@ -47,6 +49,12 @@ export interface StepNodeActions {
   resize: (size: { width: number; height: number }) => void
 }
 
+/** A candidate for the "which block does this close?" picker on a region marker. */
+export interface RegionStartOption {
+  index: number
+  label: string
+}
+
 export interface WiredInput {
   token: string
   sourceStepTitle: string
@@ -59,6 +67,10 @@ const props = defineProps<
     index: number
     isStart: boolean
     unreachable: boolean
+    /** Blocks this marker could close - only on LOOP_END / ORCHESTRATOR_END cards. */
+    regionStartOptions: RegionStartOption[]
+    /** Whether this step sits inside an orchestrated region, i.e. gets delegated. */
+    orchestrated: boolean
     flowInWired: boolean
     wiredInputs: WiredInput[]
     routeTargets: (string | null)[]
@@ -75,6 +87,16 @@ const editableOutputs = computed(() => hasEditableOutputs(props.data.step.conten
 const isCondition = computed(() => props.data.step.contentType === 'CONDITION')
 const isLoop = computed(() => props.data.step.contentType === 'LOOP')
 const isWatcher = computed(() => props.data.step.contentType === 'WATCHER')
+const regionStartKind = computed<PipelineStepContentType | undefined>(() => REGION_START_KIND[props.data.step.contentType])
+const regionStartLabel = computed(() => (regionStartKind.value === 'LOOP' ? 'Цикл' : 'Оркестратор'))
+/** The "?" popover on the orchestrator card: open on click, not on hover - it is a paragraph. */
+const helpOpen = ref(false)
+const showDelegationHint = computed(() =>
+  props.data.orchestrated
+  && (props.data.step.contentType === 'PROMPT'
+    || props.data.step.contentType === 'MD_FILE'
+    || props.data.step.contentType === 'PROMPT_LOOP'),
+)
 
 /** Minutes are what an author thinks in; the model and the API stay in seconds. */
 function minutesField(secondsKey: 'checkIntervalSeconds' | 'watchTimeoutSeconds') {
@@ -131,6 +153,12 @@ const watcherHint = computed(() => {
   return `${source} Проверки идут фоновым поллером и почти не тратят токенов, но ожидание держится на открытой сессии агента: закроете терминал — прогон встанет и продолжится с того же места, когда его возобновят.`
 })
 
+// A hint only means something to a director, so leaving a region clears it instead of saving a
+// value the backend would then reject.
+watch(() => props.data.orchestrated, (inRegion) => {
+  if (!inRegion) props.data.step.delegationHint = null
+})
+
 function pinClassForRoute(outcomeKey: string | null): string {
   if (outcomeKey === 'true' && isCondition.value) return 'pl-pin-true'
   if (outcomeKey === 'false' && isCondition.value) return 'pl-pin-false'
@@ -162,8 +190,18 @@ function pinClassForRoute(outcomeKey: string | null): string {
         <span class="pl-kind-label">{{ kind.label }} · {{ data.index + 1 }}</span>
         <input v-model="data.step.title" placeholder="Название шага" class="pl-title nodrag" />
       </div>
+      <span v-if="data.orchestrated" class="pl-chip pl-chip-orchestrated" title="Шаг внутри региона оркестрации: его раздаёт директор"><AppIcon name="fanout" class="size-3" />делегируется</span>
       <span v-if="data.isStart" class="pl-chip pl-chip-start" title="Выполнение начинается с этого блока"><AppIcon name="play" class="size-3" />старт</span>
       <span v-else-if="data.unreachable" class="pl-chip pl-chip-warn" title="До блока нет пути от старта — он никогда не выполнится"><AppIcon name="warning" class="size-3" />недостижим</span>
+      <button
+        v-if="data.step.contentType === 'ORCHESTRATOR'"
+        type="button"
+        class="pl-icon-btn nodrag"
+        title="Что делает этот блок"
+        @click="helpOpen = !helpOpen"
+      >
+        <AppIcon name="question" class="size-3.5" />
+      </button>
       <button type="button" class="pl-icon-btn nodrag" title="Удалить блок" @click="data.on.remove()">
         <AppIcon name="trash" class="size-3.5" />
       </button>
@@ -232,6 +270,49 @@ function pinClassForRoute(outcomeKey: string | null): string {
         <p class="pl-hint">Соедините «тело цикла» с первым шагом, а последний шаг верните в этот блок. Для досрочного выхода направьте ветку результата мимо цикла.</p>
       </template>
 
+      <template v-else-if="data.step.contentType === 'LOOP_END'">
+        <label class="mb-1 block text-[12px] text-muted">{{ regionStartLabel }}</label>
+        <select v-model="data.step.regionStartStepIndex" class="pl-select">
+          <option :value="null">— выберите блок —</option>
+          <option v-for="option in data.regionStartOptions" :key="option.index" :value="option.index">{{ option.label }}</option>
+        </select>
+        <p class="pl-hint">Поток сам вернётся в начало цикла — обратный провод рисовать не нужно. Цикл решит, начинать ли следующую итерацию или выходить по лимиту.</p>
+      </template>
+
+      <template v-else-if="data.step.contentType === 'PROMPT_LOOP'">
+        <label class="mb-1 block text-[12px] text-muted">Сколько раз повторить</label>
+        <input v-model.number="data.step.maxIterations" type="number" min="1" max="100" class="pl-input mb-2" />
+        <textarea
+          v-model="data.step.promptText"
+          rows="4"
+          placeholder="Например: проведи ревью, после поправь ошибки"
+          class="pl-textarea"
+        />
+        <p class="pl-hint">Блок повторяет свой промпт заданное число раз сам в себе — тело рёбрами набрасывать не нужно. Номер итерации считает сервер, он же виден в прогоне.</p>
+      </template>
+
+      <template v-else-if="data.step.contentType === 'ORCHESTRATOR'">
+        <label class="mb-1 block text-[12px] text-muted">Попыток на шаг</label>
+        <input v-model.number="data.step.maxIterations" type="number" min="1" max="5" class="pl-input" />
+        <p v-if="helpOpen" class="pl-help">
+          Внутри региона работу делают дешёвые модели под присмотром дорогой: ведущая модель не выполняет
+          шаги сама, а раздаёт их, запускает и принимает результат, а не прошедшее приёмку повторяет —
+          до указанного числа попыток, потом моделью сильнее, потом сама. Для этого нужен скилл
+          <b>pipelines</b> и хотя бы один локальный CLI, которым можно запустить модель. Если ничего
+          не нашлось, шаги просто выполнит сам агент — прогон не упадёт.
+        </p>
+        <p v-else class="pl-hint">Регион до блока «Приёмка» раздаётся дешёвым моделям. Подробнее — по знаку «?» в заголовке.</p>
+      </template>
+
+      <template v-else-if="data.step.contentType === 'ORCHESTRATOR_END'">
+        <label class="mb-1 block text-[12px] text-muted">{{ regionStartLabel }}</label>
+        <select v-model="data.step.regionStartStepIndex" class="pl-select">
+          <option :value="null">— выберите блок —</option>
+          <option v-for="option in data.regionStartOptions" :key="option.index" :value="option.index">{{ option.label }}</option>
+        </select>
+        <p class="pl-hint">Конец региона: дальше работает сам ведущий агент.</p>
+      </template>
+
       <template v-else-if="data.step.contentType === 'WATCHER'">
         <select v-model="data.step.watchSource" class="pl-select mb-2" @change="watchTargetChanged(true)">
           <option value="GITLAB_MR">Merge request в GitLab</option>
@@ -264,6 +345,13 @@ function pinClassForRoute(outcomeKey: string | null): string {
         <p class="pl-hint">{{ watcherHint }}</p>
       </template>
 
+      <label v-if="showDelegationHint" class="mt-2 block">
+        <span class="mb-1 block text-[12px] text-muted">Кому отдать</span>
+        <select v-model="data.step.delegationHint" class="pl-select">
+          <option v-for="hint in DELEGATION_HINTS" :key="String(hint.value)" :value="hint.value">{{ hint.label }}</option>
+        </select>
+      </label>
+
       <label v-if="data.step.contentType === 'PROMPT' || data.step.contentType === 'MD_FILE'" class="pl-file pl-file-secondary">
         <input type="file" class="sr-only" @change="data.on.referenceFileChosen($event)" />
         <AppIcon name="link" class="size-3.5" />
@@ -295,7 +383,12 @@ function pinClassForRoute(outcomeKey: string | null): string {
         </div>
       </div>
 
-      <div class="pl-port-group">
+      <div v-if="data.step.contentType === 'LOOP_END'" class="pl-port-row pl-port-row-out">
+        <span class="pl-branch-default">возврат в цикл</span>
+        <span class="pl-port-target">{{ data.step.regionStartStepIndex === null ? 'цикл не выбран' : data.regionStartOptions.find((o) => o.index === data.step.regionStartStepIndex)?.label ?? '—' }}</span>
+      </div>
+
+      <div v-else class="pl-port-group">
         <div class="pl-port-group-head">
           <span class="pl-port-label">{{ isCondition || isParallel ? 'Ветки' : 'Переходы' }}</span>
           <button v-if="canAddBranch" type="button" class="pl-text-btn nodrag" @click="data.on.addBranch()">
