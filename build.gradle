@@ -56,6 +56,12 @@ tasks.register('installPlaywrightBrowsers', JavaExec) {
 
 tasks.named('test') {
     useJUnitPlatform()
+    // SkillAssetsInSyncTest compares the shipped skills against the copies in .claude/skills.
+    // Those copies aren't on the test classpath, so without declaring them the test task stays
+    // UP-TO-DATE and the drift it exists to catch goes unnoticed.
+    inputs.dir('.claude/skills')
+            .withPropertyName('checkedInSkills')
+            .withPathSensitivity(PathSensitivity.RELATIVE)
 }
 
 bootJar {
