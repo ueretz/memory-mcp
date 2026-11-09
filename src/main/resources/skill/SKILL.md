@@ -202,7 +202,7 @@ specific classes, you can also save/update a single location directly via
   optionally linking the entry that holds its MD spec right away.
 - `task_spec_set(projectScope, taskKey, entryName)` - link an existing entry to the task as its MD
   spec (replaces any previous link; the previous entry is left alone).
-- `task_cancel(projectScope, taskKey, reason?)` - mark a task `CANCELLED` instead of done; the
+- `task_cancel(projectScope, taskKey)` - mark a task `CANCELLED` instead of done; the
   dashboard shows a red cross for it rather than a progress ring.
 - `task_list(projectScope)` - list a project's tasks; check before creating a duplicate.
 - `task_close(projectScope, taskKey)` - mark a task done. A task's progress bar and the ring on

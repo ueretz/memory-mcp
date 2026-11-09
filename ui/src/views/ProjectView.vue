@@ -46,7 +46,11 @@ const pipelinesEnabled = computed(
 )
 
 const activeTasks = computed(() => (tasks.value ?? []).filter((task) => task.status === 'ACTIVE'))
-const doneTasks = computed(() => (tasks.value ?? []).filter((task) => task.status === 'DONE'))
+// Done and cancelled share the collapsed section: both are finished as far as the page is
+// concerned, and a status that matched no group at all would drop its tasks off the page.
+const closedTasks = computed(() =>
+  (tasks.value ?? []).filter((task) => task.status === 'DONE' || task.status === 'CANCELLED'),
+)
 
 const router = useRouter()
 const showDeleteConfirm = ref(false)
@@ -228,16 +232,16 @@ async function confirmDelete() {
           />
         </div>
 
-        <details v-if="doneTasks.length" class="group pt-4">
+        <details v-if="closedTasks.length" class="group pt-4">
           <summary
             class="inline-flex cursor-pointer list-none items-center gap-1.5 rounded-lg px-1 py-1.5 text-[12.5px] text-muted transition hover:text-content"
           >
             <AppIcon name="chevron" class="size-3 transition group-open:rotate-90" />
-            {{ doneTasks.length }} done
+            {{ closedTasks.length }} closed
           </summary>
           <div class="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
             <TaskCard
-              v-for="task in doneTasks"
+              v-for="task in closedTasks"
               :key="task.taskKey"
               :task="task"
               :project-scope="project"

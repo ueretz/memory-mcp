@@ -39,12 +39,15 @@ public class TaskMcpTools {
             @McpToolParam(description = "MANUAL if the user gave the key directly, JIRA if resolved via a ticket-tracker tool", required = false) Task.Source source,
             @McpToolParam(description = "Name of an existing memory entry containing the task's markdown spec. Save it with memory_save first; omit to leave the current spec link unchanged.", required = false) String specEntryName) {
         TaskSummary result = taskService.start(projectScope, taskKey, title, source);
+        // Recorded before the spec link: the task exists from here on, and linking a spec that
+        // isn't saved yet is the normal first-call failure - losing the TASK_START event over it
+        // would make the stats disagree with the database.
+        usageEventRecorder.record(UsageEvent.Action.TASK_START, null, projectScope, taskKey, null);
         if (specEntryName != null) {
             TaskDetail detail = taskService.setSpec(projectScope, taskKey, specEntryName);
             result = new TaskSummary(detail.taskKey(), detail.title(), detail.source(), detail.status(),
                     detail.progress(), detail.spec() == null ? null : detail.spec().name(), detail.updatedAt());
         }
-        usageEventRecorder.record(UsageEvent.Action.TASK_START, null, projectScope, taskKey, null);
         return result;
     }
 

@@ -102,7 +102,7 @@ subtasks that are `DONE`, with `TODO`/`IN_PROGRESS`/`BLOCKED` all counting as no
 no progress field to set - moving a subtask's status *is* how progress is reported, which is
 another reason a subtask must never be left silently `IN_PROGRESS`.
 
-A task that is abandoned rather than finished gets `task_cancel(projectScope, taskKey, reason?)`,
+A task that is abandoned rather than finished gets `task_cancel(projectScope, taskKey)`,
 not `task_close` - the dashboard then shows a red cross instead of a stale progress ring, and the
 reason belongs in the task's own MD spec.
 

@@ -6,6 +6,7 @@ import ru.iuribabalin.memorymcp.dto.SpecSummary;
 import ru.iuribabalin.memorymcp.dto.TaskDetail;
 import ru.iuribabalin.memorymcp.dto.TaskSummary;
 import ru.iuribabalin.memorymcp.entity.AgentTask;
+import ru.iuribabalin.memorymcp.entity.MemoryNode;
 import ru.iuribabalin.memorymcp.entity.Task;
 import ru.iuribabalin.memorymcp.repository.AgentTaskRepository;
 import ru.iuribabalin.memorymcp.repository.MemoryNodeRepository;
@@ -45,6 +46,11 @@ public class TaskService {
         if (isNew) {
             task.setStatus(Task.Status.ACTIVE);
             task.setCreatedAt(now);
+        } else if (task.getStatus() == Task.Status.CANCELLED) {
+            // Resuming is the only way back from a cancellation - there is no reopen tool, and a
+            // task left CANCELLED keeps rendering as a red cross with its progress suppressed
+            // while work continues on it.
+            task.setStatus(Task.Status.ACTIVE);
         }
         task.setUpdatedAt(now);
         task = taskRepository.save(task);
@@ -97,12 +103,26 @@ public class TaskService {
     @Transactional
     public TaskDetail setSpec(String projectScope, String taskKey, String entryName) {
         Task task = resolve(projectScope, taskKey);
-        Long specEntryId = memoryNodeRepository.findByName(entryName)
-                .orElseThrow(() -> new MemoryNotFoundException(entryName))
-                .getId();
-        task.setSpecEntryId(specEntryId);
+        task.setSpecEntryId(resolveSpecEntry(task, entryName));
         task.setUpdatedAt(Instant.now());
         return toDetail(taskRepository.save(task));
+    }
+
+    /**
+     * Resolves the entry a task or one of its subtasks links as its spec. Entry names are globally
+     * unique, so a near-miss name from another project resolves cleanly - and the UI then builds
+     * the spec's link from *this* task's scope, presenting a foreign document as this task's spec.
+     * Rejecting the mismatch here fails at the point the agent made the typo instead.
+     */
+    Long resolveSpecEntry(Task task, String entryName) {
+        MemoryNode node = memoryNodeRepository.findByName(entryName)
+                .orElseThrow(() -> new MemoryNotFoundException(entryName));
+        boolean sameProject = task.getProjectScope().equals(node.getProjectScope());
+        boolean sameTaskOrCommon = node.getTask() == null || node.getTask().getId().equals(task.getId());
+        if (!sameProject || !sameTaskOrCommon) {
+            throw new SpecEntryScopeMismatchException(entryName, task.getProjectScope(), task.getTaskKey());
+        }
+        return node.getId();
     }
 
     @Transactional
