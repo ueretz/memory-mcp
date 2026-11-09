@@ -5,7 +5,9 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.transaction.annotation.Transactional;
 import ru.iuribabalin.memorymcp.dto.AgentTaskSummary;
+import ru.iuribabalin.memorymcp.dto.SaveMemoryRequest;
 import ru.iuribabalin.memorymcp.entity.AgentTask;
+import ru.iuribabalin.memorymcp.entity.MemoryNode;
 import ru.iuribabalin.memorymcp.entity.Task;
 
 import java.util.List;
@@ -22,6 +24,9 @@ class AgentTaskServiceTest {
 
     @Autowired
     private TaskService taskService;
+
+    @Autowired
+    private MemoryService memoryService;
 
     @Test
     void createsAndListsAgentTasksInCreationOrder() {
@@ -180,5 +185,62 @@ class AgentTaskServiceTest {
                 "agent-task-svc-test-claimable-1", "AT-CLAIMABLE-SVC-1", null, AgentTask.Status.DONE, true);
 
         assertThat(result).extracting(AgentTaskSummary::title).containsExactly("Todo");
+    }
+
+    @Test
+    void linksASpecToASubtaskAndReplacesItOnTheNextCall() {
+        taskService.start("agent-task-spec-project", "ATS-1", "Test task", Task.Source.MANUAL);
+        saveEntry("agent-task-spec-first", "agent-task-spec-project", "ATS-1");
+        saveEntry("agent-task-spec-second", "agent-task-spec-project", "ATS-1");
+        AgentTaskSummary created = agentTaskService.create(
+                "agent-task-spec-project", "ATS-1", "Implement", AgentTask.Type.IMPLEMENTATION, "label", null);
+
+        agentTaskService.setSpec("agent-task-spec-project", "ATS-1", created.id(), "agent-task-spec-first");
+        AgentTaskSummary relinked = agentTaskService.setSpec(
+                "agent-task-spec-project", "ATS-1", created.id(), "agent-task-spec-second");
+
+        assertThat(relinked.spec().name()).isEqualTo("agent-task-spec-second");
+        assertThat(agentTaskService.list("agent-task-spec-project", "ATS-1", null, null, false))
+                .singleElement()
+                .extracting(summary -> summary.spec().name())
+                .isEqualTo("agent-task-spec-second");
+    }
+
+    @Test
+    void createLinksTheSpecRightAwayWhenGivenItsEntryName() {
+        taskService.start("agent-task-spec-create-project", "ATS-2", "Test task", Task.Source.MANUAL);
+        saveEntry("agent-task-spec-create-entry", "agent-task-spec-create-project", "ATS-2");
+
+        AgentTaskSummary created = agentTaskService.create(
+                "agent-task-spec-create-project", "ATS-2", "Implement", AgentTask.Type.IMPLEMENTATION,
+                "label", null, "agent-task-spec-create-entry");
+
+        assertThat(created.spec().name()).isEqualTo("agent-task-spec-create-entry");
+    }
+
+    @Test
+    void aSubtaskWithoutASpecReportsItAsNull() {
+        taskService.start("agent-task-no-spec-project", "ATS-3", "Test task", Task.Source.MANUAL);
+
+        AgentTaskSummary created = agentTaskService.create(
+                "agent-task-no-spec-project", "ATS-3", "Implement", AgentTask.Type.IMPLEMENTATION, "label", null);
+
+        assertThat(created.spec()).isNull();
+    }
+
+    @Test
+    void linkingAnUnknownEntryAsSubtaskSpecFails() {
+        taskService.start("agent-task-spec-missing-project", "ATS-4", "Test task", Task.Source.MANUAL);
+        AgentTaskSummary created = agentTaskService.create(
+                "agent-task-spec-missing-project", "ATS-4", "Implement", AgentTask.Type.IMPLEMENTATION, "label", null);
+
+        assertThatThrownBy(() -> agentTaskService.setSpec(
+                "agent-task-spec-missing-project", "ATS-4", created.id(), "no-such-entry"))
+                .isInstanceOf(MemoryNotFoundException.class);
+    }
+
+    private void saveEntry(String name, String projectScope, String taskKey) {
+        memoryService.save(new SaveMemoryRequest(
+                name, MemoryNode.Type.PROJECT, "spec", "# spec", projectScope, taskKey, null, null, null));
     }
 }

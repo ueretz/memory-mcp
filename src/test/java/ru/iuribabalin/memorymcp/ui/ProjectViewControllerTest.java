@@ -9,11 +9,14 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import ru.iuribabalin.memorymcp.dto.AgentTaskSummary;
+import ru.iuribabalin.memorymcp.dto.SpecSummary;
+import ru.iuribabalin.memorymcp.dto.TaskDetail;
 import ru.iuribabalin.memorymcp.entity.AgentTask;
 import ru.iuribabalin.memorymcp.service.AgentTaskService;
 import ru.iuribabalin.memorymcp.service.ProjectService;
 import ru.iuribabalin.memorymcp.service.TaskNotFoundException;
 import ru.iuribabalin.memorymcp.service.TaskService;
+import ru.iuribabalin.memorymcp.entity.Task;
 
 import java.time.Instant;
 import java.util.List;
@@ -91,5 +94,45 @@ class ProjectViewControllerTest {
                 .andExpect(status().isNoContent());
 
         verify(projectService).delete("memory-mcp");
+    }
+
+    @Test
+    void servesOneTaskWithItsSpecAndProgress() throws Exception {
+        Instant now = Instant.now();
+        TaskDetail detail = new TaskDetail(
+                "AT-1", "Test task", Task.Source.MANUAL, Task.Status.ACTIVE,
+                new SpecSummary("at-1-spec", "What has to be done", now),
+                new TaskDetail.Progress(1, 4, 25), now, now);
+        when(taskService.get("memory-mcp", "AT-1")).thenReturn(detail);
+
+        mockMvc.perform(get("/api/projects/memory-mcp/tasks/AT-1"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.taskKey").value("AT-1"))
+                .andExpect(jsonPath("$.spec.name").value("at-1-spec"))
+                .andExpect(jsonPath("$.progress.done").value(1))
+                .andExpect(jsonPath("$.progress.total").value(4))
+                .andExpect(jsonPath("$.progress.percent").value(25));
+    }
+
+    @Test
+    void servesATaskWithoutASpecAsNull() throws Exception {
+        Instant now = Instant.now();
+        when(taskService.get("memory-mcp", "AT-2")).thenReturn(new TaskDetail(
+                "AT-2", null, Task.Source.MANUAL, Task.Status.CANCELLED, null,
+                new TaskDetail.Progress(0, 0, 0), now, now));
+
+        mockMvc.perform(get("/api/projects/memory-mcp/tasks/AT-2"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.spec").doesNotExist())
+                .andExpect(jsonPath("$.status").value("CANCELLED"));
+    }
+
+    @Test
+    void returns404WhenTheRequestedTaskDoesNotExist() throws Exception {
+        when(taskService.get("memory-mcp", "NO-SUCH"))
+                .thenThrow(new TaskNotFoundException("memory-mcp", "NO-SUCH"));
+
+        mockMvc.perform(get("/api/projects/memory-mcp/tasks/NO-SUCH"))
+                .andExpect(status().isNotFound());
     }
 }
