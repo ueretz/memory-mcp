@@ -38,6 +38,15 @@ public class Pipeline {
     @Column(name = "updated_at", nullable = false)
     private Instant updatedAt;
 
+    /**
+     * The step a run begins at, chosen by the author on the board's input plate. Before V24 the
+     * start was inferred ("the step nothing routes into"), which turned ambiguous the moment a
+     * pipeline had two such steps - the usual cause being variables, which had to be steps back
+     * then. Null only for a pipeline that has no steps yet.
+     */
+    @Column(name = "start_step_id")
+    private Long startStepId;
+
     public Long getId() {
         return id;
     }
@@ -96,5 +105,13 @@ public class Pipeline {
 
     public void setUpdatedAt(Instant updatedAt) {
         this.updatedAt = updatedAt;
+    }
+
+    public Long getStartStepId() {
+        return startStepId;
+    }
+
+    public void setStartStepId(Long startStepId) {
+        this.startStepId = startStepId;
     }
 }

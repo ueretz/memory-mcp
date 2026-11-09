@@ -161,6 +161,10 @@ export interface SettingSummary {
 }
 
 export type PipelineParameterType = 'STRING' | 'NUMBER' | 'BOOLEAN'
+/**
+ * `VARIABLE` is historical: V24 moved variables onto the pipeline's input plate, so no step can be
+ * one any more. It stays in the union because run steps recorded before then still report it.
+ */
 export type PipelineStepContentType =
   | 'PROMPT' | 'MD_FILE' | 'CONDITION' | 'VARIABLE' | 'PARALLEL' | 'JOIN' | 'LOOP' | 'WATCHER'
   | 'LOOP_END' | 'PROMPT_LOOP' | 'ORCHESTRATOR' | 'ORCHESTRATOR_END'
@@ -271,12 +275,45 @@ export interface PipelineParameterLinkView {
   parameterName: string
   targetStepOrderIndex: number | null
   targetStepTitle: string | null
+  /** Set instead of the step target when the parameter helps build a variable. */
+  targetVariableName: string | null
 }
 
 export interface PipelineUpsertParameterLink {
   token: string
   parameterName: string
   targetStepIndex: number | null
+  targetVariableName?: string | null
+}
+
+/** A named constant on the input plate. Not a step - see PipelineVariable in the backend. */
+export interface PipelineVariableView {
+  id: number
+  name: string
+  value: string | null
+  orderIndex: number
+}
+
+export interface PipelineVariableLinkView {
+  id: number
+  token: string
+  variableName: string
+  targetStepOrderIndex: number | null
+  targetStepTitle: string | null
+  /** Set instead of the step target when one variable's value is built from another's. */
+  targetVariableName: string | null
+}
+
+export interface PipelineUpsertVariable {
+  name: string
+  value: string | null
+}
+
+export interface PipelineUpsertVariableLink {
+  token: string
+  variableName: string
+  targetStepIndex: number | null
+  targetVariableName: string | null
 }
 
 export interface PipelineDetail {
@@ -288,6 +325,10 @@ export interface PipelineDetail {
   parameters: PipelineParameterView[]
   steps: PipelineStepView[]
   parameterLinks: PipelineParameterLinkView[]
+  variables: PipelineVariableView[]
+  variableLinks: PipelineVariableLinkView[]
+  /** Null only while a pipeline has no steps yet. */
+  startStepOrderIndex: number | null
   createdBy: string | null
   createdAt: string
   updatedAt: string
@@ -333,6 +374,10 @@ export interface PipelineUpsertRequest {
   parameters: PipelineUpsertParameter[]
   steps: PipelineUpsertStep[]
   parameterLinks: PipelineUpsertParameterLink[]
+  variables: PipelineUpsertVariable[]
+  variableLinks: PipelineUpsertVariableLink[]
+  /** Which step a run begins at. The board always states it; null leaves it to the backend. */
+  startStepIndex: number | null
 }
 
 export interface PipelineExportEnvelope {

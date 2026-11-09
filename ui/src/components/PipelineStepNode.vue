@@ -25,7 +25,7 @@ import {
  * Every wire attaches to a named port, and every port the step can have is drawn on the card up
  * front - nothing appears only after a drag:
  *   - `flow-in`        (left, header)   incoming transition
- *   - `data-in`        (left, footer)   incoming data wire (not on VARIABLE)
+ *   - `data-in`        (left, footer)   incoming data wire (not on PARALLEL / JOIN / LOOP)
  *   - `flow-out-<i>`   (right, footer)  one per transition port: named branches, then "далее";
  *                                       CONDITION has exactly `true` and `false`
  *   - `data-out-<i>`   (right, footer)  one per declared output
@@ -249,11 +249,6 @@ function pinClassForRoute(outcomeKey: string | null): string {
           </div>
           <p class="pl-hint">Сравнивается значение со входа данных. Ветка выбирается сервером, без модели.</p>
         </template>
-      </template>
-
-      <template v-else-if="data.step.contentType === 'VARIABLE'">
-        <input v-model="data.step.promptText" placeholder="Значение, например: src/config" class="pl-input" />
-        <p class="pl-hint">Публикуется как выход «{{ data.step.outputs[0]?.name || 'value' }}» сразу при запуске, без Claude.</p>
       </template>
 
       <template v-else-if="data.step.contentType === 'PARALLEL'">

@@ -368,53 +368,87 @@ class PipelineRunServiceTest {
     }
 
     @Test
-    void variableAsTheRootStepAutoExecutesBeforeStartReturns() {
+    void aVariableValueIsSubstitutedIntoTheStepItIsWiredTo() {
         pipelineService.create(new PipelineUpsertRequest(
                 "var-run-1", "Variable run", "desc", "pipeline-run-svc-test-project",
                 List.of(),
-                List.of(
-                        new PipelineUpsertRequest.StepRequest("Greeting", PipelineStep.ContentType.VARIABLE, "hello",
-                                null, null, 0, 0, List.of(),
-                                List.of(new PipelineUpsertRequest.StepRequest.OutputRequest("greeting")),
-                                List.of(new PipelineUpsertRequest.StepRequest.DataLinkRequest("tok-2", "greeting", 1)),
-                                null, null),
-                        new PipelineUpsertRequest.StepRequest("Use it", PipelineStep.ContentType.PROMPT, "say {{data:tok-2}}",
-                                null, null, 0, 0, List.of(), List.of(), List.of(), null, null))
-        ), "Tester");
+                List.of(new PipelineUpsertRequest.StepRequest("Use it", PipelineStep.ContentType.PROMPT,
+                        "say {{data:tok-2}}", null, null, 0, 0, List.of(), List.of(), List.of(), null, null)),
+                List.of(),
+                List.of(new PipelineUpsertRequest.VariableRequest("greeting", "hello")),
+                List.of(new PipelineUpsertRequest.VariableLinkRequest("tok-2", "greeting", 0, null)),
+                0), "Tester");
 
         PipelineRunDetail run = pipelineRunService.start("var-run-1", "{}", "Tester");
 
-        assertThat(run.currentStepOrderIndex()).isEqualTo(1);
-        assertThat(run.steps().get(0).status()).isEqualTo(PipelineRunStep.Status.DONE);
-        assertThat(run.steps().get(1).resolvedInstructionText()).isEqualTo("say hello");
+        // The variable never shows up as a step of the run - it is not one.
+        assertThat(run.steps()).hasSize(1);
+        assertThat(run.currentStepOrderIndex()).isZero();
+        assertThat(run.steps().get(0).resolvedInstructionText()).isEqualTo("say hello");
     }
 
     @Test
-    void consecutiveVariableAndConditionStepsAllAutoAdvanceInOneCall() {
+    void aVariableBuiltOutOfAParameterAndAnotherVariableResolvesInOnePass() {
         pipelineService.create(new PipelineUpsertRequest(
-                "chain-run-1", "Chained auto steps", "desc", "pipeline-run-svc-test-project",
+                "var-run-2", "Nested variable run", "desc", "pipeline-run-svc-test-project",
+                List.of(new PipelineUpsertRequest.ParameterRequest("who", "Who", PipelineParameter.Type.STRING, false, null)),
+                List.of(new PipelineUpsertRequest.StepRequest("Use it", PipelineStep.ContentType.PROMPT,
+                        "{{data:tok-full}}", null, null, 0, 0, List.of(), List.of(), List.of(), null, null)),
+                List.of(new PipelineUpsertRequest.ParameterLinkRequest("tok-who", "who", null, "full")),
+                List.of(new PipelineUpsertRequest.VariableRequest("greeting", "Привет"),
+                        new PipelineUpsertRequest.VariableRequest("full", "{{data:tok-greeting}}, {{data:tok-who}}!")),
+                List.of(new PipelineUpsertRequest.VariableLinkRequest("tok-greeting", "greeting", null, "full"),
+                        new PipelineUpsertRequest.VariableLinkRequest("tok-full", "full", 0, null)),
+                0), "Tester");
+
+        PipelineRunDetail run = pipelineRunService.start("var-run-2", "{\"who\":\"Юрий\"}", "Tester");
+
+        assertThat(run.steps().get(0).resolvedInstructionText()).isEqualTo("Привет, Юрий!");
+    }
+
+    @Test
+    void aVariableCanFeedTheValueAConditionComparesAgainst() {
+        pipelineService.create(new PipelineUpsertRequest(
+                "chain-run-1", "Variable into condition", "desc", "pipeline-run-svc-test-project",
                 List.of(),
                 List.of(
-                        new PipelineUpsertRequest.StepRequest("Set threshold", PipelineStep.ContentType.VARIABLE, "5",
-                                null, null, 0, 0,
-                                List.of(new PipelineUpsertRequest.StepRequest.RouteRequest(null, 1)),
-                                List.of(new PipelineUpsertRequest.StepRequest.OutputRequest("threshold")),
-                                List.of(new PipelineUpsertRequest.StepRequest.DataLinkRequest("tok-3", "threshold", 1)),
-                                null, null),
                         new PipelineUpsertRequest.StepRequest("Check threshold", PipelineStep.ContentType.CONDITION, null,
                                 null, null, 0, 0,
-                                List.of(new PipelineUpsertRequest.StepRequest.RouteRequest("true", 2),
+                                List.of(new PipelineUpsertRequest.StepRequest.RouteRequest("true", 1),
                                         new PipelineUpsertRequest.StepRequest.RouteRequest("false", null)),
                                 List.of(), List.of(), PipelineStep.ConditionOperator.EQUALS, "5"),
                         new PipelineUpsertRequest.StepRequest("Notify", PipelineStep.ContentType.PROMPT, "notify",
-                                null, null, 0, 0, List.of(), List.of(), List.of(), null, null))
-        ), "Tester");
+                                null, null, 0, 0, List.of(), List.of(), List.of(), null, null)),
+                List.of(),
+                List.of(new PipelineUpsertRequest.VariableRequest("threshold", "5")),
+                List.of(new PipelineUpsertRequest.VariableLinkRequest("tok-3", "threshold", 0, null)),
+                0), "Tester");
 
         PipelineRunDetail run = pipelineRunService.start("chain-run-1", "{}", "Tester");
 
-        assertThat(run.currentStepOrderIndex()).isEqualTo(2);
         assertThat(run.steps().get(0).status()).isEqualTo(PipelineRunStep.Status.DONE);
-        assertThat(run.steps().get(1).status()).isEqualTo(PipelineRunStep.Status.DONE);
+        assertThat(run.currentStepOrderIndex()).isEqualTo(1);
+    }
+
+    @Test
+    void aRunBeginsAtTheStepPinnedToTheInputPlate() {
+        pipelineService.create(new PipelineUpsertRequest(
+                "explicit-start-run-1", "Explicit start", "desc", "pipeline-run-svc-test-project",
+                List.of(),
+                List.of(
+                        new PipelineUpsertRequest.StepRequest("Unwired", PipelineStep.ContentType.PROMPT, "skip me",
+                                null, null, 0, 0, List.of(), List.of(), List.of(), null, null),
+                        new PipelineUpsertRequest.StepRequest("Real start", PipelineStep.ContentType.PROMPT, "start here",
+                                null, null, 0, 0,
+                                List.of(new PipelineUpsertRequest.StepRequest.RouteRequest(null, 2)),
+                                List.of(), List.of(), null, null),
+                        new PipelineUpsertRequest.StepRequest("Then", PipelineStep.ContentType.PROMPT, "then",
+                                null, null, 0, 0, List.of(), List.of(), List.of(), null, null)),
+                List.of(), List.of(), List.of(), 1), "Tester");
+
+        PipelineRunDetail run = pipelineRunService.start("explicit-start-run-1", "{}", "Tester");
+
+        assertThat(run.currentStepOrderIndex()).isEqualTo(1);
     }
 
     private void createParameterLinkPipeline(String slug) {

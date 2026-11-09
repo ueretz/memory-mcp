@@ -180,6 +180,13 @@ async function confirmDelete() {
             <b>{{ p.name }}</b> · {{ p.type.toLowerCase() }}<span v-if="p.required" class="pl-params-required">*</span><span v-if="p.defaultValue" class="pl-runs-muted"> = {{ p.defaultValue }}</span>
           </span>
         </div>
+        <!-- Variables are constants the author wrote, not values a run is started with, so they get
+             their own row rather than sitting among the parameters. -->
+        <div v-if="pipeline.variables.length" class="pl-chips mt-2">
+          <span v-for="v in pipeline.variables" :key="v.id" class="pl-chip-var">
+            <b>{{ v.name }}</b><span v-if="v.value" class="pl-runs-muted"> = {{ v.value }}</span>
+          </span>
+        </div>
       </section>
 
       <section>

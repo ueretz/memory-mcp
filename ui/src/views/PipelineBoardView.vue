@@ -16,33 +16,40 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, toRef, watch } fro
 import { onBeforeRouteLeave } from 'vue-router'
 
 import { fetchPipeline, updatePipeline, uploadPipelineAsset } from '@/api/client'
-import type { PipelineStepContentType, PipelineUpsertParameter } from '@/api/types'
+import type { PipelineUpsertParameter } from '@/api/types'
 import AppIcon from '@/components/AppIcon.vue'
 import ErrorState from '@/components/ErrorState.vue'
 import PipelineEndNode from '@/components/PipelineEndNode.vue'
-import PipelineParamsNode from '@/components/PipelineParamsNode.vue'
+import PipelineInputNode from '@/components/PipelineInputNode.vue'
 import PipelineStepNode, { type RegionStartOption, type StepNodeActions, type WiredInput } from '@/components/PipelineStepNode.vue'
 import {
   BLOCK_KINDS,
-  PARAMS_NODE_ID,
-  PARAMS_SOURCE_TITLE,
+  INPUT_NODE_ID,
   PARAM_PIN_COLORS,
   REGION_START_KIND,
+  VARIABLE_PIN_COLOR,
   WIRE_COLORS,
   analyzeGraph,
   collectIssues,
   fromDetail,
+  inputLinkSourceTitle,
+  inputLinksFromDetail,
   isAncestor,
   newBoardStep,
   orchestratedSteps,
-  paramLinksFromDetail,
   removeStepAt,
+  startIndexFromDetail,
   stepDisplayTitle,
   stripDataToken,
+  toUpsertParameterLinks,
   toUpsertSteps,
+  toUpsertVariableLinks,
+  variablesFromDetail,
   wouldCreateCycle,
-  type BoardParamLink,
+  type BoardBlockKind,
+  type BoardInputLink,
   type BoardStep,
+  type BoardVariable,
 } from '@/lib/pipelineBoard'
 
 // The board always operates on an already-created pipeline - metadata (name, parameters) lives on
@@ -58,7 +65,12 @@ const description = ref<string | null>(null)
 const projectScope = ref<string | null>(null)
 const parameters = ref<PipelineUpsertParameter[]>([])
 const steps = ref<BoardStep[]>([])
-const paramLinks = ref<BoardParamLink[]>([])
+// Variables and the wires out of the input plate. A variable is not a step - it does no work, so it
+// lives on the plate next to the run parameters instead of taking a card in the transition chain.
+const variables = ref<BoardVariable[]>([])
+const inputLinks = ref<BoardInputLink[]>([])
+/** Which step the run begins at. Stated by the author on the plate, not inferred from the graph. */
+const startStepIndex = ref<number | null>(null)
 const loading = ref(true)
 const loadError = ref<string | null>(null)
 const saving = ref(false)
@@ -69,8 +81,8 @@ const savedToastVisible = ref(false)
 const END_NODE_ID = 'end'
 const CARD_WIDTH = 320
 const endPosition = ref({ x: 0, y: 0 })
-// The parameters node sits left of the leftmost block; its position is session-local like the end node's.
-const paramsPosition = ref({ x: 0, y: 0 })
+// The input plate sits left of the leftmost block; its position is session-local like the end node's.
+const inputPosition = ref({ x: 0, y: 0 })
 // Card sizes are session-local: the API has no field for them, only for positions.
 const nodeSizes = ref<Record<number, { width: number; height: number }>>({})
 
@@ -101,20 +113,23 @@ function buildRequest() {
     projectScope: projectScope.value,
     parameters: parameters.value,
     steps: toUpsertSteps(steps.value),
-    parameterLinks: paramLinks.value.map((l) => ({ token: l.token, parameterName: l.parameterName, targetStepIndex: l.targetStepIndex })),
+    parameterLinks: toUpsertParameterLinks(inputLinks.value),
+    variables: variables.value.map((v) => ({ name: v.name, value: v.value })),
+    variableLinks: toUpsertVariableLinks(inputLinks.value),
+    startStepIndex: startStepIndex.value,
   }
 }
 
 const dirty = computed(() => !loading.value && JSON.stringify(buildRequest()) !== savedSnapshot.value)
 
-function placeParamsNode() {
+function placeInputNode() {
   if (steps.value.length === 0) {
-    paramsPosition.value = { x: -320, y: 40 }
+    inputPosition.value = { x: -340, y: 40 }
     return
   }
   const minX = Math.min(...steps.value.map((s) => s.positionX))
   const ys = steps.value.filter((s) => s.positionX === minX).map((s) => s.positionY)
-  paramsPosition.value = { x: minX - 340, y: Math.min(...ys) }
+  inputPosition.value = { x: minX - 360, y: Math.min(...ys) }
 }
 
 function placeEndNode() {
@@ -143,8 +158,10 @@ async function load() {
       defaultValue: p.defaultValue,
     }))
     steps.value = fromDetail(pipeline)
-    paramLinks.value = paramLinksFromDetail(pipeline)
-    placeParamsNode()
+    variables.value = variablesFromDetail(pipeline)
+    inputLinks.value = inputLinksFromDetail(pipeline)
+    startStepIndex.value = startIndexFromDetail(pipeline, steps.value)
+    placeInputNode()
     placeEndNode()
     savedSnapshot.value = JSON.stringify(buildRequest())
     selectedStepIndex.value = null
@@ -158,7 +175,13 @@ async function load() {
 
 watch(slug, load, { immediate: true })
 
-const issues = computed(() => collectIssues(steps.value, paramLinks.value, parameters.value.map((p) => p.name)))
+const issues = computed(() => collectIssues({
+  steps: steps.value,
+  inputLinks: inputLinks.value,
+  parameterNames: parameters.value.map((p) => p.name),
+  variables: variables.value,
+  startStepIndex: startStepIndex.value,
+}))
 const errorCount = computed(() => issues.value.filter((i) => i.severity === 'error').length)
 const warningCount = computed(() => issues.value.filter((i) => i.severity === 'warning').length)
 
@@ -248,16 +271,20 @@ function nextFreePosition(): { x: number; y: number } {
 }
 
 /** A block that opens a region, and the marker that closes it - placed as a pair. */
-const REGION_PAIRS: Partial<Record<PipelineStepContentType, PipelineStepContentType>> = {
+const REGION_PAIRS: Partial<Record<BoardBlockKind, BoardBlockKind>> = {
   LOOP: 'LOOP_END',
   ORCHESTRATOR: 'ORCHESTRATOR_END',
 }
 
-function addStep(kind: PipelineStepContentType, at?: { x: number; y: number }) {
+function addStep(kind: BoardBlockKind, at?: { x: number; y: number }) {
   const position = at ?? nextFreePosition()
   const x = Math.round(position.x)
   const y = Math.round(position.y)
   steps.value.push(newBoardStep(kind, { x, y }))
+  // The first block on an empty board is the only thing the start could mean - wiring it by hand
+  // would just be an error waiting to be reported. Checked before the paired marker below is
+  // pushed, or placing a Цикл first would leave the board without a start.
+  if (startStepIndex.value === null && steps.value.length === 1) startStepIndex.value = 0
   // A region needs both ends to mean anything, and finding the second one in the palette is work
   // the author should not have to do: placing the opening block places its closing marker too,
   // already pointing back at it.
@@ -304,7 +331,9 @@ function removeStep(index: number) {
       target.promptText = stripDataToken(target.promptText, link.token)
     }
   })
-  removeStepAt(steps.value, index, paramLinks.value)
+  removeStepAt(steps.value, index, inputLinks.value)
+  if (startStepIndex.value === index) startStepIndex.value = null
+  else if (startStepIndex.value !== null && startStepIndex.value > index) startStepIndex.value--
   const sizes: Record<number, { width: number; height: number }> = {}
   Object.entries(nodeSizes.value).forEach(([key, size]) => {
     const i = Number(key)
@@ -371,12 +400,18 @@ function unwireDataLink(sourceIndex: number, token: string) {
   selectedEdgeId.value = null
 }
 
-function unwireParamLink(token: string) {
-  const link = paramLinks.value.find((l) => l.token === token)
+function unwireInputLink(token: string) {
+  const link = inputLinks.value.find((l) => l.token === token)
   if (!link) return
-  const target = steps.value[link.targetStepIndex]
-  if (target) target.promptText = stripDataToken(target.promptText, token)
-  paramLinks.value = paramLinks.value.filter((l) => l.token !== token)
+  // The placeholder sits in whatever the wire fed: a step's instruction, or a variable's value.
+  if (link.targetStepIndex !== null) {
+    const target = steps.value[link.targetStepIndex]
+    if (target) target.promptText = stripDataToken(target.promptText, token)
+  } else if (link.targetVariableName !== null) {
+    const target = variables.value.find((v) => v.name === link.targetVariableName)
+    if (target) target.value = stripDataToken(target.value, token)
+  }
+  inputLinks.value = inputLinks.value.filter((l) => l.token !== token)
   selectedEdgeId.value = null
 }
 
@@ -384,14 +419,42 @@ function unwireInputByToken(token: string) {
   steps.value.forEach((step, sourceIndex) => {
     if (step.dataLinksOut.some((l) => l.token === token)) unwireDataLink(sourceIndex, token)
   })
-  unwireParamLink(token)
+  unwireInputLink(token)
+}
+
+// ------------------------------------------------------------------------------------------
+// Variables (input plate)
+// ------------------------------------------------------------------------------------------
+
+function addVariable() {
+  variables.value.push({ name: '', value: '' })
+}
+
+function removeVariable(index: number) {
+  const removed = variables.value[index]
+  variables.value.splice(index, 1)
+  // Wires out of it, and wires that fed it, go with it - placeholders included.
+  inputLinks.value
+    .filter((l) => (l.source.kind === 'variable' && l.source.name === removed.name) || l.targetVariableName === removed.name)
+    .map((l) => l.token)
+    .forEach(unwireInputLink)
+}
+
+function renameVariable(index: number, newName: string) {
+  const oldName = variables.value[index].name
+  variables.value[index].name = newName
+  // Links address variables by name, so they follow the rename instead of dangling.
+  inputLinks.value.forEach((link) => {
+    if (link.source.kind === 'variable' && link.source.name === oldName) link.source = { kind: 'variable', name: newName }
+    if (link.targetVariableName === oldName) link.targetVariableName = newName
+  })
 }
 
 function wiredInputsFor(stepIndex: number): WiredInput[] {
   const result: WiredInput[] = []
-  paramLinks.value.forEach((link) => {
+  inputLinks.value.forEach((link) => {
     if (link.targetStepIndex === stepIndex) {
-      result.push({ token: link.token, sourceStepTitle: PARAMS_SOURCE_TITLE, sourceOutputName: link.parameterName })
+      result.push({ token: link.token, sourceStepTitle: inputLinkSourceTitle(link), sourceOutputName: link.source.name })
     }
   })
   steps.value.forEach((step, sourceIndex) => {
@@ -430,7 +493,7 @@ async function onReferenceFileChosen(index: number, event: Event) {
 // Graph -> vue-flow nodes / edges
 // ------------------------------------------------------------------------------------------
 
-const graph = computed(() => analyzeGraph(steps.value))
+const graph = computed(() => analyzeGraph(steps.value, startStepIndex.value))
 const orchestrated = computed(() => orchestratedSteps(steps.value))
 
 function routeTargetLabel(target: BoardStep['routes'][number]['target']): string | null {
@@ -466,21 +529,32 @@ function actionsFor(index: number): StepNodeActions {
   }
 }
 
+const startTargetTitle = computed(() => {
+  const index = startStepIndex.value
+  if (index === null || !steps.value[index]) return null
+  return stepDisplayTitle(steps.value[index], index)
+})
+
 const flowNodes = computed(() => [
   {
-    id: PARAMS_NODE_ID,
-    type: 'params',
-    position: paramsPosition.value,
+    id: INPUT_NODE_ID,
+    type: 'input',
+    position: inputPosition.value,
     class: 'pl-node pl-node-params',
     data: {
       parameters: parameters.value,
-      wiredNames: paramLinks.value.map((l) => l.parameterName),
+      variables: variables.value,
+      wiredParameterNames: inputLinks.value.filter((l) => l.source.kind === 'param').map((l) => l.source.name),
+      wiredVariableNames: inputLinks.value.filter((l) => l.source.kind === 'variable').map((l) => l.source.name),
+      variableNamesWithInput: inputLinks.value.map((l) => l.targetVariableName).filter((n): n is string => n !== null),
+      startTargetTitle: startTargetTitle.value,
       settingsTo: { name: 'pipeline-edit', params: { slug: slug.value } },
+      on: { addVariable, removeVariable, renameVariable },
     },
   },
   ...steps.value.map((step, index) => {
     const size = nodeSizes.value[index]
-    const { roots, reachable } = graph.value
+    const { reachable } = graph.value
     const startKind = REGION_START_KIND[step.contentType]
     const regionStartOptions: RegionStartOption[] = startKind
       ? steps.value.flatMap((candidate, i) =>
@@ -495,8 +569,8 @@ const flowNodes = computed(() => [
       data: {
         step,
         index,
-        isStart: roots.length > 0 && roots[0] === index && steps.value.length > 1,
-        unreachable: steps.value.length > 1 && roots.length > 0 && !reachable.has(index),
+        isStart: startStepIndex.value === index,
+        unreachable: steps.value.length > 1 && startStepIndex.value !== null && !reachable.has(index),
         flowInWired: flowInWired.value.has(index),
         wiredInputs: wiredInputsFor(index),
         routeTargets: step.routes.map((r) => routeTargetLabel(r.target)),
@@ -518,6 +592,8 @@ const flowNodes = computed(() => [
 function flowEdgeId(stepIndex: number, routeIndex: number) {
   return `flow-${stepIndex}-${routeIndex}`
 }
+
+const START_EDGE_ID = 'start'
 
 const flowEdges = computed(() => {
   const selected = selectedEdgeId.value
@@ -564,23 +640,57 @@ const flowEdges = computed(() => {
         }
       }),
   )
-  const paramWires = paramLinks.value.flatMap((link) => {
-    const parameterIndex = parameters.value.findIndex((p) => p.name === link.parameterName)
-    if (parameterIndex < 0 || !steps.value[link.targetStepIndex]) return []
-    const id = `plink-${link.token}`
+  // Wires out of the input plate. The source pin is a parameter row or a variable row; the target
+  // is a step's data input or - when one variable is built out of another - a variable row's input.
+  const inputWires = inputLinks.value.flatMap((link) => {
+    const sourceIndex = link.source.kind === 'param'
+      ? parameters.value.findIndex((p) => p.name === link.source.name)
+      : variables.value.findIndex((v) => v.name === link.source.name)
+    if (sourceIndex < 0) return []
+    const targetVariableIndex = link.targetVariableName === null
+      ? -1
+      : variables.value.findIndex((v) => v.name === link.targetVariableName)
+    if (link.targetStepIndex !== null && !steps.value[link.targetStepIndex]) return []
+    if (link.targetStepIndex === null && targetVariableIndex < 0) return []
+    const id = `ilink-${link.token}`
     const isSelected = selected === id
-    const color = PARAM_PIN_COLORS[parameters.value[parameterIndex].type]
+    const color = link.source.kind === 'param'
+      ? PARAM_PIN_COLORS[parameters.value[sourceIndex].type]
+      : VARIABLE_PIN_COLOR
     return [{
       id,
-      source: PARAMS_NODE_ID,
-      sourceHandle: `param-out-${parameterIndex}`,
-      target: String(link.targetStepIndex),
-      targetHandle: 'data-in',
+      source: INPUT_NODE_ID,
+      sourceHandle: link.source.kind === 'param' ? `param-out-${sourceIndex}` : `var-out-${sourceIndex}`,
+      target: link.targetStepIndex !== null ? String(link.targetStepIndex) : INPUT_NODE_ID,
+      targetHandle: link.targetStepIndex !== null ? 'data-in' : `var-in-${targetVariableIndex}`,
       class: ['pl-edge pl-edge-data', { 'pl-edge-selected': isSelected }],
       style: { stroke: isSelected ? WIRE_COLORS.flowSelected : color, strokeWidth: isSelected ? 2.5 : 1.75, strokeDasharray: '6 4' },
     }]
   })
-  return [...transitions, ...dataWires, ...paramWires]
+  const startWire = startStepIndex.value !== null && steps.value[startStepIndex.value]
+    ? [{
+        id: START_EDGE_ID,
+        source: INPUT_NODE_ID,
+        sourceHandle: 'start-out',
+        target: String(startStepIndex.value),
+        targetHandle: 'flow-in',
+        label: 'старт',
+        class: ['pl-edge pl-edge-flow', { 'pl-edge-selected': selected === START_EDGE_ID }],
+        style: {
+          stroke: selected === START_EDGE_ID ? WIRE_COLORS.flowSelected : WIRE_COLORS.flow,
+          strokeWidth: selected === START_EDGE_ID ? 2.5 : 2,
+        },
+        markerEnd: {
+          type: MarkerType.ArrowClosed,
+          color: selected === START_EDGE_ID ? 'var(--color-accent)' : WIRE_COLORS.flow,
+          width: 16,
+          height: 16,
+        },
+        labelBgPadding: [6, 3] as [number, number],
+        labelBgBorderRadius: 6,
+      }]
+    : []
+  return [...startWire, ...transitions, ...dataWires, ...inputWires]
 })
 
 // ------------------------------------------------------------------------------------------
@@ -592,8 +702,8 @@ function onNodeDragStop({ node }: NodeDragEvent) {
     endPosition.value = { x: node.position.x, y: node.position.y }
     return
   }
-  if (node.id === PARAMS_NODE_ID) {
-    paramsPosition.value = { x: node.position.x, y: node.position.y }
+  if (node.id === INPUT_NODE_ID) {
+    inputPosition.value = { x: node.position.x, y: node.position.y }
     return
   }
   const step = steps.value[Number(node.id)]
@@ -604,7 +714,7 @@ function onNodeDragStop({ node }: NodeDragEvent) {
 function onNodeClick({ node }: NodeMouseEvent) {
   selectedEdgeId.value = null
   contextMenu.value = null
-  selectedStepIndex.value = node.id === END_NODE_ID || node.id === PARAMS_NODE_ID ? null : Number(node.id)
+  selectedStepIndex.value = node.id === END_NODE_ID || node.id === INPUT_NODE_ID ? null : Number(node.id)
 }
 
 function onEdgeClick({ edge }: EdgeMouseEvent) {
@@ -636,21 +746,91 @@ const menuKinds = computed(() => {
   return BLOCK_KINDS.filter((k) => k.label.toLowerCase().includes(q) || k.description.toLowerCase().includes(q))
 })
 
+/** Does `candidate` already take part in building `variableName`? (Walks the plate's own wires.) */
+function buildsOnVariable(variableName: string, candidate: string): boolean {
+  const seen = new Set<string>()
+  const stack = [variableName]
+  while (stack.length) {
+    const current = stack.pop()!
+    for (const link of inputLinks.value) {
+      if (link.source.kind !== 'variable' || link.targetVariableName !== current) continue
+      if (link.source.name === candidate) return true
+      if (!seen.has(link.source.name)) {
+        seen.add(link.source.name)
+        stack.push(link.source.name)
+      }
+    }
+  }
+  return false
+}
+
 function onConnect(connection: Connection) {
   const sourceHandle = connection.sourceHandle ?? ''
   const targetHandle = connection.targetHandle ?? ''
 
-  if (connection.source === PARAMS_NODE_ID) {
-    if (targetHandle !== 'data-in' || connection.target === END_NODE_ID) {
-      showHint('Параметр подключается ко входу данных блока (зелёный порт).')
+  if (connection.source === INPUT_NODE_ID) {
+    // The start port names the first step; it carries no value, so it is handled on its own.
+    if (sourceHandle === 'start-out') {
+      if (targetHandle !== 'flow-in' || connection.target === END_NODE_ID || connection.target === INPUT_NODE_ID) {
+        showHint('Старт подключается ко входу перехода блока — порт в шапке карточки.')
+        return
+      }
+      startStepIndex.value = Number(connection.target)
+      selectedStepIndex.value = null
+      selectedEdgeId.value = START_EDGE_ID
       return
     }
-    const parameter = parameters.value[Number(sourceHandle.slice('param-out-'.length))]
+
+    const fromParameter = sourceHandle.startsWith('param-out-')
+    const source = fromParameter
+      ? parameters.value[Number(sourceHandle.slice('param-out-'.length))]
+      : variables.value[Number(sourceHandle.slice('var-out-'.length))]
+    if (!source) return
+    const sourceRef = { kind: fromParameter ? ('param' as const) : ('variable' as const), name: source.name }
+    if (!source.name.trim()) {
+      showHint('Сначала дайте переменной имя, потом тяните от неё провод.')
+      return
+    }
+
+    // Into another variable's value: that is how one variable is built out of another, with no step.
+    if (connection.target === INPUT_NODE_ID) {
+      if (!targetHandle.startsWith('var-in-')) {
+        showHint('Значение можно подать только во вход переменной (левый пин строки).')
+        return
+      }
+      const targetVariable = variables.value[Number(targetHandle.slice('var-in-'.length))]
+      if (!targetVariable) return
+      if (!fromParameter && targetVariable.name === source.name) {
+        showHint('Переменную нельзя собрать из самой себя.')
+        return
+      }
+      if (!fromParameter && buildsOnVariable(targetVariable.name, source.name)) {
+        showHint('Получился бы цикл: эта переменная уже участвует в сборке источника.')
+        return
+      }
+      if (inputLinks.value.some((l) => l.source.kind === sourceRef.kind && l.source.name === sourceRef.name && l.targetVariableName === targetVariable.name)) {
+        showHint('Это значение уже подключено к этой переменной.')
+        return
+      }
+      const token = crypto.randomUUID()
+      inputLinks.value.push({ token, source: sourceRef, targetStepIndex: null, targetVariableName: targetVariable.name })
+      targetVariable.value = `${targetVariable.value}{{data:${token}}}`
+      selectedStepIndex.value = null
+      selectedEdgeId.value = `ilink-${token}`
+      return
+    }
+
+    if (targetHandle !== 'data-in' || connection.target === END_NODE_ID) {
+      showHint(fromParameter
+        ? 'Параметр подключается ко входу данных блока (зелёный порт).'
+        : 'Переменная подключается ко входу данных блока (зелёный порт).')
+      return
+    }
     const targetIndex = Number(connection.target)
     const target = steps.value[targetIndex]
-    if (!parameter || !target) return
-    if (paramLinks.value.some((l) => l.parameterName === parameter.name && l.targetStepIndex === targetIndex)) {
-      showHint('Этот параметр уже подключён к этому блоку.')
+    if (!target) return
+    if (inputLinks.value.some((l) => l.source.kind === sourceRef.kind && l.source.name === sourceRef.name && l.targetStepIndex === targetIndex)) {
+      showHint('Это значение уже подключено к этому блоку.')
       return
     }
     if (target.contentType === 'CONDITION' && wiredInputsFor(targetIndex).length > 0) {
@@ -658,12 +838,12 @@ function onConnect(connection: Connection) {
       return
     }
     const token = crypto.randomUUID()
-    paramLinks.value.push({ token, parameterName: parameter.name, targetStepIndex: targetIndex })
+    inputLinks.value.push({ token, source: sourceRef, targetStepIndex: targetIndex, targetVariableName: null })
     if (target.contentType !== 'CONDITION') {
       target.promptText = `${target.promptText ?? ''}\n{{data:${token}}}`
     }
     selectedStepIndex.value = null
-    selectedEdgeId.value = `plink-${token}`
+    selectedEdgeId.value = `ilink-${token}`
     return
   }
 
@@ -738,19 +918,30 @@ function onConnect(connection: Connection) {
 }
 
 function removeEdge(id: string) {
-  if (id.startsWith('flow-')) {
+  if (id === START_EDGE_ID) {
+    startStepIndex.value = null
+    selectedEdgeId.value = null
+  } else if (id.startsWith('flow-')) {
     const [, stepIndex, routeIndex] = id.split('-').map(Number)
     unwireRoute(stepIndex, routeIndex)
   } else if (id.startsWith('data-')) {
     unwireInputByToken(id.slice('data-'.length))
-  } else if (id.startsWith('plink-')) {
-    unwireParamLink(id.slice('plink-'.length))
+  } else if (id.startsWith('ilink-')) {
+    unwireInputLink(id.slice('ilink-'.length))
   }
 }
 
 const selectedEdgeSummary = computed(() => {
   const id = selectedEdgeId.value
   if (!id) return null
+  if (id === START_EDGE_ID) {
+    return {
+      kind: 'flow' as const,
+      title: 'Старт',
+      text: `Вход пайплайна → ${startTargetTitle.value ?? '—'}`,
+      detail: 'С этого блока начинается каждый запуск. Переподключите провод, чтобы сменить первый шаг.',
+    }
+  }
   if (id.startsWith('flow-')) {
     const [, stepIndex, routeIndex] = id.split('-').map(Number)
     const step = steps.value[stepIndex]
@@ -768,18 +959,28 @@ const selectedEdgeSummary = computed(() => {
           : `Срабатывает, когда Claude возвращает outcome «${key}» в pipeline_run_step_update.`,
     }
   }
-  if (id.startsWith('plink-')) {
-    const token = id.slice('plink-'.length)
-    const link = paramLinks.value.find((l) => l.token === token)
-    const target = link ? steps.value[link.targetStepIndex] : undefined
-    if (!link || !target) return null
+  if (id.startsWith('ilink-')) {
+    const token = id.slice('ilink-'.length)
+    const link = inputLinks.value.find((l) => l.token === token)
+    if (!link) return null
+    const what = link.source.kind === 'param' ? 'параметра' : 'переменной'
+    if (link.targetVariableName !== null) {
+      return {
+        kind: 'data' as const,
+        title: `Провод ${what}`,
+        text: `${inputLinkSourceTitle(link)} · ${link.source.name} → переменная ${link.targetVariableName}`,
+        detail: `В значение переменной вставлен маркер {{data:${token.slice(0, 8)}…}} — он раскроется при запуске, до первого шага.`,
+      }
+    }
+    const target = link.targetStepIndex !== null ? steps.value[link.targetStepIndex] : undefined
+    if (!target || link.targetStepIndex === null) return null
     return {
       kind: 'data' as const,
-      title: 'Провод параметра',
-      text: `${PARAMS_SOURCE_TITLE} · ${link.parameterName} → ${stepDisplayTitle(target, link.targetStepIndex)}`,
+      title: `Провод ${what}`,
+      text: `${inputLinkSourceTitle(link)} · ${link.source.name} → ${stepDisplayTitle(target, link.targetStepIndex)}`,
       detail: target.contentType === 'CONDITION'
-        ? 'Условие сравнит значение параметра с заданным.'
-        : `В инструкцию вставлен маркер {{data:${token.slice(0, 8)}…}} — при запуске он заменится значением параметра (или его значением по умолчанию).`,
+        ? 'Условие сравнит это значение с заданным.'
+        : `В инструкцию вставлен маркер {{data:${token.slice(0, 8)}…}} — при запуске он заменится значением.`,
     }
   }
   const token = id.slice('data-'.length)
@@ -886,7 +1087,7 @@ function focusIssue(stepIndex: number | null) {
       <VueFlow
         :nodes="flowNodes"
         :edges="flowEdges"
-        :node-types="{ step: PipelineStepNode, end: PipelineEndNode, params: PipelineParamsNode }"
+        :node-types="{ step: PipelineStepNode, end: PipelineEndNode, input: PipelineInputNode }"
         :connection-mode="ConnectionMode.Strict"
         :connection-line-style="{ stroke: 'var(--color-accent)', strokeWidth: 2 }"
         :delete-key-code="null"
@@ -933,6 +1134,7 @@ function focusIssue(stepIndex: number | null) {
         <span><i class="pl-legend-flow" />переход</span>
         <span><i class="pl-legend-data" />данные</span>
         <span><i class="pl-legend-param" />параметр</span>
+        <span><i class="pl-legend-var" />переменная</span>
       </div>
 
       <div v-if="hint" class="pl-toast">{{ hint }}</div>

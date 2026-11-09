@@ -13,6 +13,7 @@ import ru.iuribabalin.memorymcp.entity.PipelineRun;
 import ru.iuribabalin.memorymcp.entity.PipelineStep;
 import ru.iuribabalin.memorymcp.entity.PipelineStepOutput;
 import ru.iuribabalin.memorymcp.entity.PipelineStepRoute;
+import ru.iuribabalin.memorymcp.entity.PipelineVariable;
 import ru.iuribabalin.memorymcp.repository.PipelineDataLinkRepository;
 import ru.iuribabalin.memorymcp.repository.PipelineParameterRepository;
 import ru.iuribabalin.memorymcp.repository.PipelineRepository;
@@ -20,6 +21,7 @@ import ru.iuribabalin.memorymcp.repository.PipelineRunRepository;
 import ru.iuribabalin.memorymcp.repository.PipelineStepOutputRepository;
 import ru.iuribabalin.memorymcp.repository.PipelineStepRepository;
 import ru.iuribabalin.memorymcp.repository.PipelineStepRouteRepository;
+import ru.iuribabalin.memorymcp.repository.PipelineVariableRepository;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
@@ -36,6 +38,7 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 @Service
 public class PipelineService {
@@ -52,6 +55,7 @@ public class PipelineService {
     private final PipelineStepRouteRepository pipelineStepRouteRepository;
     private final PipelineStepOutputRepository pipelineStepOutputRepository;
     private final PipelineDataLinkRepository pipelineDataLinkRepository;
+    private final PipelineVariableRepository pipelineVariableRepository;
     private final PipelineAssetService pipelineAssetService;
     private final PipelineRunRepository pipelineRunRepository;
     private final ObjectMapper objectMapper;
@@ -62,6 +66,7 @@ public class PipelineService {
                             PipelineStepRouteRepository pipelineStepRouteRepository,
                             PipelineStepOutputRepository pipelineStepOutputRepository,
                             PipelineDataLinkRepository pipelineDataLinkRepository,
+                            PipelineVariableRepository pipelineVariableRepository,
                             PipelineAssetService pipelineAssetService,
                            PipelineRunRepository pipelineRunRepository,
                             ObjectMapper objectMapper) {
@@ -71,6 +76,7 @@ public class PipelineService {
         this.pipelineStepRouteRepository = pipelineStepRouteRepository;
         this.pipelineStepOutputRepository = pipelineStepOutputRepository;
         this.pipelineDataLinkRepository = pipelineDataLinkRepository;
+        this.pipelineVariableRepository = pipelineVariableRepository;
         this.pipelineAssetService = pipelineAssetService;
         this.pipelineRunRepository = pipelineRunRepository;
         this.objectMapper = objectMapper;
@@ -106,13 +112,7 @@ public class PipelineService {
     }
 
     private PipelineDetail create(PipelineUpsertRequest request, String createdBy, boolean imported) {
-        if (!imported) {
-            validateSteps(request.steps());
-        }
-        validateGraph(request.steps());
-        validateDataLinks(request.steps());
-        validateParameterLinks(request);
-        validateStepKinds(request.steps(), request.parameterLinks());
+        validate(request, imported);
         if (pipelineRepository.findBySlug(request.slug()).isPresent()) {
             throw new PipelineSlugTakenException(request.slug());
         }
@@ -123,22 +123,52 @@ public class PipelineService {
         pipeline.setCreatedAt(now);
         applyFields(pipeline, request, now);
         pipeline = pipelineRepository.save(pipeline);
-        replaceParametersAndSteps(pipeline.getId(), request);
+        List<PipelineStep> savedSteps = replaceParametersAndSteps(pipeline.getId(), request);
+        pipeline.setStartStepId(resolveStartStepId(request, savedSteps));
+        pipelineRepository.save(pipeline);
         return toDetail(resolve(request.slug()));
     }
 
     @Transactional
     public PipelineDetail update(String slug, PipelineUpsertRequest request) {
-        validateSteps(request.steps());
-        validateGraph(request.steps());
-        validateDataLinks(request.steps());
-        validateParameterLinks(request);
-        validateStepKinds(request.steps(), request.parameterLinks());
+        validate(request, false);
         Pipeline pipeline = resolve(slug);
         applyFields(pipeline, request, Instant.now());
+        // The start step is cleared up front: the step row it points at is about to be deleted and
+        // re-created by replaceParametersAndSteps, and the FK would refuse the delete otherwise.
+        pipeline.setStartStepId(null);
+        pipelineRepository.saveAndFlush(pipeline);
+        List<PipelineStep> savedSteps = replaceParametersAndSteps(pipeline.getId(), request);
+        pipeline.setStartStepId(resolveStartStepId(request, savedSteps));
         pipelineRepository.save(pipeline);
-        replaceParametersAndSteps(pipeline.getId(), request);
         return toDetail(resolve(slug));
+    }
+
+    private void validate(PipelineUpsertRequest request, boolean imported) {
+        if (!imported) {
+            // Asset-less MD_FILE steps remain importable so the author can reattach the file on the
+            // target installation; ordinary saves must still reject that incomplete step.
+            validateSteps(request.steps());
+        }
+        validateGraph(request.steps(), request.startStepIndex());
+        validateDataLinks(request.steps());
+        validateVariables(request);
+        validateLinkTargets(request);
+        validateStepKinds(request.steps(), request.parameterLinks(), request.variableLinks());
+    }
+
+    /**
+     * The start the author chose, or - for a caller that sends none (an older API client, an export
+     * taken before V24) - the pre-V24 inference: the one step nothing routes into.
+     */
+    private Long resolveStartStepId(PipelineUpsertRequest request, List<PipelineStep> savedSteps) {
+        if (savedSteps.isEmpty()) {
+            return null;
+        }
+        if (request.startStepIndex() != null) {
+            return savedSteps.get(request.startStepIndex()).getId();
+        }
+        return savedSteps.get(inferStartIndex(request.steps())).getId();
     }
 
     @Transactional
@@ -147,9 +177,14 @@ public class PipelineService {
                 .map(pipeline -> {
                     List<Long> stepIds = stepIdsOf(pipeline.getId());
                     pipelineDataLinkRepository.deleteByTargetStepIdIn(stepIds);
+                    pipelineDataLinkRepository.deleteByTargetVariableIdIn(variableIdsOf(pipeline.getId()));
+                    pipelineVariableRepository.deleteByPipelineId(pipeline.getId());
                     pipelineParameterRepository.deleteByPipelineId(pipeline.getId());
                     pipelineStepOutputRepository.deleteByStepIdIn(stepIds);
                     pipelineStepRouteRepository.deleteByStepIdIn(stepIds);
+                    // The pipeline still points at its start step; clear it before the steps go.
+                    pipeline.setStartStepId(null);
+                    pipelineRepository.saveAndFlush(pipeline);
                     pipelineStepRepository.deleteByPipelineId(pipeline.getId());
                     pipelineRepository.delete(pipeline);
                     return true;
@@ -232,8 +267,12 @@ public class PipelineService {
      * explicit routes (an empty list means "dead end / not yet wired", never an implicit chain to
      * whatever a later-created step happens to occupy at orderIndex+1).
      */
-    private void validateGraph(List<PipelineUpsertRequest.StepRequest> steps) {
+    private void validateGraph(List<PipelineUpsertRequest.StepRequest> steps, Integer startStepIndex) {
         int n = steps.size();
+        if (startStepIndex != null && (startStepIndex < 0 || startStepIndex >= n)) {
+            throw new PipelineInvalidGraphException(
+                    "Pipeline starts at step index " + startStepIndex + ", but it has " + n + " steps");
+        }
         if (n == 0 || steps.stream().allMatch(s -> s.routes().isEmpty())) {
             return;
         }
@@ -281,17 +320,22 @@ public class PipelineService {
                 }
             }
         }
-        List<String> roots = new ArrayList<>();
-        for (int i = 0; i < n; i++) {
-            boolean isolated = inDegree[i] == 0 && outDegree[i] == 0;
-            if (!isolated && entryInDegree[i] == 0) {
-                roots.add(steps.get(i).title());
+        // Only a caller that did not name a start still has to have exactly one inferrable root.
+        // Once the start is explicit, a step with no incoming route is just a step the author has
+        // not wired up yet - the board reports it as unreachable, which is a warning, not a refusal.
+        if (startStepIndex == null) {
+            List<String> roots = new ArrayList<>();
+            for (int i = 0; i < n; i++) {
+                boolean isolated = inDegree[i] == 0 && outDegree[i] == 0;
+                if (!isolated && entryInDegree[i] == 0) {
+                    roots.add(steps.get(i).title());
+                }
             }
-        }
-        if (roots.size() != 1) {
-            throw new PipelineInvalidGraphException(roots.isEmpty()
-                    ? "Pipeline has no starting step — every step has an incoming route"
-                    : "Pipeline has more than one starting step: " + String.join(", ", roots));
+            if (roots.size() != 1) {
+                throw new PipelineInvalidGraphException(roots.isEmpty()
+                        ? "Pipeline has no starting step — every step has an incoming route"
+                        : "Pipeline has more than one starting step: " + String.join(", ", roots));
+            }
         }
         // Cycles are legal only when they return to a LOOP step. Removing every incoming LOOP edge
         // must therefore leave an acyclic graph; the loop itself enforces a finite iteration limit.
@@ -322,6 +366,33 @@ public class PipelineService {
         if (visited < n) {
             throw new PipelineInvalidGraphException("Pipeline has a cycle that does not return to a LOOP step");
         }
+    }
+
+    /**
+     * The pre-V24 start rule, kept for callers that send no explicit start: the step nothing routes
+     * into, ignoring a LOOP's back edge, falling back to the first step. {@code validateGraph} has
+     * already refused anything ambiguous by the time this runs.
+     */
+    private int inferStartIndex(List<PipelineUpsertRequest.StepRequest> steps) {
+        List<List<Integer>> adjacency = buildExecutionAdjacency(steps);
+        int n = steps.size();
+        boolean[] hasEntry = new boolean[n];
+        for (int i = 0; i < n; i++) {
+            for (int target : adjacency.get(i)) {
+                boolean backEdgeIntoLoop = steps.get(target).contentType() == PipelineStep.ContentType.LOOP
+                        && reachableFrom(target, adjacency).contains(i);
+                if (!backEdgeIntoLoop) {
+                    hasEntry[target] = true;
+                }
+            }
+        }
+        for (int i = 0; i < n; i++) {
+            boolean isolated = !hasEntry[i] && adjacency.get(i).isEmpty();
+            if (!hasEntry[i] && !isolated) {
+                return i;
+            }
+        }
+        return 0;
     }
 
     /**
@@ -418,13 +489,44 @@ public class PipelineService {
     }
 
     /**
-     * Parameter links: the parameter must exist in this same request, the target must be a real
-     * step, and tokens are unique across BOTH kinds of link (they share one unique index and one
-     * {@code {{data:token}}} namespace inside prompts).
+     * Variables are named constants on the input plate, so they are held to the same naming rules
+     * as parameters, and one must actually carry a value: either typed in, or wired in from a
+     * parameter or another variable.
      */
-    private void validateParameterLinks(PipelineUpsertRequest request) {
+    private void validateVariables(PipelineUpsertRequest request) {
+        Set<String> wiredInto = Stream.concat(
+                        request.variableLinks().stream().map(PipelineUpsertRequest.VariableLinkRequest::targetVariableName),
+                        request.parameterLinks().stream().map(PipelineUpsertRequest.ParameterLinkRequest::targetVariableName))
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet());
+        Set<String> names = new HashSet<>();
+        for (PipelineUpsertRequest.VariableRequest variable : request.variables()) {
+            if (variable.name() == null || variable.name().isBlank()) {
+                throw new PipelineInvalidGraphException("A pipeline variable has no name");
+            }
+            if (!names.add(variable.name())) {
+                throw new PipelineInvalidGraphException(
+                        "Pipeline declares more than one variable named '" + variable.name() + "'");
+            }
+            boolean empty = variable.value() == null || variable.value().isBlank();
+            if (empty && !wiredInto.contains(variable.name())) {
+                throw new PipelineInvalidGraphException(
+                        "Variable '" + variable.name() + "' has no value and nothing wired into it");
+            }
+        }
+    }
+
+    /**
+     * Parameter and variable links: the source must exist in this same request, the target must be a
+     * real step (or, for a variable link, a real variable), and tokens are unique across ALL kinds
+     * of link - they share one unique index and one {@code {{data:token}}} namespace.
+     */
+    private void validateLinkTargets(PipelineUpsertRequest request) {
         Set<String> parameterNames = request.parameters().stream()
                 .map(PipelineUpsertRequest.ParameterRequest::name)
+                .collect(Collectors.toSet());
+        Set<String> variableNames = request.variables().stream()
+                .map(PipelineUpsertRequest.VariableRequest::name)
                 .collect(Collectors.toSet());
         Set<String> tokens = new HashSet<>();
         for (PipelineUpsertRequest.StepRequest step : request.steps()) {
@@ -440,20 +542,91 @@ public class PipelineService {
                 throw new PipelineInvalidGraphException(
                         "Parameter link wires a parameter '" + link.parameterName() + "' the pipeline does not declare");
             }
-            Integer target = link.targetStepIndex();
-            if (target == null || target < 0 || target >= n) {
+            boolean toStep = link.targetStepIndex() != null;
+            boolean toVariable = link.targetVariableName() != null;
+            if (toStep == toVariable) {
                 throw new PipelineInvalidGraphException(
-                        "Parameter '" + link.parameterName() + "' is wired to step index " + target
+                        "Parameter '" + link.parameterName() + "' must be wired either to a step or to a variable");
+            }
+            if (toStep && (link.targetStepIndex() < 0 || link.targetStepIndex() >= n)) {
+                throw new PipelineInvalidGraphException(
+                        "Parameter '" + link.parameterName() + "' is wired to step index " + link.targetStepIndex()
                                 + ", but the pipeline only has " + n + " steps");
+            }
+            if (toVariable && !variableNames.contains(link.targetVariableName())) {
+                throw new PipelineInvalidGraphException(
+                        "Parameter '" + link.parameterName() + "' is wired to a variable '"
+                                + link.targetVariableName() + "' the pipeline does not declare");
             }
             if (link.token() == null || link.token().isBlank() || !tokens.add(link.token())) {
                 throw new PipelineInvalidGraphException("Data link token '" + link.token() + "' is used more than once");
             }
         }
+        for (PipelineUpsertRequest.VariableLinkRequest link : request.variableLinks()) {
+            if (!variableNames.contains(link.variableName())) {
+                throw new PipelineInvalidGraphException(
+                        "Variable link wires a variable '" + link.variableName() + "' the pipeline does not declare");
+            }
+            boolean toStep = link.targetStepIndex() != null;
+            boolean toVariable = link.targetVariableName() != null;
+            if (toStep == toVariable) {
+                throw new PipelineInvalidGraphException(
+                        "Variable '" + link.variableName() + "' must be wired either to a step or to another variable");
+            }
+            if (toStep && (link.targetStepIndex() < 0 || link.targetStepIndex() >= n)) {
+                throw new PipelineInvalidGraphException(
+                        "Variable '" + link.variableName() + "' is wired to step index " + link.targetStepIndex()
+                                + ", but the pipeline only has " + n + " steps");
+            }
+            if (toVariable && !variableNames.contains(link.targetVariableName())) {
+                throw new PipelineInvalidGraphException(
+                        "Variable '" + link.variableName() + "' is wired to a variable '"
+                                + link.targetVariableName() + "' the pipeline does not declare");
+            }
+            if (link.token() == null || link.token().isBlank() || !tokens.add(link.token())) {
+                throw new PipelineInvalidGraphException("Data link token '" + link.token() + "' is used more than once");
+            }
+        }
+        validateNoVariableCycle(request.variableLinks());
+    }
+
+    /**
+     * Variables are resolved in one pass before the first step runs, so a variable built out of
+     * itself - directly or through others - has no value to start from.
+     */
+    private void validateNoVariableCycle(List<PipelineUpsertRequest.VariableLinkRequest> links) {
+        Map<String, List<String>> dependsOn = new HashMap<>();
+        for (PipelineUpsertRequest.VariableLinkRequest link : links) {
+            if (link.targetVariableName() != null) {
+                dependsOn.computeIfAbsent(link.targetVariableName(), key -> new ArrayList<>()).add(link.variableName());
+            }
+        }
+        Set<String> settled = new HashSet<>();
+        Set<String> onPath = new HashSet<>();
+        for (String name : dependsOn.keySet()) {
+            walkVariable(name, dependsOn, settled, onPath);
+        }
+    }
+
+    private void walkVariable(String name, Map<String, List<String>> dependsOn,
+                               Set<String> settled, Set<String> onPath) {
+        if (settled.contains(name)) {
+            return;
+        }
+        if (!onPath.add(name)) {
+            throw new PipelineInvalidGraphException(
+                    "Variable '" + name + "' is built out of itself - variables cannot form a cycle");
+        }
+        for (String source : dependsOn.getOrDefault(name, List.of())) {
+            walkVariable(source, dependsOn, settled, onPath);
+        }
+        onPath.remove(name);
+        settled.add(name);
     }
 
     private void validateStepKinds(List<PipelineUpsertRequest.StepRequest> steps,
-                                   List<PipelineUpsertRequest.ParameterLinkRequest> parameterLinks) {
+                                   List<PipelineUpsertRequest.ParameterLinkRequest> parameterLinks,
+                                   List<PipelineUpsertRequest.VariableLinkRequest> variableLinks) {
         int n = steps.size();
         int[] incomingDataLinkCount = new int[n];
         // Counted apart from parameter links: a COMMAND watcher may take a value the USER typed at
@@ -472,12 +645,20 @@ public class PipelineService {
                 incomingDataLinkCount[link.targetStepIndex()]++;
             }
         }
+        for (PipelineUpsertRequest.VariableLinkRequest link : variableLinks) {
+            if (link.targetStepIndex() != null && link.targetStepIndex() >= 0 && link.targetStepIndex() < n) {
+                incomingDataLinkCount[link.targetStepIndex()]++;
+            }
+        }
         for (int i = 0; i < n; i++) {
             PipelineUpsertRequest.StepRequest step = steps.get(i);
             if (step.contentType() == PipelineStep.ContentType.CONDITION) {
                 validateConditionStep(step, incomingDataLinkCount[i]);
             } else if (step.contentType() == PipelineStep.ContentType.VARIABLE) {
-                validateVariableStep(step);
+                throw new PipelineInvalidGraphException(
+                        "Step '" + step.title() + "' is type VARIABLE, which is no longer a kind of step: a "
+                                + "variable is a block on the pipeline's input plate. Send it in 'variables' "
+                                + "and wire it with 'variableLinks' instead.");
             } else if (step.contentType() == PipelineStep.ContentType.PARALLEL) {
                 validateParallelStep(step, incomingDataLinkCount[i]);
             } else if (step.contentType() == PipelineStep.ContentType.JOIN) {
@@ -897,23 +1078,6 @@ public class PipelineService {
         }
     }
 
-    private void validateVariableStep(PipelineUpsertRequest.StepRequest step) {
-        if (step.promptText() == null || step.promptText().isBlank()) {
-            throw new PipelineInvalidParametersException(
-                    "Step '" + step.title() + "' is type VARIABLE but has no value");
-        }
-        if (step.outputs().size() != 1) {
-            throw new PipelineInvalidGraphException(
-                    "Step '" + step.title() + "' is type VARIABLE and must declare exactly one output (has "
-                            + step.outputs().size() + ")");
-        }
-        boolean hasNamedRoute = step.routes().stream().anyMatch(r -> r.outcomeKey() != null);
-        if (step.routes().size() > 1 || hasNamedRoute) {
-            throw new PipelineInvalidGraphException(
-                    "Step '" + step.title() + "' is type VARIABLE and can have at most one route, with no outcome key");
-        }
-    }
-
     private String resolveInstructionText(PipelineStep step) {
         if (step.getContentType() != PipelineStep.ContentType.MD_FILE) {
             return step.getPromptText();
@@ -938,11 +1102,25 @@ public class PipelineService {
                 .toList();
     }
 
-    private void replaceParametersAndSteps(Long pipelineId, PipelineUpsertRequest request) {
+    private List<Long> variableIdsOf(Long pipelineId) {
+        return pipelineVariableRepository.findByPipelineIdOrderByOrderIndexAsc(pipelineId).stream()
+                .map(PipelineVariable::getId)
+                .toList();
+    }
+
+    /** @return the saved steps, in request order, so the caller can resolve the start step. */
+    private List<PipelineStep> replaceParametersAndSteps(Long pipelineId, PipelineUpsertRequest request) {
         List<Long> existingStepIds = stepIdsOf(pipelineId);
-        // Links first: parameter-sourced links reference parameters, which are replaced next.
+        // Links first: they reference the parameters, variables and steps replaced below.
         pipelineDataLinkRepository.deleteByTargetStepIdIn(existingStepIds);
+        pipelineDataLinkRepository.deleteByTargetVariableIdIn(variableIdsOf(pipelineId));
+        pipelineVariableRepository.deleteByPipelineId(pipelineId);
         pipelineParameterRepository.deleteByPipelineId(pipelineId);
+        // Same reason as the step flush below: the derived deleteBy* queries go through the
+        // persistence context and Hibernate flushes INSERTs first, so re-saving a pipeline would
+        // insert a variable with a name the row being removed still holds - and
+        // ux_pipeline_variables_name would reject it.
+        pipelineVariableRepository.flush();
         Map<String, Long> parameterIdByName = new HashMap<>();
         int paramIndex = 0;
         for (PipelineUpsertRequest.ParameterRequest parameterRequest : request.parameters()) {
@@ -955,6 +1133,17 @@ public class PipelineService {
             parameter.setDefaultValue(parameterRequest.defaultValue());
             parameter.setOrderIndex(paramIndex++);
             parameterIdByName.put(parameter.getName(), pipelineParameterRepository.save(parameter).getId());
+        }
+
+        Map<String, Long> variableIdByName = new HashMap<>();
+        int variableIndex = 0;
+        for (PipelineUpsertRequest.VariableRequest variableRequest : request.variables()) {
+            PipelineVariable variable = new PipelineVariable();
+            variable.setPipelineId(pipelineId);
+            variable.setName(variableRequest.name());
+            variable.setValue(variableRequest.value());
+            variable.setOrderIndex(variableIndex++);
+            variableIdByName.put(variable.getName(), pipelineVariableRepository.save(variable).getId());
         }
 
         pipelineStepOutputRepository.deleteByStepIdIn(existingStepIds);
@@ -1038,9 +1227,25 @@ public class PipelineService {
             PipelineDataLink link = new PipelineDataLink();
             link.setToken(linkRequest.token());
             link.setSourceParameterId(parameterIdByName.get(linkRequest.parameterName()));
-            link.setTargetStepId(savedSteps.get(linkRequest.targetStepIndex()).getId());
+            if (linkRequest.targetStepIndex() != null) {
+                link.setTargetStepId(savedSteps.get(linkRequest.targetStepIndex()).getId());
+            } else {
+                link.setTargetVariableId(variableIdByName.get(linkRequest.targetVariableName()));
+            }
             pipelineDataLinkRepository.save(link);
         }
+        for (PipelineUpsertRequest.VariableLinkRequest linkRequest : request.variableLinks()) {
+            PipelineDataLink link = new PipelineDataLink();
+            link.setToken(linkRequest.token());
+            link.setSourceVariableId(variableIdByName.get(linkRequest.variableName()));
+            if (linkRequest.targetStepIndex() != null) {
+                link.setTargetStepId(savedSteps.get(linkRequest.targetStepIndex()).getId());
+            } else {
+                link.setTargetVariableId(variableIdByName.get(linkRequest.targetVariableName()));
+            }
+            pipelineDataLinkRepository.save(link);
+        }
+        return savedSteps;
     }
 
     private PipelineSummary toSummary(Pipeline pipeline) {
@@ -1094,14 +1299,38 @@ public class PipelineService {
                 .toList();
         Map<Long, String> parameterNameById = parameters.stream()
                 .collect(Collectors.toMap(PipelineDetail.PipelineParameterView::id, PipelineDetail.PipelineParameterView::name));
-        List<PipelineDetail.PipelineParameterLinkView> parameterLinks = pipelineDataLinkRepository
-                .findByTargetStepIdIn(pipelineSteps.stream().map(PipelineStep::getId).toList()).stream()
+        List<PipelineVariable> pipelineVariables = pipelineVariableRepository
+                .findByPipelineIdOrderByOrderIndexAsc(pipeline.getId());
+        List<PipelineDetail.PipelineVariableView> variables = pipelineVariables.stream()
+                .map(v -> new PipelineDetail.PipelineVariableView(v.getId(), v.getName(), v.getValue(), v.getOrderIndex()))
+                .toList();
+        Map<Long, String> variableNameById = pipelineVariables.stream()
+                .collect(Collectors.toMap(PipelineVariable::getId, PipelineVariable::getName));
+
+        // One query per target kind: a variable's value can feed a step or another variable.
+        List<PipelineDataLink> linksIntoSteps = pipelineDataLinkRepository
+                .findByTargetStepIdIn(pipelineSteps.stream().map(PipelineStep::getId).toList());
+        List<PipelineDataLink> linksIntoVariables = pipelineDataLinkRepository
+                .findByTargetVariableIdIn(pipelineVariables.stream().map(PipelineVariable::getId).toList());
+        List<PipelineDetail.PipelineParameterLinkView> parameterLinks = Stream
+                .concat(linksIntoSteps.stream(), linksIntoVariables.stream())
                 .filter(PipelineDataLink::isParameterSourced)
                 .map(link -> new PipelineDetail.PipelineParameterLinkView(
                         link.getId(), link.getToken(), parameterNameById.get(link.getSourceParameterId()),
-                        orderIndexById.get(link.getTargetStepId()), titleById.get(link.getTargetStepId())))
+                        orderIndexById.get(link.getTargetStepId()), titleById.get(link.getTargetStepId()),
+                        variableNameById.get(link.getTargetVariableId())))
+                .toList();
+        List<PipelineDetail.PipelineVariableLinkView> variableLinks = Stream
+                .concat(linksIntoSteps.stream(), linksIntoVariables.stream())
+                .filter(PipelineDataLink::isVariableSourced)
+                .map(link -> new PipelineDetail.PipelineVariableLinkView(
+                        link.getId(), link.getToken(), variableNameById.get(link.getSourceVariableId()),
+                        orderIndexById.get(link.getTargetStepId()), titleById.get(link.getTargetStepId()),
+                        variableNameById.get(link.getTargetVariableId())))
                 .toList();
         return new PipelineDetail(pipeline.getId(), pipeline.getSlug(), pipeline.getName(), pipeline.getDescription(),
-                pipeline.getProjectScope(), parameters, steps, parameterLinks, pipeline.getCreatedBy(), pipeline.getCreatedAt(), pipeline.getUpdatedAt());
+                pipeline.getProjectScope(), parameters, steps, parameterLinks, variables, variableLinks,
+                pipeline.getStartStepId() == null ? null : orderIndexById.get(pipeline.getStartStepId()),
+                pipeline.getCreatedBy(), pipeline.getCreatedAt(), pipeline.getUpdatedAt());
     }
 }
