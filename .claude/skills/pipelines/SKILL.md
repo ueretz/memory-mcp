@@ -193,6 +193,95 @@ A watcher never appears inside a **Параллельно** fan-out (the dashboa
 so the sub-agent rules in the previous section never apply to it - you always work a watcher
 yourself.
 
+## Цикл с промптом (PROMPT_LOOP) — один блок, который крутит свой промпт N раз
+
+A **Цикл с промптом** (`PROMPT_LOOP`) step is yours to work, like a PROMPT step. Its whole body is
+its own instruction: there is no graph to follow, you just do the same work several times. The server
+counts the passes, so a run interrupted mid-loop resumes on the pass it reached.
+
+1. Do the step's `resolvedInstructionText` **once**. (The example from the author: «проведи ревью,
+   после поправь ошибки» — so one pass is one review plus the fixes it found.)
+2. Call `pipeline_run_step_check(runId, orderIndex, observedState)` with a short literal describing
+   what that pass produced (`"нашёл 2 замечания"`, `"поправил"`, `"чисто"`). The dashboard shows it
+   while the step runs.
+3. The response is `{iteration, maxIterations, done}`. While `done` is `false`, go back to step 1 and
+   do the work again. The moment it is `true`, stop.
+4. Close the step as usual: `pipeline_run_step_update(runId, orderIndex, "DONE", note, outcome,
+   outputsJson)`, with the number of passes in `note` (e.g. `"3 итерации, последняя чистая"`). Named
+   branches, outputs and data links work exactly as on a PROMPT step; fill them from the LAST pass.
+
+**Never count the iterations yourself and never stop early because the work looks finished.** The
+limit is the author's instruction — a review loop set to 5 is five reviews, even if the third one was
+clean. If you genuinely cannot do another pass (nothing left to review, say), do the pass, report
+that in `observedState`, and keep going until the server says `done`.
+
+On resume, `pipeline_run_get` gives the step's `loopIteration` and `loopMaxIterations` — pick up from
+`loopIteration + 1`, don't restart at one.
+
+## Цикл-регион (LOOP → … → LOOP_END) — nothing for you to do, but steps come back
+
+A **Цикл** (`LOOP`) step and the **Конец цикла** (`LOOP_END`) that closes it are both executed by the
+server; neither ever appears as a step to work on. What changes for you is only this: **the steps
+between them arrive in `activeStepOrderIndexes` again on every iteration, and that is not an error.**
+
+- When a step you already did comes back, do it again. Its `executionCount` in the run response says
+  which pass this is.
+- In the chat checklist, don't tick the same line twice — re-open it with the iteration number:
+  `- [ ] 2. Прогнать тесты (итерация 2)`.
+- The loop leaves on its own: once the iteration limit is reached, the server takes the loop's `done`
+  route instead of re-entering the body.
+
+Older pipelines close a loop with an edge drawn back into the `LOOP` block instead of a `LOOP_END`.
+That behaves identically — you never see the difference.
+
+## Оркестратор (ORCHESTRATOR → … → ORCHESTRATOR_END) — вы директор, а не исполнитель
+
+A pipeline may mark a stretch of itself as an **orchestrated region**: between an **Оркестратор**
+(`ORCHESTRATOR`) block and its **Приёмка** (`ORCHESTRATOR_END`), the author is asking that the work be
+done by the cheapest model on this machine that can do it, with you supervising — not by you. The
+point is to stop paying your own token price for routine work.
+
+Both blocks are server-executed markers; you never act on them. You recognise the region from the run
+response: every step inside it has `orchestrated: true`, plus `orchestratorMaxAttempts` (how many
+attempts a delegated step gets) and possibly `delegationHint`.
+
+**1. Scout the machine once per run, on entering the region.** Find out what can run a model here —
+check for CLIs with `command -v` (`claude`, `codex`, `ollama`, `llm`, and anything else you have
+reason to expect), then ask whichever ones exist what models they have (`ollama list`, `llm models`,
+…). Rank what you find from cheapest to strongest, by your own judgement. Print the ranking in chat
+as one line (`Доступны: ollama/qwen2.5-coder:7b (дешёвая), claude -p --model haiku (средняя), я сам`)
+and keep it for the rest of the run. Nothing is stored server-side; there is no model registry.
+
+**If nothing is available, the region degrades — it never fails.** Do the steps yourself, and write
+why in each step's `note` (`"сделано директором: локальных CLI не найдено"`). Say it once in chat too,
+so the user knows the economy did not happen.
+
+**2. Delegate each step in the region.** For each one:
+- `delegationHint: "SELF"` → do it yourself, no delegation. `"CHEAPEST"` → the cheapest model you
+  found. `"BALANCED"` → mid-tier. Absent (`null`) → **you** choose, from the step's instruction: a
+  mechanical rewrite goes to the cheapest, something needing judgement goes higher.
+- Mark the step `RUNNING`, then run the chosen CLI through Bash, passing the step's
+  `resolvedInstructionText` as the instruction. Tell the delegate exactly what to return, including
+  every name under the step's `outputs` and — if the step has more than one route — which outcome keys
+  it may pick. Capture stdout.
+- The delegate never calls pipeline tools. You record everything.
+
+**3. Accept or reject — this is the supervising half, and it is not optional.** Read what came back
+and judge it against the step's instruction: is the work actually done, are the declared outputs
+present and plausible, is the format right? If not:
+- retry the same model (a clearer instruction usually fixes it), up to `orchestratorMaxAttempts`
+  attempts in total;
+- then try one model up the ranking;
+- then do the step yourself.
+
+**4. Report who did it.** Close the step as usual, and put the executor in `note`:
+`"сделано ollama/qwen2.5-coder:7b, попытка 2"`, or `"сделано директором: дважды не прошло приёмку"`.
+That note is the only place the saved tokens become visible, so never omit it.
+
+**5. Boundaries.** A region never sits inside a **Параллельно** fan-out (the dashboard refuses to save
+that) and regions never nest — one director per run. Past the **Приёмка** you are back to doing the
+work yourself.
+
 ## Resuming an interrupted run
 
 If the user asks to continue a pipeline run from an earlier session, call
