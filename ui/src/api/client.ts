@@ -9,6 +9,8 @@ import type {
   MemoryType,
   PipelineAssetSummary,
   PipelineDetail,
+  PipelineExportEnvelope,
+  PipelineImportResponse,
   PipelineRunDetail,
   PipelineRunSummary,
   PipelineSummary,
@@ -229,6 +231,14 @@ export function fetchPipelines(): Promise<PipelineSummary[]> {
 
 export function fetchPipeline(slug: string): Promise<PipelineDetail> {
   return getJson(`/api/pipelines/${encodeURIComponent(slug)}`)
+}
+
+export function fetchPipelineExport(slug: string): Promise<PipelineExportEnvelope> {
+  return getJson(`/api/pipelines/${encodeURIComponent(slug)}/export`)
+}
+
+export function importPipeline(request: PipelineExportEnvelope): Promise<PipelineImportResponse> {
+  return postJson('/api/pipelines/import', request)
 }
 
 export function createPipeline(request: PipelineUpsertRequest): Promise<PipelineDetail> {

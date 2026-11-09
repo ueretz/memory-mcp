@@ -287,6 +287,17 @@ export interface PipelineUpsertRequest {
   parameterLinks: PipelineUpsertParameterLink[]
 }
 
+export interface PipelineExportEnvelope {
+  formatVersion: number
+  pipeline: PipelineUpsertRequest
+  warnings: string[]
+}
+
+export interface PipelineImportResponse {
+  pipeline: PipelineDetail
+  warnings: string[]
+}
+
 export interface PipelineRunSummary {
   id: number
   pipelineId: number

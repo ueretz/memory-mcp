@@ -86,7 +86,20 @@ public class PipelineService {
 
     @Transactional
     public PipelineDetail create(PipelineUpsertRequest request, String createdBy) {
-        validateSteps(request.steps());
+        return create(request, createdBy, false);
+    }
+
+    @Transactional
+    public PipelineDetail createImported(PipelineUpsertRequest request, String createdBy) {
+        // Asset-less MD_FILE steps remain importable so the author can reattach the file on the
+        // target installation; ordinary saves must still reject that incomplete step.
+        return create(request, createdBy, true);
+    }
+
+    private PipelineDetail create(PipelineUpsertRequest request, String createdBy, boolean imported) {
+        if (!imported) {
+            validateSteps(request.steps());
+        }
         validateGraph(request.steps());
         validateDataLinks(request.steps());
         validateParameterLinks(request);

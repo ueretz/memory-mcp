@@ -16,6 +16,7 @@ import ru.iuribabalin.memorymcp.service.PipelineRunNotFoundException;
 import ru.iuribabalin.memorymcp.service.PipelineRunStepNotFoundException;
 import ru.iuribabalin.memorymcp.service.PipelineRunUnknownOutputException;
 import ru.iuribabalin.memorymcp.service.PipelineSlugTakenException;
+import ru.iuribabalin.memorymcp.service.PipelineUnsupportedFormatVersionException;
 import ru.iuribabalin.memorymcp.service.TaskNotFoundException;
 import ru.iuribabalin.memorymcp.service.UnsupportedExportException;
 
@@ -86,6 +87,12 @@ public class ApiExceptionHandler {
 
     @ExceptionHandler(PipelineInvalidGraphException.class)
     public ResponseEntity<Map<String, String>> handlePipelineInvalidGraph(PipelineInvalidGraphException ex) {
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Map.of("error", ex.getMessage()));
+    }
+
+    @ExceptionHandler(PipelineUnsupportedFormatVersionException.class)
+    public ResponseEntity<Map<String, String>> handlePipelineUnsupportedFormatVersion(
+            PipelineUnsupportedFormatVersionException ex) {
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Map.of("error", ex.getMessage()));
     }
 

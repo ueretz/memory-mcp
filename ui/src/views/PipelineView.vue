@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, toRef, watch } from 'vue'
 import { useRouter } from 'vue-router'
 
-import { deletePipeline, fetchPipeline, fetchPipelineRun, fetchPipelineRuns } from '@/api/client'
+import { deletePipeline, fetchPipeline, fetchPipelineExport, fetchPipelineRun, fetchPipelineRuns } from '@/api/client'
 import type { PipelineRunSummary } from '@/api/types'
 import AppIcon from '@/components/AppIcon.vue'
 import ConfirmDialog from '@/components/ConfirmDialog.vue'
@@ -64,6 +64,31 @@ function progressPercent(run: PipelineRunSummary): number {
   return Math.round((run.doneStepCount / run.totalStepCount) * 100)
 }
 
+// ---- Export -------------------------------------------------------------------------------
+const exporting = ref(false)
+const exportError = ref<string | null>(null)
+const historyWarnings = window.history.state?.pipelineImportWarnings
+const pipelineWarnings = ref<string[]>(Array.isArray(historyWarnings) ? historyWarnings : [])
+
+async function downloadExport() {
+  exporting.value = true
+  exportError.value = null
+  try {
+    const exported = await fetchPipelineExport(slug.value)
+    pipelineWarnings.value = exported.warnings
+    const url = URL.createObjectURL(new Blob([JSON.stringify(exported, null, 2)], { type: 'application/json' }))
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `${slug.value}.pipeline.json`
+    link.click()
+    setTimeout(() => URL.revokeObjectURL(url), 0)
+  } catch (cause) {
+    exportError.value = cause instanceof Error ? cause.message : String(cause)
+  } finally {
+    exporting.value = false
+  }
+}
+
 // ---- Delete -------------------------------------------------------------------------------
 const router = useRouter()
 const showDeleteConfirm = ref(false)
@@ -100,6 +125,15 @@ async function confirmDelete() {
           </RouterLink>
           <button
             type="button"
+            :disabled="exporting"
+            class="inline-flex items-center gap-2 rounded-lg border border-border bg-panel px-3 py-2 text-[13px] font-medium text-content transition hover:border-accent/40 hover:text-accent disabled:opacity-50"
+            @click="downloadExport"
+          >
+            <AppIcon name="download" class="size-4" />
+            {{ exporting ? 'Экспорт…' : 'Экспорт' }}
+          </button>
+          <button
+            type="button"
             class="inline-flex items-center gap-2 rounded-lg border border-border bg-panel px-3 py-2 text-[13px] font-medium text-content transition hover:border-red-500/50 hover:text-red-600"
             @click="showDeleteConfirm = true"
           >
@@ -115,6 +149,17 @@ async function confirmDelete() {
           </RouterLink>
         </template>
       </PageHeader>
+
+      <div
+        v-if="pipelineWarnings.length"
+        class="mb-6 flex items-start gap-3 rounded-2xl border border-type-feedback/30 bg-type-feedback/5 px-5 py-4"
+      >
+        <AppIcon name="warning" class="mt-0.5 size-5 shrink-0 text-type-feedback" />
+        <ul class="min-w-0 flex-1 space-y-1 text-[13px] break-words text-muted">
+          <li v-for="warning in pipelineWarnings" :key="warning">{{ warning }}</li>
+        </ul>
+      </div>
+      <p v-if="exportError" class="mb-6 text-[12.5px] text-red-600">{{ exportError }}</p>
 
       <SkeletonRows v-if="loading && !pipeline" :rows="2" class="mb-6" />
 

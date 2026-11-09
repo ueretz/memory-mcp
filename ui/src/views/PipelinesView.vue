@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import { useRouter } from 'vue-router'
 
-import { fetchPipelines, fetchSettings } from '@/api/client'
+import { fetchPipelines, fetchSettings, importPipeline } from '@/api/client'
+import type { PipelineExportEnvelope } from '@/api/types'
 import AppIcon from '@/components/AppIcon.vue'
 import EmptyState from '@/components/EmptyState.vue'
 import ErrorState from '@/components/ErrorState.vue'
@@ -30,12 +32,48 @@ const anyRunning = computed(() => pipelines.value?.some((p) => p.lastRunStatus =
 usePolling(reload, anyRunning, 5000)
 
 const enabled = computed(() => settings.value?.some((s) => s.key === 'feature.pipelines.enabled' && s.value === 'true') ?? true)
+
+const router = useRouter()
+const importInput = ref<HTMLInputElement | null>(null)
+const importing = ref(false)
+const importError = ref<string | null>(null)
+
+async function importSelectedFile(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  input.value = ''
+  if (!file) return
+  importing.value = true
+  importError.value = null
+  try {
+    const envelope = JSON.parse(await file.text()) as PipelineExportEnvelope
+    const imported = await importPipeline(envelope)
+    await router.push({
+      name: 'pipeline',
+      params: { slug: imported.pipeline.slug },
+      state: { pipelineImportWarnings: imported.warnings },
+    })
+  } catch (cause) {
+    importError.value = cause instanceof Error ? cause.message : String(cause)
+  } finally {
+    importing.value = false
+  }
+}
 </script>
 
 <template>
   <div>
     <PageHeader eyebrow="Pipelines" title="Пайплайны" subtitle="Общие для всех проектов: собираются на доске, запускаются из любого репозитория.">
       <template #actions>
+        <button
+          type="button"
+          :disabled="importing"
+          class="inline-flex items-center gap-2 rounded-lg border border-border bg-panel px-3 py-2 text-[13px] font-medium text-content transition hover:border-accent/40 hover:text-accent disabled:opacity-50"
+          @click="importInput?.click()"
+        >
+          <AppIcon name="download" class="size-4 rotate-180" />
+          {{ importing ? 'Импорт…' : 'Импорт' }}
+        </button>
         <RouterLink
           :to="{ name: 'pipeline-new' }"
           class="inline-flex items-center gap-2 rounded-lg bg-accent px-3 py-2 text-[13px] font-medium text-accent-fg transition hover:bg-accent-hover"
@@ -45,6 +83,8 @@ const enabled = computed(() => settings.value?.some((s) => s.key === 'feature.pi
         </RouterLink>
       </template>
     </PageHeader>
+    <input ref="importInput" type="file" accept=".json,application/json" class="sr-only" @change="importSelectedFile" />
+    <p v-if="importError" class="mb-6 text-[12.5px] text-red-600">{{ importError }}</p>
 
     <p v-if="!enabled" class="mb-6 rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-[13px] text-amber-700">
       Экспериментальная функция «Пайплайны» выключена. Claude Code не сможет их выполнить, пока вы не включите
