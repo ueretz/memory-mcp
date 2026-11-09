@@ -16,7 +16,12 @@ class SettingsServiceTest {
     private SettingsService settingsService;
 
     @Test
-    void pipelinesFlagStartsDisabled() {
+    void pipelinesFlagReadsBackAsDisabled() {
+        // These tests run against the shared dev database, where the flag may well have been
+        // switched on from the dashboard - so the precondition is established here rather than
+        // assumed from the seed row. The rollback after each test keeps that invisible outside.
+        settingsService.set(SettingsService.PIPELINES_ENABLED, "false");
+
         assertThat(settingsService.isEnabled(SettingsService.PIPELINES_ENABLED)).isFalse();
     }
 

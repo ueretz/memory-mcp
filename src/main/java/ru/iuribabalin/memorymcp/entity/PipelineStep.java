@@ -58,7 +58,9 @@ public class PipelineStep {
 
     @Enumerated(EnumType.STRING)
     @Column(name = "condition_mode", nullable = false, length = 20)
-    private ConditionMode conditionMode;
+    // Mirrors the column's own DEFAULT 'VALUE' (V20) and PipelineUpsertRequest.StepRequest's
+    // coercion of a null mode, so a step built outside the service layer is still persistable.
+    private ConditionMode conditionMode = ConditionMode.VALUE;
 
     @Column(name = "max_iterations")
     private Integer maxIterations;
